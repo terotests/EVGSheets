@@ -1033,6 +1033,41 @@ class SheetsApp {
         if neg {
             a = (0.0 - v)
         }
+        ; Past a trillion the figure is a magnitude, not an amount: shown as
+        ; 2.22226E+15, the way a spreadsheet's General format shows it. (The
+        ; integer arithmetic below would also overflow there.)
+        if (a >= 1000000000000.0) {
+            def e:int 0
+            def m:double a
+            while (m >= 10.0) {
+                m = (m / 10.0)
+                e = (e + 1)
+            }
+            def scaled:int (to_int ((m * 100000.0) + 0.5))
+            if (scaled >= 1000000) {
+                scaled = 100000
+                e = (e + 1)
+            }
+            def ms:string (to_string scaled)
+            def digits:string ((substring ms 0 1) + "." + (substring ms 1 (strlen ms)))
+            while ((strlen digits) > 1) {
+                def last:int (charAt digits ((strlen digits) - 1))
+                if ((last == 48) || (last == 46)) {
+                    def wasDot:boolean (last == 46)
+                    digits = (substring digits 0 ((strlen digits) - 1))
+                    if wasDot {
+                        break
+                    }
+                } {
+                    break
+                }
+            }
+            def sci:string (digits + "E+" + (to_string e))
+            if neg {
+                return ("-" + sci)
+            }
+            return sci
+        }
         def cents:int (to_int ((a * 100.0) + 0.5))
         def whole:int (idiv cents 100)
         def frac:int (cents - (whole * 100))
