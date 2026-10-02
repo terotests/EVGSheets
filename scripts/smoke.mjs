@@ -154,6 +154,18 @@ try {
   s = await state(page);
   ok("a menubar menu opens", s.menuOpen);
   await shot(page, "02_format_menu");
+  // Each menu hangs under its own trigger — also after the pointer slides
+  // along the bar with one open, which switches the menu.
+  const under = async (menu) => {
+    const t = (await page.evaluate((m) => window.sheet.app.rectOf("sx-mb-" + m + "-trigger"), menu)).split(",").map(Number);
+    const c = (await page.evaluate((m) => window.sheet.app.rectOf("sx-mb-" + m + "-content"), menu)).split(",").map(Number);
+    return c.length === 4 && Math.abs(c[0] - t[0]) <= 12 && c[1] >= t[1] + t[3] - 2;
+  };
+  ok("the Format menu opens under Format", await under("format"));
+  const ins = await centre(page, "sx-mb-insert-trigger");
+  await page.mouse.move(ins.x, ins.y);
+  await page.waitForTimeout(120);
+  ok("hovering Insert switches to the Insert menu, under Insert", (await page.evaluate(() => window.sheet.app.rectOf("sx-mb-insert-content"))) !== "" && (await under("insert")));
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
   ok("Escape closes it", !(await state(page)).menuOpen);
