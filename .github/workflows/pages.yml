@@ -1,0 +1,139 @@
+# Build EVGSheets, test it in a real Chromium, and publish it to GitHub Pages
+# (https://terotests.github.io/EVGSheets/).
+#
+#   /             the editor (?ui=full|compact|viewer|grid, ?tools=, ?theme=, ?readonly=)
+#   /embed.html   the same build mounted four times with different parameters
+#
+# The app is Ranger source. It is compiled by the compiler committed in Ranger
+# (dist/rgrc.js) together with the parts of Ranger it imports — the datagrid
+# core, the EVG library (fetched by Ranger's `npm run deps`) — and EVGUI's
+# controllers. A sparse, shallow checkout of each is enough; no compiler build.
+name: Deploy EVGSheets to GitHub Pages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      ranger_ref:
+        description: "Ranger branch, tag or commit to build with"
+        required: false
+        default: ""
+      evgui_ref:
+        description: "EVGUI branch, tag or commit to build with"
+        required: false
+        default: ""
+
+# The core API this app uses (GridApp.setChrome, stateJson, sceneList, the
+# modern/dark themes) and EVGUI's pressed-state fix are on these branches
+# until they are merged; then both go back to master / main.
+env:
+  RANGER_REF: ${{ inputs.ranger_ref || 'claude/bold-ride-6h3zlv' }}
+  EVGUI_REF: ${{ inputs.evgui_ref || 'claude/bold-ride-6h3zlv' }}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout EVGSheets
+        uses: actions/checkout@v4
+        with:
+          path: evgsheets
+
+      - name: Checkout Ranger (compiler, datagrid core, EVG)
+        uses: actions/checkout@v4
+        with:
+          repository: terotests/Ranger
+          ref: ${{ env.RANGER_REF }}
+          path: ranger
+          fetch-depth: 1
+          sparse-checkout: |
+            compiler
+            lib
+            dist
+            bin
+            scripts
+            gallery/ts_parser
+            gallery/datagrid/src
+            gallery/datagrid/web
+            gallery/datagrid/fixtures
+            gallery/evg_window
+            gallery/game_engine/ui
+            gallery/office/assets
+            gallery/office/drawing
+            gallery/office/editor
+            gallery/office/text
+            gallery/ooxml
+            gallery/pdf_writer/src
+            gallery/pdf_writer/assets/fonts
+            gallery/rangerdb/src
+            gallery/rangersql/src
+            gallery/vela/src
+            gallery/zip
+
+      - name: Checkout EVGUI (the controllers)
+        uses: actions/checkout@v4
+        with:
+          repository: terotests/EVGUI
+          ref: ${{ env.EVGUI_REF }}
+          path: ranger/gallery/evgui
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install esbuild and playwright-core
+        working-directory: evgsheets
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: evgsheets
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.* \
+                     /etc/apt/sources.list.d/microsoft-prod.*
+          npx playwright-core install --with-deps chromium ||
+            npx playwright-core install chromium
+
+      - name: Build
+        run: node evgsheets/scripts/build.mjs --ranger ranger --out evgsheets/dist
+
+      - name: Smoke test in Chromium
+        run: node evgsheets/scripts/smoke.mjs --dist evgsheets/dist --shots evgsheets/shots
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: evgsheets/shots
+          if-no-files-found: ignore
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: evgsheets/dist
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

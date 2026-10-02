@@ -1,0 +1,420 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; RibbonCtl — one group of icon buttons on the EVGSheets ribbon
+; =============================================================================
+; A toolbar in the WAI-ARIA sense: one tab stop for the whole group, the arrow
+; keys move between its buttons (roving focus), Home and End jump to the ends,
+; Enter and Space press. A button is either an action (Undo) or a toggle (Bold),
+; and a toggle reports `aria-pressed` — which is what a reader says, rather
+; than "checked", for a button that stays down.
+;
+; It is an EVGUI controller (UiCtl): it builds its own subtree, reports its
+; rows, and is mounted in a UiHost like every other one. What it does NOT do
+; is know what a button MEANS. Pressing one records its value in `pressed`;
+; the app reads that, runs the command, and writes back which toggles are on
+; from the sheet's own state. The ribbon never decides that Bold is on.
+;
+; The glyphs are Lucide paths on a 24×24 box, drawn by EVG as paths — the same
+; icons the EVGUI demos use, so the editor looks like the rest of the kit.
+; =============================================================================
+
+Import "../../evgui/src/UiCtl.rgr"
+Import "../../evgui/src/UiTree.rgr"
+Import "pkg:evg/EVGElement.rgr"
+Import "pkg:evg/EVGA11yTree.rgr"
+
+class RibbonItem {
+    def value:string ""
+    def name:string ""
+    def icon:string ""
+    ; A word drawn instead of an icon, for the few commands no icon says
+    ; better than a word does ("%", ".0").
+    def text:string ""
+    def shortcut:string ""
+    def toggle:boolean false
+    def on:boolean false
+    def disabled:boolean false
+    def separator:boolean false
+    ; A colour shown under the glyph: the text and fill buttons show the colour
+    ; they would apply.
+    def swatch:string ""
+    def el:EVGElement
+
+    Constructor () {
+        el = (EVGElement.createDiv())
+    }
+}
+
+class RibbonCtl extends UiCtl {
+    def items:[RibbonItem]
+    def rovingValue:string ""
+    ; The value of the button pressed last, until the app takes it.
+    def pressed:string ""
+
+    Constructor () {
+        rootEl = (EVGElement.createDiv())
+        def empty:[RibbonItem]
+        items = empty
+    }
+
+    fn add:RibbonItem (value:string name:string icon:string) {
+        def it (new RibbonItem())
+        it.value = value
+        it.name = name
+        it.icon = icon
+        push items it
+        if ((strlen rovingValue) == 0) {
+            rovingValue = value
+        }
+        return it
+    }
+
+    fn addToggle:RibbonItem (value:string name:string icon:string) {
+        def it:RibbonItem (this.add(value name icon))
+        it.toggle = true
+        return it
+    }
+
+    fn addSeparator:void () {
+        def it (new RibbonItem())
+        it.separator = true
+        push items it
+    }
+
+    fn find@(optional):RibbonItem (value:string) {
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            if ((it.separator == false) && (it.value == value)) {
+                def hit@(optional):RibbonItem it
+                return hit
+            }
+            i = (i + 1)
+        }
+        def miss@(optional):RibbonItem
+        return miss
+    }
+
+    fn setOn:void (value:string on:boolean) {
+        def it@(optional):RibbonItem (this.find(value))
+        if (null? it) {
+            return
+        }
+        it.on = on
+    }
+
+    fn setDisabled:void (value:string off:boolean) {
+        def it@(optional):RibbonItem (this.find(value))
+        if (null? it) {
+            return
+        }
+        it.disabled = off
+    }
+
+    fn setSwatch:void (value:string hex:string) {
+        def it@(optional):RibbonItem (this.find(value))
+        if (null? it) {
+            return
+        }
+        it.swatch = hex
+    }
+
+    ; Drop every button whose value is not in `keep` — what a host's
+    ; `tools=bold,italic,sort` parameter asks for. Separators survive only
+    ; between two kept buttons.
+    fn keepOnly:void (keep:[string]) {
+        def out:[RibbonItem]
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            if it.separator {
+                def n:int (array_length out)
+                if (n > 0) {
+                    def last:RibbonItem (itemAt out (n - 1))
+                    if (last.separator == false) {
+                        push out it
+                    }
+                }
+            } {
+                if (RibbonCtl.listHas(keep it.value)) {
+                    push out it
+                }
+            }
+            i = (i + 1)
+        }
+        def n2:int (array_length out)
+        if (n2 > 0) {
+            def tail:RibbonItem (itemAt out (n2 - 1))
+            if tail.separator {
+                removeLast out
+            }
+        }
+        items = out
+        rovingValue = ""
+        def j:int 0
+        while (j < (array_length items)) {
+            def it2:RibbonItem (itemAt items j)
+            if ((it2.separator == false) && ((strlen rovingValue) == 0)) {
+                rovingValue = it2.value
+            }
+            j = (j + 1)
+        }
+    }
+
+    sfn listHas:boolean (list:[string] v:string) {
+        def i:int 0
+        while (i < (array_length list)) {
+            if ((itemAt list i) == v) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    fn buttonCount:int () {
+        def n:int 0
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            if (it.separator == false) {
+                n = (n + 1)
+            }
+            i = (i + 1)
+        }
+        return n
+    }
+
+    fn itemTid:string (value:string) {
+        return ((tid + "-") + value)
+    }
+
+    fn valueOf:string (target:string) {
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            if (it.separator == false) {
+                if ((this.itemTid(it.value)) == target) {
+                    return it.value
+                }
+            }
+            i = (i + 1)
+        }
+        return ""
+    }
+
+    fn build:void () {
+        def root:EVGElement (unwrap rootEl)
+        root.id = tid
+        root.className = "sx-ribbon"
+        UiTree.clearChildren(root)
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            def el:EVGElement (unwrap it.el)
+            UiTree.clearChildren(el)
+            el.textContent = ""
+            el.elementType = 0
+            if it.separator {
+                el.id = ""
+                el.className = "sx-sep"
+                root.addChild(el)
+            } {
+                el.id = (this.itemTid(it.value))
+                el.className = "sx-tool"
+                el.cursor = "pointer"
+                if ((strlen it.text) > 0) {
+                    UiTree.addClass(el "sx-tool-text")
+                }
+                if it.disabled {
+                    UiTree.addClass(el "sx-tool-disabled")
+                }
+                if (it.toggle && it.on) {
+                    UiTree.setState(el "sx-tool" "on")
+                } {
+                    UiTree.setState(el "sx-tool" "off")
+                }
+                if ((strlen it.text) > 0) {
+                    def word:EVGElement (EVGElement.createSpan())
+                    word.className = "sx-tool-word"
+                    word.textContent = it.text
+                    word.elementType = 1
+                    word.a11yHidden = true
+                    el.addChild(word)
+                } {
+                    el.addChild((RibbonCtl.glyph(it.icon "sx-glyph")))
+                }
+                if ((strlen it.swatch) > 0) {
+                    def bar:EVGElement (EVGElement.createDiv())
+                    bar.className = "sx-swatch"
+                    bar.a11yHidden = true
+                    UiTree.inline(bar "background-color" it.swatch)
+                    el.addChild(bar)
+                }
+                root.addChild(el)
+            }
+            i = (i + 1)
+        }
+    }
+
+    sfn glyph:EVGElement (d:string cls:string) {
+        def g:EVGElement (EVGElement.createDiv())
+        g.className = cls
+        g.tagName = "path"
+        g.elementType = 3
+        g.viewBox = "0 0 24 24"
+        g.svgPath = d
+        g.a11yHidden = true
+        return g
+    }
+
+    fn activate:string (target:string) {
+        if disabled {
+            return ""
+        }
+        def v:string (this.valueOf(target))
+        if ((strlen v) == 0) {
+            return ""
+        }
+        def it@(optional):RibbonItem (this.find(v))
+        if (null? it) {
+            return ""
+        }
+        if it.disabled {
+            return ""
+        }
+        rovingValue = v
+        pressed = v
+        return ""
+    }
+
+    ; Take the last press, once.
+    fn takePressed:string () {
+        def v:string pressed
+        pressed = ""
+        return v
+    }
+
+    fn enabledValues:[string] () {
+        def out:[string]
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            if ((it.separator == false) && (it.disabled == false)) {
+                push out it.value
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    fn keyDown:string (target:string key:string) {
+        if (UiCtl.activatesOn(key)) {
+            this.activate(target)
+            return ""
+        }
+        def vals:[string] (this.enabledValues())
+        def n:int (array_length vals)
+        if (n == 0) {
+            return ""
+        }
+        def cur:string (this.valueOf(target))
+        def at:int 0
+        def i:int 0
+        while (i < n) {
+            if ((itemAt vals i) == cur) {
+                at = i
+            }
+            i = (i + 1)
+        }
+        def next:int -1
+        if (key == "ArrowRight") {
+            next = (at + 1)
+            if (next >= n) {
+                next = 0
+            }
+        }
+        if (key == "ArrowLeft") {
+            next = (at - 1)
+            if (next < 0) {
+                next = (n - 1)
+            }
+        }
+        if (key == "Home") {
+            next = 0
+        }
+        if (key == "End") {
+            next = (n - 1)
+        }
+        if (next < 0) {
+            return ""
+        }
+        rovingValue = (itemAt vals next)
+        return (this.itemTid(rovingValue))
+    }
+
+    fn tids:[string] () {
+        def a:[string]
+        push a tid
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            if (it.separator == false) {
+                push a (this.itemTid(it.value))
+            }
+            i = (i + 1)
+        }
+        return a
+    }
+
+    fn isFocusable:boolean (target:string) {
+        def v:string (this.valueOf(target))
+        if ((strlen v) == 0) {
+            return false
+        }
+        def it@(optional):RibbonItem (this.find(v))
+        if (null? it) {
+            return false
+        }
+        return (it.disabled == false)
+    }
+
+    fn onFocus:void (target:string) {
+        def v:string (this.valueOf(target))
+        if ((strlen v) > 0) {
+            rovingValue = v
+        }
+    }
+
+    fn rows:[UiRow] () {
+        def out:[UiRow]
+        def bar:UiRow (UiRow.of(tid (EVGA11yRole.toolbar()) name))
+        bar.orientation = "horizontal"
+        push out bar
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:RibbonItem (itemAt items i)
+            if (it.separator == false) {
+                def r:UiRow (UiRow.of((this.itemTid(it.value)) (EVGA11yRole.button()) it.name))
+                r.parentTid = tid
+                r.disabled = it.disabled
+                r.keyShortcut = it.shortcut
+                if it.toggle {
+                    if it.on {
+                        r.pressed = (EVGA11yTri.yes())
+                    } {
+                        r.pressed = (EVGA11yTri.no())
+                    }
+                }
+                if (it.disabled == false) {
+                    r.focusable = true
+                    r.tabStop = (it.value == rovingValue)
+                }
+                push out r
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+}

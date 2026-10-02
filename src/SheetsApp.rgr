@@ -1,0 +1,1880 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; SheetsApp — the Ranger spreadsheet core with an EVGUI interface around it
+; =============================================================================
+;
+;   ┌─ header ── EVGSheets · File Edit View Insert Format Data ── book.xlsx ─┐
+;   ├─ ribbon ── ↶ ↷ │ Font▾ 11▾ │ B I U S A▁ ◩▁ │ ≡ ≡ ≡ ↵ ⊞ │ $▾ % │ … ──┤
+;   │ ┌─ the core (GridApp): formula bar, headers, cells, dialogs ─────────┐ │
+;   │ │                                                                    │ │
+;   │ └────────────────────────────────────────────────────────────────────┘ │
+;   ├─ footer ── Sales  Costs  Summary  + ─────────── Sum 4,100 · Count 201 ─┤
+;   └────────────────────────────────────────────────────────────────────────┘
+;
+; Two worlds, one canvas. The CORE is gallery/datagrid's GridApp: the workbook
+; model, the formula engine, xlsx in and out, the grid, the formula bar and
+; every dialog — the editor that has the features. The INTERFACE is EVGUI: a
+; menubar, dropdown menus, a ribbon of icon toggles, tabs and a context menu,
+; each one an EVGUI controller in a UiHost, styled by one stylesheet
+; (sheets.css) with a light and a dark palette.
+;
+; The seam is the display list. The page is laid out by EVG; the element with
+; id `sx-grid` is a placeholder whose rectangle is handed to GridApp as its
+; window, and GridApp's own list is painted INTO that element with
+; `EVGDisplayList.paintAt` — so a menu that drops over the grid is drawn over
+; it, and the grid's own dialogs stay inside the grid.
+;
+; The two halves agree on state by asking, never by mirroring: a toggle on the
+; ribbon is ON because `GridFormat` says the active cell is bold, read again
+; after every input. The ribbon does not remember Bold; it reports a press and
+; the core decides.
+;
+; The accessibility trees merge the same way the pictures do: the chrome's
+; tree from UiHost, the core's from GridApp, the core's hung under a region
+; node at the grid's rectangle. One tree, one focus.
+;
+; It runs PARAMETRISED: `setPreset("full" | "compact" | "viewer" | "grid")`
+; and `setOption(name value)` choose which pieces are shown, which ribbon
+; tools exist, and whether the workbook can be edited at all — the same editor
+; as a full application, as a light viewer inside another app, or as a bare
+; grid.
+; =============================================================================
+
+Import "../../datagrid/web/datagrid_web.rgr"
+Import "../../evgui/src/UiHost.rgr"
+Import "RibbonCtl.rgr"
+Import "pkg:evg/EVGElement.rgr"
+Import "pkg:evg/EVGUnit.rgr"
+Import "pkg:evg/EVGLayout.rgr"
+Import "pkg:evg/EVGDisplayList.rgr"
+Import "pkg:evg/EVGA11yTree.rgr"
+
+; What a menu row or a ribbon button does: a GridApp command and its argument,
+; or one of the app's own verbs ("sx:…") that the core does not have.
+class SxAction {
+    def value:string ""
+    def command:string ""
+    def arg:string ""
+    def shortcut:string ""
+
+    Constructor () {
+    }
+}
+
+class SheetsApp {
+    def grid:DataGridWeb (new DataGridWeb)
+    def ui:UiHost (new UiHost)
+
+    def menubar:MenubarCtl (new MenubarCtl)
+    def fontMenu:MenuCtl (new MenuCtl)
+    def sizeMenu:MenuCtl (new MenuCtl)
+    def numMenu:MenuCtl (new MenuCtl)
+    def borderMenu:MenuCtl (new MenuCtl)
+    def ctxMenu:MenuCtl (new MenuCtl)
+    def history:RibbonCtl (new RibbonCtl)
+    def textTools:RibbonCtl (new RibbonCtl)
+    def alignTools:RibbonCtl (new RibbonCtl)
+    def numberTools:RibbonCtl (new RibbonCtl)
+    def dataTools:RibbonCtl (new RibbonCtl)
+    def insertTools:RibbonCtl (new RibbonCtl)
+    def tabs:TabsCtl (new TabsCtl)
+    def sheetTools:RibbonCtl (new RibbonCtl)
+
+    ; The page's own elements (not controllers).
+    def headerEl:EVGElement (EVGElement.createDiv())
+    def ribbonEl:EVGElement (EVGElement.createDiv())
+    def gridEl:EVGElement (EVGElement.createDiv())
+    def footerEl:EVGElement (EVGElement.createDiv())
+    def titleEl:EVGElement (EVGElement.createSpan())
+    def docEl:EVGElement (EVGElement.createSpan())
+    def statusEl:EVGElement (EVGElement.createSpan())
+    def statsEl:EVGElement (EVGElement.createSpan())
+    def badgeEl:EVGElement (EVGElement.createSpan())
+    def ctxHolder:EVGElement (EVGElement.createDiv())
+
+    def actions:[string:SxAction]
+
+    ; --- what is shown ------------------------------------------------------
+    def preset:string "full"
+    def showMenubar:boolean true
+    def showRibbon:boolean true
+    def showFormulaBar:boolean true
+    def showTabs:boolean true
+    def showStatus:boolean true
+    def showTitle:boolean true
+    def readOnly:boolean false
+    ; Ribbon tools to keep, by value; empty keeps them all.
+    def tools:[string]
+    def theme:string "light"
+    def title:string "EVGSheets"
+
+    ; --- geometry -----------------------------------------------------------
+    def pageW:double 1100.0
+    def pageH:double 700.0
+    def gx:int 0
+    def gy:int 0
+    def gw:int 0
+    def gh:int 0
+
+    ; --- focus and pointer ----------------------------------------------------
+    ; Who has the keyboard: the sheet, or an EVGUI control (ui.focusId).
+    def gridFocused:boolean true
+    ; A press that began on the grid keeps going to the grid until it is let
+    ; go, wherever the pointer wanders — a drag-select past the edge.
+    def gridCapture:boolean false
+    def held:boolean false
+    def ctxOpen:boolean false
+    def ctxX:int 0
+    def ctxY:int 0
+    def lastSheetsKey:string ""
+    def built:boolean false
+
+    Constructor () {
+        def m:[string:SxAction]
+        actions = m
+        def t:[string]
+        tools = t
+    }
+
+    ; =========================================================================
+    ; Starting up
+    ; =========================================================================
+
+    fn start:void (w:int h:int css:string) {
+        pageW = (to_double w)
+        pageH = (to_double h)
+        ui.setPageSize(pageW pageH)
+        if ((strlen css) > 0) {
+            ui.addStyleSheet(css)
+        }
+        ; The core starts at the full size and is told its real rectangle by
+        ; the first layout.
+        grid.start(w h)
+        grid.app.setChrome(false true false false)
+        def themed:boolean (grid.setTheme("modern"))
+        this.buildModels()
+        this.buildChrome()
+        built = true
+    }
+
+    fn addFont:boolean (family:string data:buffer) {
+        return (grid.addFont(family data))
+    }
+
+    fn addFace:boolean (data:buffer) {
+        return (grid.addFace(data))
+    }
+
+    fn useDemo:void () {
+        grid.useDemo()
+        this.sync()
+    }
+
+    fn openWorkbook:boolean (data:buffer name:string) {
+        def ok:boolean (grid.openWorkbook(data name))
+        this.sync()
+        return ok
+    }
+
+    fn openWorkbookPassword:boolean (data:buffer name:string password:string) {
+        def ok:boolean (grid.openWorkbookPassword(data name password))
+        this.sync()
+        return ok
+    }
+
+    fn showSheet:boolean (name:string) {
+        def ok:boolean (grid.showSheet(name))
+        this.sync()
+        return ok
+    }
+
+    fn resize:void (w:int h:int) {
+        pageW = (to_double w)
+        pageH = (to_double h)
+        ui.setPageSize(pageW pageH)
+    }
+
+    ; =========================================================================
+    ; Parameters: which pieces exist
+    ; =========================================================================
+
+    ; A preset is a starting point; `setOption` changes one piece after it.
+    ;   full     menubar, ribbon, formula bar, sheet tabs, status bar
+    ;   compact  a short ribbon, formula bar, tabs, status — no menubar
+    ;   viewer   read-only: tabs and status only; select, scroll, copy, sort
+    ;   grid     the bare grid, editable, nothing around it
+    fn setPreset:boolean (name:string) {
+        def n:string (to_lowercase (trim name))
+        def empty:[string]
+        tools = empty
+        if (n == "full") {
+            showMenubar = true
+            showRibbon = true
+            showFormulaBar = true
+            showTabs = true
+            showStatus = true
+            showTitle = true
+            readOnly = false
+        } {
+            if (n == "compact") {
+                showMenubar = false
+                showRibbon = true
+                showFormulaBar = true
+                showTabs = true
+                showStatus = true
+                showTitle = false
+                readOnly = false
+                tools = (strsplit "undo,redo,bold,italic,underline,color,fill,left,center,right,numfmt,percent,sortasc,sortdesc,chart" ",")
+            } {
+                if (n == "viewer") {
+                    showMenubar = false
+                    showRibbon = false
+                    showFormulaBar = false
+                    showTabs = true
+                    showStatus = true
+                    showTitle = false
+                    readOnly = true
+                } {
+                    if (n == "grid") {
+                        showMenubar = false
+                        showRibbon = false
+                        showFormulaBar = false
+                        showTabs = false
+                        showStatus = false
+                        showTitle = false
+                        readOnly = false
+                    } {
+                        return false
+                    }
+                }
+            }
+        }
+        preset = n
+        this.rebuildChrome()
+        return true
+    }
+
+    ; One switch by name: menubar, ribbon, formulaBar, tabs, status, title,
+    ; readOnly ("true"/"false"), tools (a comma list of ribbon values, or ""
+    ; for all of them), theme ("light"/"dark"), name (the document title).
+    fn setOption:boolean (name:string value:string) {
+        def on:boolean ((value == "true") || (value == "1") || (value == "on") || (value == "yes"))
+        if (name == "menubar") {
+            showMenubar = on
+        } {
+            if (name == "ribbon") {
+                showRibbon = on
+            } {
+                if (name == "formulaBar") {
+                    showFormulaBar = on
+                } {
+                    if (name == "tabs") {
+                        showTabs = on
+                    } {
+                        if (name == "status") {
+                            showStatus = on
+                        } {
+                            if (name == "title") {
+                                showTitle = on
+                            } {
+                                if (name == "readOnly") {
+                                    readOnly = on
+                                } {
+                                    if (name == "tools") {
+                                        def empty:[string]
+                                        tools = empty
+                                        if ((strlen (trim value)) > 0) {
+                                            tools = (strsplit (trim value) ",")
+                                        }
+                                    } {
+                                        if (name == "theme") {
+                                            return (this.setTheme(value))
+                                        } {
+                                            if (name == "name") {
+                                                title = value
+                                            } {
+                                                return false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        this.rebuildChrome()
+        return true
+    }
+
+    fn setTheme:boolean (name:string) {
+        def n:string (to_lowercase (trim name))
+        if ((n != "light") && (n != "dark")) {
+            return false
+        }
+        theme = n
+        if (n == "dark") {
+            ui.setTheme("dark")
+            def a:boolean (grid.setTheme("dark"))
+        } {
+            ui.setTheme("")
+            def b:boolean (grid.setTheme("modern"))
+        }
+        this.sync()
+        return true
+    }
+
+    ; Everything the page shows, as JSON a host can read back.
+    fn optionsJson:string () {
+        def o:string "{"
+        o = (o + "\"preset\":" + (GridApp.jsonStr(preset)))
+        o = (o + ",\"menubar\":" + (GridApp.jsonBool(showMenubar)))
+        o = (o + ",\"ribbon\":" + (GridApp.jsonBool(showRibbon)))
+        o = (o + ",\"formulaBar\":" + (GridApp.jsonBool(showFormulaBar)))
+        o = (o + ",\"tabs\":" + (GridApp.jsonBool(showTabs)))
+        o = (o + ",\"status\":" + (GridApp.jsonBool(showStatus)))
+        o = (o + ",\"title\":" + (GridApp.jsonBool(showTitle)))
+        o = (o + ",\"readOnly\":" + (GridApp.jsonBool(readOnly)))
+        o = (o + ",\"theme\":" + (GridApp.jsonStr(theme)))
+        o = (o + ",\"tools\":" + (GridApp.jsonStr((join tools ","))))
+        o = (o + "}")
+        return o
+    }
+
+    ; =========================================================================
+    ; The models: menus, ribbon groups, tabs
+    ; =========================================================================
+
+    fn act:SxAction (value:string command:string arg:string shortcut:string) {
+        def a (new SxAction())
+        a.value = value
+        a.command = command
+        a.arg = arg
+        a.shortcut = shortcut
+        set actions value a
+        return a
+    }
+
+    fn item:void (mc:MenuCtl value:string label:string command:string arg:string shortcut:string) {
+        this.act(value command arg shortcut)
+        mc.addItem(value label false)
+    }
+
+    fn kid:void (parent:UiItem value:string label:string command:string arg:string) {
+        this.act(value command arg "")
+        def k:UiItem (MenuCtl.addKid(parent value label false))
+    }
+
+    fn buildModels:void () {
+        ; --- the menubar ---------------------------------------------------
+        menubar = (new MenubarCtl)
+        menubar.tid = "sx-mb"
+        menubar.name = "Main menu"
+        menubar.addMenu("file" "File")
+        menubar.addMenu("edit" "Edit")
+        menubar.addMenu("view" "View")
+        menubar.addMenu("insert" "Insert")
+        menubar.addMenu("format" "Format")
+        menubar.addMenu("data" "Data")
+
+        def f:MenuCtl (menubar.attachMenu("file"))
+        this.item(f "new" "New workbook" "file.new" "" "")
+        this.item(f "open" "Open…" "file.open" "" "Ctrl+O")
+        f.addSeparator()
+        this.item(f "save" "Download .xlsx" "file.saveAs" "" "Ctrl+S")
+
+        def e:MenuCtl (menubar.attachMenu("edit"))
+        this.item(e "undo" "Undo" "edit.undo" "" "Ctrl+Z")
+        this.item(e "redo" "Redo" "edit.redo" "" "Ctrl+Y")
+        e.addSeparator()
+        this.item(e "cut" "Cut" "edit.cut" "" "Ctrl+X")
+        this.item(e "copy" "Copy" "edit.copy" "" "Ctrl+C")
+        this.item(e "paste" "Paste" "edit.paste" "" "Ctrl+V")
+        this.item(e "pastespecial" "Paste special…" "edit.pasteSpecial" "" "Ctrl+⇧V")
+        e.addSeparator()
+        this.item(e "find" "Find and replace…" "edit.find" "" "Ctrl+F")
+        this.item(e "clear" "Clear contents" "edit.clear" "" "Del")
+        this.item(e "selectall" "Select all" "select.all" "" "Ctrl+A")
+
+        def v:MenuCtl (menubar.attachMenu("view"))
+        this.act("showformula" "sx:formulaBar" "" "")
+        def c1:UiItem (v.addCheckbox("showformula" "Formula bar" true))
+        this.act("showtabs" "sx:tabs" "" "")
+        def c2:UiItem (v.addCheckbox("showtabs" "Sheet tabs" true))
+        this.act("showstatus" "sx:status" "" "")
+        def c3:UiItem (v.addCheckbox("showstatus" "Status bar" true))
+        this.act("showribbon" "sx:ribbon" "" "")
+        def c4:UiItem (v.addCheckbox("showribbon" "Toolbar" true))
+        v.addSeparator()
+        this.act("themelight" "sx:theme" "light" "")
+        def r1:UiItem (v.addRadio("themelight" "Light theme" "theme" true))
+        this.act("themedark" "sx:theme" "dark" "")
+        def r2:UiItem (v.addRadio("themedark" "Dark theme" "theme" false))
+        v.addSeparator()
+        this.item(v "freeze" "Freeze panes at selection" "view.freeze.here" "" "")
+        this.item(v "unfreeze" "Unfreeze panes" "view.freeze.none" "" "")
+        this.act("rtl" "view.rtl" "" "")
+        def c5:UiItem (v.addCheckbox("rtl" "Right to left" false))
+
+        def ins:MenuCtl (menubar.attachMenu("insert"))
+        this.item(ins "rowabove" "Row above" "insert.row.above" "" "")
+        this.item(ins "rowbelow" "Row below" "insert.row.below" "" "")
+        this.item(ins "colleft" "Column left" "insert.column.left" "" "")
+        this.item(ins "colright" "Column right" "insert.column.right" "" "")
+        ins.addSeparator()
+        this.item(ins "chart" "Chart…" "insert.chart" "" "")
+        this.item(ins "link" "Link…" "insert.link" "" "Ctrl+K")
+        ins.addSeparator()
+        this.item(ins "sheet" "New sheet" "sheet.add" "" "")
+
+        def fm:MenuCtl (menubar.attachMenu("format"))
+        this.item(fm "fbold" "Bold" "format.bold" "" "Ctrl+B")
+        this.item(fm "fitalic" "Italic" "format.italic" "" "Ctrl+I")
+        this.item(fm "funderline" "Underline" "format.underline" "" "Ctrl+U")
+        this.item(fm "fstrike" "Strikethrough" "format.strike" "" "")
+        fm.addSeparator()
+        def numSub:UiItem (fm.addSub("number" "Number" false))
+        this.kid(numSub "nf-currency" "Currency" "format.numfmt" "currency")
+        this.kid(numSub "nf-percent" "Percent" "format.numfmt" "percent")
+        this.kid(numSub "nf-comma" "Thousands separator" "format.numfmt" "comma")
+        this.kid(numSub "nf-date" "Date" "format.numfmt" "date")
+        this.kid(numSub "nf-text" "Text" "format.numfmt" "text")
+        MenuCtl.addKidSeparator(numSub)
+        this.kid(numSub "nf-more" "More decimals" "format.decimals" "more")
+        this.kid(numSub "nf-less" "Fewer decimals" "format.decimals" "less")
+        def alignSub:UiItem (fm.addSub("alignment" "Alignment" false))
+        this.kid(alignSub "al-left" "Left" "format.align" "left")
+        this.kid(alignSub "al-center" "Center" "format.align" "center")
+        this.kid(alignSub "al-right" "Right" "format.align" "right")
+        MenuCtl.addKidSeparator(alignSub)
+        this.kid(alignSub "al-top" "Top" "format.valign" "top")
+        this.kid(alignSub "al-middle" "Middle" "format.valign" "center")
+        this.kid(alignSub "al-bottom" "Bottom" "format.valign" "bottom")
+        this.item(fm "fwrap" "Wrap text" "format.wrap" "" "")
+        this.item(fm "fmerge" "Merge cells" "format.merge" "" "")
+        fm.addSeparator()
+        this.item(fm "ftextcolor" "Text colour…" "format.color" "" "")
+        this.item(fm "ffill" "Fill colour…" "format.fill" "" "")
+        this.item(fm "fborders" "Borders…" "format.border" "" "")
+        this.item(fm "fcond" "Conditional formatting…" "format.conditional" "" "")
+        fm.addSeparator()
+        this.item(fm "fautocol" "Fit column width" "format.autofit.column" "" "")
+        this.item(fm "fautorow" "Fit row height" "format.autofit.row" "" "")
+        this.item(fm "fclear" "Clear formatting" "format.clear" "" "")
+
+        def d:MenuCtl (menubar.attachMenu("data"))
+        this.item(d "dsortasc" "Sort A → Z" "data.sort.asc" "" "")
+        this.item(d "dsortdesc" "Sort Z → A" "data.sort.desc" "" "")
+        this.item(d "dfilterclear" "Clear filters" "data.filter.clear" "" "")
+        d.addSeparator()
+        this.item(d "dvalid" "Data validation…" "data.validation" "" "")
+        d.addSeparator()
+        this.item(d "ddelrows" "Delete rows" "delete.rows" "" "")
+        this.item(d "ddelcols" "Delete columns" "delete.columns" "" "")
+
+        ; --- the ribbon dropdowns -----------------------------------------
+        fontMenu = (new MenuCtl)
+        fontMenu.tid = "sx-font"
+        fontMenu.name = "Open Sans"
+        def fonts:[string] ([] _:string ("Open Sans" "Noto Sans" "Helvetica" "Droid Serif" "Josefin Sans"))
+        def fi:int 0
+        while (fi < (array_length fonts)) {
+            def fname:string (itemAt fonts fi)
+            def fv:string ("font-" + (to_string fi))
+            this.act(fv "format.font" fname "")
+            def fr:UiItem (fontMenu.addRadio(fv fname "font" false))
+            fi = (fi + 1)
+        }
+
+        sizeMenu = (new MenuCtl)
+        sizeMenu.tid = "sx-size"
+        sizeMenu.name = "11"
+        def sizes:[string] ([] _:string ("8" "9" "10" "11" "12" "14" "16" "18" "20" "24" "28" "36" "48"))
+        def si:int 0
+        while (si < (array_length sizes)) {
+            def sz:string (itemAt sizes si)
+            def sv:string ("size-" + sz)
+            this.act(sv "format.size" sz "")
+            def sr:UiItem (sizeMenu.addRadio(sv sz "size" false))
+            si = (si + 1)
+        }
+
+        numMenu = (new MenuCtl)
+        numMenu.tid = "sx-num"
+        numMenu.name = "Number"
+        this.item(numMenu "num-currency" "Currency" "format.numfmt" "currency" "")
+        this.item(numMenu "num-percent" "Percent" "format.numfmt" "percent" "")
+        this.item(numMenu "num-comma" "Thousands separator" "format.numfmt" "comma" "")
+        this.item(numMenu "num-date" "Date" "format.numfmt" "date" "")
+        this.item(numMenu "num-text" "Text" "format.numfmt" "text" "")
+
+        borderMenu = (new MenuCtl)
+        borderMenu.tid = "sx-borders"
+        borderMenu.name = "Borders"
+        this.item(borderMenu "b-all" "All borders" "format.border" "all" "")
+        this.item(borderMenu "b-outline" "Outline" "format.border" "outline" "")
+        this.item(borderMenu "b-none" "No borders" "format.border" "none" "")
+        borderMenu.addSeparator()
+        this.item(borderMenu "b-more" "More borders…" "format.border" "" "")
+
+        ; --- the context menu on the sheet ---------------------------------
+        ctxMenu = (new MenuCtl)
+        ctxMenu.tid = "sx-ctx"
+        ctxMenu.name = "Cell actions"
+        ctxMenu.contextMode = true
+        this.item(ctxMenu "c-cut" "Cut" "edit.cut" "" "Ctrl+X")
+        this.item(ctxMenu "c-copy" "Copy" "edit.copy" "" "Ctrl+C")
+        this.item(ctxMenu "c-paste" "Paste" "edit.paste" "" "Ctrl+V")
+        ctxMenu.addSeparator()
+        this.item(ctxMenu "c-rowabove" "Insert row above" "insert.row.above" "" "")
+        this.item(ctxMenu "c-rowbelow" "Insert row below" "insert.row.below" "" "")
+        this.item(ctxMenu "c-colleft" "Insert column left" "insert.column.left" "" "")
+        this.item(ctxMenu "c-colright" "Insert column right" "insert.column.right" "" "")
+        this.item(ctxMenu "c-delrows" "Delete rows" "delete.rows" "" "")
+        this.item(ctxMenu "c-delcols" "Delete columns" "delete.columns" "" "")
+        ctxMenu.addSeparator()
+        this.item(ctxMenu "c-sortasc" "Sort A → Z" "data.sort.asc" "" "")
+        this.item(ctxMenu "c-sortdesc" "Sort Z → A" "data.sort.desc" "" "")
+        ctxMenu.addSeparator()
+        this.item(ctxMenu "c-chart" "Insert chart…" "insert.chart" "" "")
+        this.item(ctxMenu "c-link" "Insert link…" "insert.link" "" "Ctrl+K")
+        this.item(ctxMenu "c-clear" "Clear contents" "edit.clear" "" "Del")
+
+        this.buildRibbon()
+
+        ; --- the sheet tabs -----------------------------------------------------
+        tabs = (new TabsCtl)
+        tabs.tid = "sx-tabs"
+        tabs.name = "Sheets"
+        sheetTools = (new RibbonCtl)
+        sheetTools.tid = "sx-sheettools"
+        sheetTools.name = "Sheet actions"
+        this.tool(sheetTools "addsheet" "Add sheet" (SheetsApp.icon("plus")) "sheet.add" "" false)
+    }
+
+    fn tool:RibbonItem (r:RibbonCtl value:string name:string icon:string command:string arg:string toggle:boolean) {
+        this.act(value command arg "")
+        if toggle {
+            return (r.addToggle(value name icon))
+        }
+        return (r.add(value name icon))
+    }
+
+    fn buildRibbon:void () {
+        history = (new RibbonCtl)
+        history.tid = "sx-rb-history"
+        history.name = "History"
+        this.tool(history "undo" "Undo" (SheetsApp.icon("undo")) "edit.undo" "" false)
+        this.tool(history "redo" "Redo" (SheetsApp.icon("redo")) "edit.redo" "" false)
+        this.tool(history "painter" "Format painter" (SheetsApp.icon("painter")) "edit.formatPainter" "" true)
+
+        textTools = (new RibbonCtl)
+        textTools.tid = "sx-rb-text"
+        textTools.name = "Text style"
+        def b:RibbonItem (this.tool(textTools "bold" "Bold" (SheetsApp.icon("bold")) "format.bold" "" true))
+        b.shortcut = "Control+B"
+        def it:RibbonItem (this.tool(textTools "italic" "Italic" (SheetsApp.icon("italic")) "format.italic" "" true))
+        it.shortcut = "Control+I"
+        def u:RibbonItem (this.tool(textTools "underline" "Underline" (SheetsApp.icon("underline")) "format.underline" "" true))
+        u.shortcut = "Control+U"
+        this.tool(textTools "strike" "Strikethrough" (SheetsApp.icon("strike")) "format.strike" "" true)
+        textTools.addSeparator()
+        def tc:RibbonItem (this.tool(textTools "color" "Text colour" (SheetsApp.icon("color")) "format.color" "" false))
+        tc.swatch = "#dc2626"
+        def fc:RibbonItem (this.tool(textTools "fill" "Fill colour" (SheetsApp.icon("fill")) "format.fill" "" false))
+        fc.swatch = "#facc15"
+
+        alignTools = (new RibbonCtl)
+        alignTools.tid = "sx-rb-align"
+        alignTools.name = "Alignment"
+        this.tool(alignTools "left" "Align left" (SheetsApp.icon("left")) "format.align" "left" true)
+        this.tool(alignTools "center" "Align center" (SheetsApp.icon("center")) "format.align" "center" true)
+        this.tool(alignTools "right" "Align right" (SheetsApp.icon("right")) "format.align" "right" true)
+        alignTools.addSeparator()
+        this.tool(alignTools "wrap" "Wrap text" (SheetsApp.icon("wrap")) "format.wrap" "" true)
+        this.tool(alignTools "merge" "Merge cells" (SheetsApp.icon("merge")) "format.merge" "" true)
+
+        numberTools = (new RibbonCtl)
+        numberTools.tid = "sx-rb-number"
+        numberTools.name = "Number format"
+        this.tool(numberTools "currency" "Currency" (SheetsApp.icon("currency")) "format.numfmt" "currency" true)
+        this.tool(numberTools "percent" "Percent" (SheetsApp.icon("percent")) "format.numfmt" "percent" true)
+        def dm:RibbonItem (this.tool(numberTools "decmore" "More decimals" "" "format.decimals" "more" false))
+        dm.text = ".00"
+        def dl:RibbonItem (this.tool(numberTools "decless" "Fewer decimals" "" "format.decimals" "less" false))
+        dl.text = ".0"
+
+        dataTools = (new RibbonCtl)
+        dataTools.tid = "sx-rb-data"
+        dataTools.name = "Data"
+        this.tool(dataTools "sortasc" "Sort A to Z" (SheetsApp.icon("sortasc")) "data.sort.asc" "" false)
+        this.tool(dataTools "sortdesc" "Sort Z to A" (SheetsApp.icon("sortdesc")) "data.sort.desc" "" false)
+        this.tool(dataTools "filterclear" "Clear filters" (SheetsApp.icon("filterclear")) "data.filter.clear" "" false)
+        this.tool(dataTools "freeze" "Freeze panes at selection" (SheetsApp.icon("freeze")) "view.freeze.here" "" true)
+
+        insertTools = (new RibbonCtl)
+        insertTools.tid = "sx-rb-insert"
+        insertTools.name = "Insert"
+        this.tool(insertTools "chart" "Insert chart" (SheetsApp.icon("chart")) "insert.chart" "" false)
+        this.tool(insertTools "link" "Insert link" (SheetsApp.icon("link")) "insert.link" "" false)
+        this.tool(insertTools "find" "Find and replace" (SheetsApp.icon("find")) "edit.find" "" false)
+    }
+
+    fn ribbonGroups:[RibbonCtl] () {
+        def a:[RibbonCtl]
+        push a history
+        push a textTools
+        push a alignTools
+        push a numberTools
+        push a dataTools
+        push a insertTools
+        return a
+    }
+
+    ; Lucide's icons (ISC licence), 24×24, stroked.
+    sfn icon:string (name:string) {
+        if (name == "undo") { return "M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" }
+        if (name == "redo") { return "m15 14 5-5-5-5 M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" }
+        if (name == "painter") { return "M18 4H6a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z M20 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-8.5 M12 12v3 M11 15h2v6h-2z" }
+        if (name == "bold") { return "M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8" }
+        if (name == "italic") { return "M19 4h-9 M14 20H5 M15 4 9 20" }
+        if (name == "underline") { return "M6 4v6a6 6 0 0 0 12 0V4 M4 20h16" }
+        if (name == "strike") { return "M16 4H9a3 3 0 0 0-2.83 4 M14 12a4 4 0 0 1 0 8H6 M4 12h16" }
+        if (name == "color") { return "M5 16 12 3l7 13 M8 11h8" }
+        if (name == "fill") { return "m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11Z M5 2l5 5 M2 13h15" }
+        if (name == "left") { return "M21 6H3 M15 12H3 M17 18H3" }
+        if (name == "center") { return "M21 6H3 M17 12H7 M19 18H5" }
+        if (name == "right") { return "M21 6H3 M21 12H9 M21 18H7" }
+        if (name == "wrap") { return "M3 6h18 M3 12h15a3 3 0 1 1 0 6h-4 M16 16l-2 2 2 2 M3 18h7" }
+        if (name == "merge") { return "M3 5h18v14H3z M8 12h8 M6 10l-2 2 2 2 M18 10l2 2-2 2" }
+        if (name == "currency") { return "M12 2v20 M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" }
+        if (name == "percent") { return "M19 5 5 19 M6.5 4a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z M17.5 15a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z" }
+        if (name == "sortasc") { return "m3 8 4-4 4 4 M7 4v16 M11 12h4 M11 16h7 M11 20h10" }
+        if (name == "sortdesc") { return "m3 16 4 4 4-4 M7 20V4 M11 4h10 M11 8h7 M11 12h4" }
+        if (name == "filterclear") { return "M13 3H2l8 9.46V19l4 2v-8.54l.9-1.06 M17 3l5 5 M22 3l-5 5" }
+        if (name == "freeze") { return "M3 3h18v18H3z M3 9h18 M9 3v18" }
+        if (name == "chart") { return "M3 3v16a2 2 0 0 0 2 2h16 M18 17V9 M13 17V5 M8 17v-3" }
+        if (name == "link") { return "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }
+        if (name == "find") { return "M11 3a8 8 0 1 0 0 16a8 8 0 1 0 0-16z M21 21l-4.3-4.3" }
+        if (name == "plus") { return "M12 5v14 M5 12h14" }
+        if (name == "chevron") { return "m6 9 6 6 6-6" }
+        if (name == "chevronRight") { return "m9 18 6-6-6-6" }
+        if (name == "check") { return "M20 6 9 17l-5-5" }
+        if (name == "dot") { return "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z" }
+        if (name == "logo") { return "M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M3 9h18 M3 15h18 M9 9v12 M15 9v12" }
+        return ""
+    }
+
+    ; =========================================================================
+    ; The page
+    ; =========================================================================
+
+    fn mount:void (parent:EVGElement c:UiCtl) {
+        push ui.ctls c
+        def el:EVGElement (unwrap c.rootEl)
+        parent.addChild(el)
+    }
+
+    fn buildChrome:void () {
+        def root:EVGElement (unwrap ui.root)
+        root.id = "root"
+        root.className = "sx-root"
+        UiTree.clearChildren(root)
+        def noCtls:[UiCtl]
+        ui.ctls = noCtls
+
+        ; The pieces the parameters keep.
+        def keep:[string] tools
+        def groups:[RibbonCtl] (this.ribbonGroups())
+        def gi:int 0
+        while (gi < (array_length groups)) {
+            def g:RibbonCtl (itemAt groups gi)
+            if ((array_length keep) > 0) {
+                g.keepOnly(keep)
+            }
+            gi = (gi + 1)
+        }
+
+        ; --- header --------------------------------------------------------
+        if (showMenubar || showTitle) {
+            headerEl.id = "sx-header"
+            headerEl.className = "sx-header"
+            UiTree.clearChildren(headerEl)
+            if showTitle {
+                def brand:EVGElement (EVGElement.createDiv())
+                brand.className = "sx-brand"
+                brand.addChild((RibbonCtl.glyph((SheetsApp.icon("logo")) "sx-logo")))
+                titleEl.className = "sx-title"
+                titleEl.elementType = 1
+                titleEl.textContent = title
+                brand.addChild(titleEl)
+                headerEl.addChild(brand)
+            }
+            if showMenubar {
+                this.mount(headerEl menubar)
+            }
+            def spacer:EVGElement (EVGElement.createDiv())
+            spacer.className = "sx-spacer"
+            headerEl.addChild(spacer)
+            badgeEl.className = "sx-badge"
+            badgeEl.elementType = 1
+            badgeEl.textContent = "Read-only"
+            if readOnly {
+                headerEl.addChild(badgeEl)
+            }
+            docEl.className = "sx-doc"
+            docEl.elementType = 1
+            headerEl.addChild(docEl)
+            root.addChild(headerEl)
+        }
+
+        ; --- ribbon ----------------------------------------------------------
+        if (showRibbon && (readOnly == false)) {
+            ribbonEl.id = "sx-ribbonbar"
+            ribbonEl.className = "sx-ribbonbar"
+            UiTree.clearChildren(ribbonEl)
+            this.mountGroup(history)
+            if (this.wantsTool("font")) {
+                this.mount(ribbonEl fontMenu)
+            }
+            if (this.wantsTool("size")) {
+                this.mount(ribbonEl sizeMenu)
+            }
+            this.mountGroup(textTools)
+            this.mountGroup(alignTools)
+            if (this.wantsTool("numfmt")) {
+                this.mount(ribbonEl numMenu)
+            }
+            this.mountGroup(numberTools)
+            if (this.wantsTool("borders")) {
+                this.mount(ribbonEl borderMenu)
+            }
+            this.mountGroup(dataTools)
+            this.mountGroup(insertTools)
+            root.addChild(ribbonEl)
+        }
+
+        ; --- the grid --------------------------------------------------------
+        gridEl.id = "sx-grid"
+        gridEl.className = "sx-grid"
+        root.addChild(gridEl)
+
+        ; --- footer: sheet tabs and the status line ------------------------
+        if (showTabs || showStatus) {
+            footerEl.id = "sx-footer"
+            footerEl.className = "sx-footer"
+            UiTree.clearChildren(footerEl)
+            if showTabs {
+                this.mount(footerEl tabs)
+                if (readOnly == false) {
+                    this.mount(footerEl sheetTools)
+                }
+            }
+            def spacer2:EVGElement (EVGElement.createDiv())
+            spacer2.className = "sx-spacer"
+            footerEl.addChild(spacer2)
+            if showStatus {
+                statusEl.className = "sx-status"
+                statusEl.elementType = 1
+                footerEl.addChild(statusEl)
+                statsEl.className = "sx-stats"
+                statsEl.elementType = 1
+                footerEl.addChild(statsEl)
+            }
+            root.addChild(footerEl)
+        }
+
+        ; --- the context menu holder (absolutely placed at the pointer) ----
+        ctxHolder.id = "sx-ctx-holder"
+        ctxHolder.className = "sx-ctx-holder"
+        UiTree.clearChildren(ctxHolder)
+        this.mount(ctxHolder ctxMenu)
+        root.addChild(ctxHolder)
+
+        grid.app.setChrome(false showFormulaBar false false)
+        grid.setReadOnly(readOnly)
+        this.sync()
+    }
+
+    fn wantsTool:boolean (value:string) {
+        if ((array_length tools) == 0) {
+            return true
+        }
+        return (RibbonCtl.listHas(tools value))
+    }
+
+    fn mountGroup:void (g:RibbonCtl) {
+        if ((g.buttonCount()) == 0) {
+            return
+        }
+        this.mount(ribbonEl g)
+    }
+
+    ; A parameter changed: models are rebuilt from scratch, because a tool
+    ; list that dropped a button cannot be undone by keeping the old group.
+    fn rebuildChrome:void () {
+        if (built == false) {
+            return
+        }
+        def noActions:[string:SxAction]
+        actions = noActions
+        this.buildModels()
+        this.buildChrome()
+    }
+
+    ; =========================================================================
+    ; State: the core decides, the chrome shows
+    ; =========================================================================
+
+    fn sync:void () {
+        def app:GridApp grid.app
+        def model:SpreadsheetModel app.model
+        def sel:GridSelection app.sel
+        def st:CellStyle (model.getCellStyle(sel.active.row sel.active.col))
+
+        textTools.setOn("bold" st.bold)
+        textTools.setOn("italic" st.italic)
+        textTools.setOn("underline" st.underline)
+        textTools.setOn("strike" st.strike)
+        if ((strlen st.textRgb) >= 4) {
+            textTools.setSwatch("color" st.textRgb)
+        }
+        alignTools.setOn("left" (st.alignSet && (st.align == "left")))
+        alignTools.setOn("center" (st.align == "center"))
+        alignTools.setOn("right" (st.align == "right"))
+        alignTools.setOn("wrap" st.wrapText)
+        alignTools.setOn("merge" ((strlen (model.mergeAt(sel.active.row sel.active.col))) > 0))
+        numberTools.setOn("currency" (GridFormat.isOn(st "numfmt" "currency")))
+        numberTools.setOn("percent" (GridFormat.isOn(st "numfmt" "percent")))
+        dataTools.setOn("freeze" ((model.freezeRows > 0) || (model.freezeCols > 0)))
+        history.setDisabled("undo" ((model.history.canUndo()) == false))
+        history.setDisabled("redo" ((model.history.canRedo()) == false))
+        history.setOn("painter" app.formatBrushArmed)
+
+        ; The font and size dropdowns name what the caret is on.
+        def fname:string st.fontName
+        if ((strlen fname) == 0) {
+            fname = "Open Sans"
+        }
+        fontMenu.name = fname
+        this.checkRadio(fontMenu fname)
+        def pt:string (SheetsApp.ptText(st.fontSizePt))
+        sizeMenu.name = pt
+        this.checkRadio(sizeMenu pt)
+
+        ; The View menu's checkboxes say what is shown.
+        def vm:UiMenu (menubar.menuAt("view"))
+        this.setChecked(vm.menu "showformula" showFormulaBar)
+        this.setChecked(vm.menu "showtabs" showTabs)
+        this.setChecked(vm.menu "showstatus" showStatus)
+        this.setChecked(vm.menu "showribbon" showRibbon)
+        this.setChecked(vm.menu "themelight" (theme == "light"))
+        this.setChecked(vm.menu "themedark" (theme == "dark"))
+        this.setChecked(vm.menu "rtl" app.uiRtl)
+
+        this.syncTabs()
+
+        ; The header and the status line.
+        def src:string app.book.sourcePath
+        if ((strlen src) == 0) {
+            src = "Untitled.xlsx"
+        }
+        docEl.textContent = (SheetsApp.baseName(src))
+        statusEl.textContent = (this.statusText())
+        statsEl.textContent = (this.statsText())
+
+        def groups:[RibbonCtl] (this.ribbonGroups())
+        def i:int 0
+        while (i < (array_length groups)) {
+            def g:RibbonCtl (itemAt groups i)
+            g.build()
+            i = (i + 1)
+        }
+        sheetTools.build()
+        menubar.build()
+        fontMenu.build()
+        sizeMenu.build()
+        numMenu.build()
+        borderMenu.build()
+        ctxMenu.build()
+        tabs.build()
+        ; The grid is what a tab shows, and it is drawn beside the tabs, not in
+        ; them: the controller's panel leaves the tree.
+        def troot:EVGElement (unwrap tabs.rootEl)
+        def onlyList:[EVGElement]
+        push onlyList (unwrap tabs.listEl)
+        troot.children = onlyList
+    }
+
+    sfn baseName:string (p:string) {
+        def i:int ((strlen p) - 1)
+        while (i >= 0) {
+            def ch:int (charAt p i)
+            if ((ch == 47) || (ch == 92)) {
+                return (substring p (i + 1) (strlen p))
+            }
+            i = (i - 1)
+        }
+        return p
+    }
+
+    sfn ptText:string (pt:double) {
+        def whole:int (to_int (pt + 0.0001))
+        if (((to_double whole) - pt) == 0.0) {
+            return (to_string whole)
+        }
+        def tenths:int (to_int ((pt * 10.0) + 0.5))
+        return ((to_string (idiv tenths 10)) + "." + (to_string (tenths - ((idiv tenths 10) * 10))))
+    }
+
+    fn checkRadio:void (mc:MenuCtl name:string) {
+        def i:int 0
+        while (i < (array_length mc.items)) {
+            def it:UiItem (itemAt mc.items i)
+            if (it.kind == "radio") {
+                it.checked = (it.name == name)
+            }
+            i = (i + 1)
+        }
+    }
+
+    fn setChecked:void (mc:MenuCtl value:string on:boolean) {
+        def i:int 0
+        while (i < (array_length mc.items)) {
+            def it:UiItem (itemAt mc.items i)
+            if (it.value == value) {
+                it.checked = on
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; The tabs are the workbook's sheets, by index. Rebuilt only when the
+    ; names changed, so a reader's place in the list survives an edit.
+    fn syncTabs:void () {
+        def book:WorkbookModel grid.app.book
+        def n:int (book.sheetCount())
+        def same:boolean ((array_length tabs.items) == n)
+        if same {
+            def i:int 0
+            while (i < n) {
+                def it:UiItem (itemAt tabs.items i)
+                def sh:SpreadsheetModel (book.sheetAt(i))
+                if (it.name != sh.name) {
+                    same = false
+                }
+                i = (i + 1)
+            }
+        }
+        if (same == false) {
+            def empty:[UiItem]
+            tabs.items = empty
+            def j:int 0
+            while (j < n) {
+                def sh2:SpreadsheetModel (book.sheetAt(j))
+                tabs.addItem((to_string j) sh2.name "" false)
+                j = (j + 1)
+            }
+        }
+        tabs.value = (to_string book.activeIndex)
+        if ((strlen tabs.rovingValue) == 0) {
+            tabs.rovingValue = tabs.value
+        }
+        if (gridFocused || ((tabs.owns(ui.focusId)) == false)) {
+            tabs.rovingValue = tabs.value
+        }
+    }
+
+    fn statusText:string () {
+        def app:GridApp grid.app
+        if app.editing {
+            if ((strlen app.editBuf) > 0) {
+                if ((charAt app.editBuf 0) == 61) {
+                    return "Editing a formula — click cells to insert references"
+                }
+            }
+            return "Editing — Enter to keep, Esc to cancel"
+        }
+        def s:string app.view.status
+        if ((strlen s) > 1) {
+            ; The core's version stamp ("v12") is a debugging aid, not news.
+            if (((charAt s 0) == 118) && ((strlen s) < 8)) {
+                return "Ready"
+            }
+            return s
+        }
+        return "Ready"
+    }
+
+    fn statsText:string () {
+        def app:GridApp grid.app
+        if (app.sel.isSingle()) {
+            return ""
+        }
+        ; Read the figures straight from the model rather than parsing the JSON
+        ; back: same walk, same cap.
+        def st:SxStats (SxStats.of(app))
+        if (st.count == 0) {
+            return ""
+        }
+        if (st.nums == 0) {
+            return ("Count " + (to_string st.count))
+        }
+        def avg:double (st.sum / (to_double st.nums))
+        return ((("Sum " + (SheetsApp.num(st.sum))) + "   Average " + (SheetsApp.num(avg))) + "   Count " + (to_string st.count))
+    }
+
+    ; A figure for the status line: thousands grouped, at most two decimals.
+    sfn num:string (v:double) {
+        def neg:boolean (v < 0.0)
+        def a:double v
+        if neg {
+            a = (0.0 - v)
+        }
+        def cents:int (to_int ((a * 100.0) + 0.5))
+        def whole:int (idiv cents 100)
+        def frac:int (cents - (whole * 100))
+        def ws:string (to_string whole)
+        def grouped:string ""
+        def n:int (strlen ws)
+        def i:int 0
+        while (i < n) {
+            if ((i > 0) && ((idiv (n - i) 3) * 3) == (n - i)) {
+                grouped = (grouped + ",")
+            }
+            grouped = (grouped + (substring ws i (i + 1)))
+            i = (i + 1)
+        }
+        def out:string grouped
+        if (frac > 0) {
+            def fs:string (to_string frac)
+            if (frac < 10) {
+                fs = ("0" + fs)
+            }
+            if ((charAt fs 1) == 48) {
+                fs = (substring fs 0 1)
+            }
+            out = (out + "." + fs)
+        }
+        if neg {
+            out = ("-" + out)
+        }
+        return out
+    }
+
+    ; =========================================================================
+    ; Drawing
+    ; =========================================================================
+
+    ; The labels of a dropdown trigger and of menu rows are one text leaf as
+    ; EVGUI builds them; a trigger also wants a chevron, a row its shortcut and
+    ; a tick. Added here, after the controllers built and before the layout,
+    ; and only on rows that are still bare — so it is safe every frame.
+    fn decorate:void (el:EVGElement) {
+        def cls:string el.className
+        def isTrigger:boolean ((indexOf cls "ui-dropdownmenu-trigger") == 0)
+        def isItem:boolean (((indexOf cls "ui-dropdownmenu-item") == 0) || ((indexOf cls "ui-contextmenu-item") == 0) || ((indexOf cls "ui-menubar-item") == 0))
+        if ((isTrigger || isItem) && (el.elementType == 1) && ((strlen el.textContent) > 0)) {
+            def words:string el.textContent
+            el.textContent = ""
+            el.elementType = 0
+            def kids:[EVGElement] el.children
+            def empty:[EVGElement]
+            el.children = empty
+            if isItem {
+                def mark:EVGElement (EVGElement.createDiv())
+                mark.className = "sx-mark"
+                mark.a11yHidden = true
+                if ((indexOf cls "state-checked") >= 0) {
+                    def radio:boolean (this.isRadioRow(el.id))
+                    if radio {
+                        mark.addChild((RibbonCtl.glyph((SheetsApp.icon("dot")) "sx-mark-dot")))
+                    } {
+                        mark.addChild((RibbonCtl.glyph((SheetsApp.icon("check")) "sx-mark-check")))
+                    }
+                }
+                el.addChild(mark)
+            }
+            def label:EVGElement (EVGElement.createSpan())
+            label.className = "sx-menu-label"
+            label.textContent = words
+            label.elementType = 1
+            label.a11yHidden = true
+            el.addChild(label)
+            if isItem {
+                def sc:string (this.shortcutOf(el.id))
+                if ((strlen sc) > 0) {
+                    def scEl:EVGElement (EVGElement.createSpan())
+                    scEl.className = "sx-menu-shortcut"
+                    scEl.textContent = sc
+                    scEl.elementType = 1
+                    scEl.a11yHidden = true
+                    el.addChild(scEl)
+                }
+                if ((indexOf cls "subtrigger") >= 0) {
+                    el.addChild((RibbonCtl.glyph((SheetsApp.icon("chevronRight")) "sx-menu-chevron")))
+                }
+            }
+            if isTrigger {
+                el.addChild((RibbonCtl.glyph((SheetsApp.icon("chevron")) "sx-trigger-chevron")))
+            }
+            ; A submenu surface hangs off its row: keep it after the label.
+            def k:int 0
+            while (k < (array_length kids)) {
+                el.addChild((itemAt kids k))
+                k = (k + 1)
+            }
+            return
+        }
+        def i:int 0
+        while (i < (array_length el.children)) {
+            this.decorate((itemAt el.children i))
+            i = (i + 1)
+        }
+    }
+
+    fn isRadioRow:boolean (tid:string) {
+        def menus:[MenuCtl] (this.allMenus())
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            def idx:int (mc.rowIndexOf(tid))
+            if (idx >= 0) {
+                return ((itemAt mc.rowKind idx) == "radio")
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    fn shortcutOf:string (tid:string) {
+        def v:string (this.leafValueOf(tid))
+        if ((strlen v) == 0) {
+            return ""
+        }
+        if (has actions v) {
+            def a:SxAction (unwrap (get actions v))
+            return a.shortcut
+        }
+        return ""
+    }
+
+    fn allMenus:[MenuCtl] () {
+        def a:[MenuCtl]
+        def i:int 0
+        while (i < (array_length menubar.menus)) {
+            def m:UiMenu (itemAt menubar.menus i)
+            push a m.menu
+            i = (i + 1)
+        }
+        push a fontMenu
+        push a sizeMenu
+        push a numMenu
+        push a borderMenu
+        push a ctxMenu
+        return a
+    }
+
+    fn layout:EVGElement () {
+        def root:EVGElement (unwrap ui.root)
+        this.decorate(root)
+        ; The context menu sits where it was asked for.
+        if ctxOpen {
+            UiTree.inline(ctxHolder "left" ((to_string ctxX) + "px"))
+            UiTree.inline(ctxHolder "top" ((to_string ctxY) + "px"))
+        }
+        def page:EVGElement (ui.layout())
+        ; The grid takes what the bars leave. Measured rather than left to
+        ; flex-grow: the ribbon wraps onto a second row on a narrow page, and
+        ; the height it wraps to is only known once it has been laid out.
+        def used:double 0.0
+        def ki:int 0
+        while (ki < (array_length root.children)) {
+            def kid:EVGElement (itemAt root.children ki)
+            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder")) {
+                used = (used + kid.calculatedHeight + 1.0)
+            }
+            ki = (ki + 1)
+        }
+        def wantH:int (to_int (pageH - used))
+        if (wantH < 40) {
+            wantH = 40
+        }
+        if (wantH != (to_int gridEl.calculatedHeight)) {
+            UiTree.inline(gridEl "height" ((to_string wantH) + "px"))
+            page = (ui.layout())
+        }
+        def nx:int (to_int gridEl.calculatedX)
+        def ny:int (to_int gridEl.calculatedY)
+        def nw:int (to_int gridEl.calculatedWidth)
+        def nh:int (to_int gridEl.calculatedHeight)
+        if (nw < 40) {
+            nw = 40
+        }
+        if (nh < 40) {
+            nh = 40
+        }
+        gx = nx
+        gy = ny
+        if ((nw != gw) || (nh != gh)) {
+            gw = nw
+            gh = nh
+            grid.resize(gw gh)
+        }
+        return page
+    }
+
+    fn displayList:EVGDisplayList () {
+        def page:EVGElement (this.layout())
+        def gdl:EVGDisplayList (grid.app.sceneList())
+        gdl.offsetBy((to_double gx) (to_double gy))
+        def inGrid (new EVGDisplayList)
+        inGrid.addClip((to_double gx) (to_double gy) (to_double gw) (to_double gh))
+        inGrid.appendFrom(gdl)
+        inGrid.addClipEnd()
+        def lay (new EVGLayout())
+        lay.setPageSize(pageW pageH)
+        def dl (new EVGDisplayList())
+        dl.setTextEngine((lay.getTextEngine()))
+        dl.paintAt("sx-grid" inGrid)
+        dl.build(page)
+        return dl
+    }
+
+    fn scene:string () {
+        def dl:EVGDisplayList (this.displayList())
+        return ("{\"width\":" + (EVGDisplayList.num(pageW)) + ",\"height\":" + (EVGDisplayList.num(pageH)) + ",\"list\":" + (dl.toJson()) + "}")
+    }
+
+    ; One tree for a reader: the chrome's, with the core's hung under a region
+    ; at the grid's rectangle. Ask for the scene first; this reads its layout.
+    fn a11yTree:EVGA11yTree () {
+        def t:EVGA11yTree (ui.a11yTree())
+        def rootNode:EVGA11yNode (t.find("root"))
+        rootNode.name = title
+        ; The font and size triggers are named by what they show ("Open Sans",
+        ; "11"); a reader also needs to hear what they are for.
+        def fontNode:EVGA11yNode (t.find((fontMenu.triggerTid())))
+        if ((strlen fontNode.id) > 0) {
+            fontNode.name = ("Font: " + fontNode.name)
+        }
+        def sizeNode:EVGA11yNode (t.find((sizeMenu.triggerTid())))
+        if ((strlen sizeNode.id) > 0) {
+            sizeNode.name = ("Font size: " + sizeNode.name)
+        }
+        def region:EVGA11yNode (t.node("sx-grid" "root" (EVGA11yRole.region())))
+        region.name = "Spreadsheet"
+        t.place(region gx gy gw gh)
+        def g:EVGA11yTree (grid.app.a11yTree())
+        def i:int 0
+        while (i < (array_length g.nodes)) {
+            def n:EVGA11yNode (itemAt g.nodes i)
+            if ((strlen n.parentId) == 0) {
+                n.parentId = "sx-grid"
+            }
+            n.x = (n.x + gx)
+            n.y = (n.y + gy)
+            push t.nodes n
+            i = (i + 1)
+        }
+        if showStatus {
+            def live:EVGA11yNode (t.statusRegion("sx-status" "root" (this.statusText())))
+            t.place(live (to_int statusEl.calculatedX) (to_int statusEl.calculatedY) (to_int statusEl.calculatedWidth) (to_int statusEl.calculatedHeight))
+            def stats:EVGA11yNode (t.label("sx-stats" "root" (this.statsText())))
+            t.place(stats (to_int statsEl.calculatedX) (to_int statsEl.calculatedY) (to_int statsEl.calculatedWidth) (to_int statsEl.calculatedHeight))
+        }
+        if (gridFocused || ((strlen ui.focusId) == 0)) {
+            t.setFocus(g.focusId)
+        } {
+            t.setFocus(ui.focusId)
+        }
+        return t
+    }
+
+    fn a11y:string () {
+        def t:EVGA11yTree (this.a11yTree())
+        return (t.toJson())
+    }
+
+    fn width:int () {
+        return (to_int pageW)
+    }
+
+    fn height:int () {
+        return (to_int pageH)
+    }
+
+    ; =========================================================================
+    ; Input
+    ; =========================================================================
+
+    fn insideGrid:boolean (x:int y:int) {
+        return ((x >= gx) && (y >= gy) && (x < (gx + gw)) && (y < (gy + gh)))
+    }
+
+    fn anyMenuOpen:boolean () {
+        if ((strlen menubar.openValue) > 0) {
+            return true
+        }
+        if (fontMenu.open || sizeMenu.open || numMenu.open || borderMenu.open || ctxMenu.open) {
+            return true
+        }
+        return false
+    }
+
+    fn closeMenus:void () {
+        if ((strlen menubar.openValue) > 0) {
+            menubar.closeMenu()
+        }
+        def menus:[MenuCtl] (this.allMenus())
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            if mc.open {
+                mc.closeMenu()
+            }
+            i = (i + 1)
+        }
+        ctxOpen = false
+    }
+
+    ; The value of the menu row `tid` names, when that row is a leaf a press
+    ; would choose — "" for a trigger, a submenu row, a separator, a disabled
+    ; row or anything that is not a menu row.
+    fn leafValueOf:string (tid:string) {
+        def menus:[MenuCtl] (this.allMenus())
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            def idx:int (mc.rowIndexOf(tid))
+            if (idx >= 0) {
+                if (itemAt mc.rowIsSub idx) {
+                    return ""
+                }
+                if (itemAt mc.rowDisabled idx) {
+                    return ""
+                }
+                def it:UiItem (itemAt mc.rowItem idx)
+                return it.value
+            }
+            i = (i + 1)
+        }
+        return ""
+    }
+
+    ; What pressing `target` will choose, worked out BEFORE the press: the
+    ; controllers close a menu as they choose from it, and after that the row
+    ; is gone.
+    fn choiceOf:string (target:string) {
+        def leaf:string (this.leafValueOf(target))
+        if ((strlen leaf) > 0) {
+            return leaf
+        }
+        return ""
+    }
+
+    fn pointer:void (x:int y:int down:boolean shift:boolean ctrl:boolean) {
+        if gridCapture {
+            grid.pointer((x - gx) (y - gy) down shift ctrl)
+            if (down == false) {
+                gridCapture = false
+                held = false
+            }
+            this.sync()
+            return
+        }
+        ; A press is an edge: the button held over the chrome is not pressed
+        ; again on every move.
+        if (down && held) {
+            return
+        }
+        held = down
+        if (down == false) {
+            ; A move or a release over the chrome.
+            ui.pointerUp()
+            def over:string (ui.hitTest((to_double x) (to_double y)))
+            if ((strlen over) > 0) {
+                ui.hover(over)
+            } {
+                ui.unhover()
+                if (this.insideGrid(x y)) {
+                    grid.pointer((x - gx) (y - gy) false shift ctrl)
+                }
+            }
+            return
+        }
+        def target:string (ui.hitTest((to_double x) (to_double y)))
+        if ((strlen target) > 0) {
+            this.pressChrome(target shift ctrl)
+            return
+        }
+        ; A press outside an open menu closes it and does nothing else.
+        if (this.anyMenuOpen()) {
+            this.closeMenus()
+            ui.blur()
+            this.sync()
+            return
+        }
+        if (this.insideGrid(x y)) {
+            gridFocused = true
+            ui.blur()
+            gridCapture = true
+            grid.pointer((x - gx) (y - gy) true shift ctrl)
+            this.sync()
+        }
+    }
+
+    fn pressChrome:void (target:string shift:boolean ctrl:boolean) {
+        def choice:string (this.choiceOf(target))
+        ; A press on a trigger of another menu closes the open one first.
+        if ((ctxMenu.owns(target)) == false) {
+            if ctxMenu.open {
+                ctxMenu.closeMenu()
+                ctxOpen = false
+            }
+        }
+        def menus:[MenuCtl] ([] _:MenuCtl (fontMenu sizeMenu numMenu borderMenu))
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            if (mc.open && ((mc.owns(target)) == false)) {
+                mc.closeMenu()
+            }
+            i = (i + 1)
+        }
+        if (((strlen menubar.openValue) > 0) && ((menubar.owns(target)) == false)) {
+            menubar.closeMenu()
+        }
+        gridFocused = false
+        ui.pressTidValue = target
+        ui.clickWith(target shift ctrl)
+        this.afterChrome(target choice)
+    }
+
+    ; After the chrome took an input: run what it chose, and hand the keyboard
+    ; back to the sheet when a command ran — the way a spreadsheet's ribbon
+    ; does, so typing after Bold goes into the cell.
+    fn afterChrome:void (target:string choice:string) {
+        def ran:boolean false
+        if ((strlen choice) > 0) {
+            ran = (this.runAction(choice))
+            this.closeMenus()
+        }
+        def groups:[RibbonCtl] (this.ribbonGroups())
+        push groups sheetTools
+        def i:int 0
+        while (i < (array_length groups)) {
+            def g:RibbonCtl (itemAt groups i)
+            def v:string (g.takePressed())
+            if ((strlen v) > 0) {
+                ran = (this.runAction(v))
+            }
+            i = (i + 1)
+        }
+        ; A tab chosen is a sheet shown.
+        def want:int (?? (to_int tabs.value) 0)
+        if (tabs.owns(target) || (tabs.owns(ui.focusId))) {
+            if ((want != grid.app.book.activeIndex) && (want >= 0) && (want < (grid.app.book.sheetCount()))) {
+                grid.app.setActiveSheet(want)
+            }
+        }
+        if ran {
+            if ((grid.app.windows.anyModalVisible()) || ((this.anyMenuOpen()) == false)) {
+                gridFocused = true
+                ui.blur()
+            }
+        }
+        this.sync()
+    }
+
+    fn runAction:boolean (value:string) {
+        if ((has actions value) == false) {
+            return false
+        }
+        def a:SxAction (unwrap (get actions value))
+        def cmd:string a.command
+        if ((indexOf cmd "sx:") == 0) {
+            if (cmd == "sx:theme") {
+                return (this.setTheme(a.arg))
+            }
+            if (cmd == "sx:formulaBar") {
+                showFormulaBar = (showFormulaBar == false)
+            }
+            if (cmd == "sx:tabs") {
+                showTabs = (showTabs == false)
+            }
+            if (cmd == "sx:status") {
+                showStatus = (showStatus == false)
+            }
+            if (cmd == "sx:ribbon") {
+                showRibbon = (showRibbon == false)
+            }
+            this.rebuildChrome()
+            return true
+        }
+        return (grid.run(cmd a.arg))
+    }
+
+    ; The secondary button on the sheet: the cell under it joins (or becomes)
+    ; the selection, and the context menu opens at the pointer.
+    fn rightClick:void (x:int y:int) {
+        if ((this.insideGrid(x y)) == false) {
+            return
+        }
+        this.closeMenus()
+        def app:GridApp grid.app
+        def lx:int (x - gx)
+        def ly:int (y - gy)
+        def hit:CellPos (app.grid.hitTest(app.model lx ly))
+        if ((hit.row >= 0) && (hit.col >= 0)) {
+            if ((app.sel.contains(hit.row hit.col)) == false) {
+                grid.pointer(lx ly true false false)
+                grid.pointer(lx ly false false false)
+            }
+        }
+        if readOnly {
+            this.sync()
+            return
+        }
+        ctxX = x
+        ctxY = y
+        ctxOpen = true
+        gridFocused = false
+        def next:string (ctxMenu.contextClick((ctxMenu.triggerTid())))
+        if ((strlen next) > 0) {
+            ui.focusId = next
+        }
+        this.sync()
+    }
+
+    fn doubleClick:void (x:int y:int) {
+        def target:string (ui.hitTest((to_double x) (to_double y)))
+        if ((strlen target) > 0) {
+            if (tabs.owns(target)) {
+                if (readOnly == false) {
+                    gridFocused = true
+                    ui.blur()
+                    def ok:boolean (grid.run("sheet.rename" ""))
+                }
+            }
+            this.sync()
+            return
+        }
+        if (this.insideGrid(x y)) {
+            grid.autoFitAt((x - gx) (y - gy))
+            this.sync()
+        }
+    }
+
+    fn wheel:void (x:int y:int delta:int) {
+        if (this.insideGrid(x y)) {
+            grid.wheel((x - gx) (y - gy) delta)
+            this.sync()
+        }
+    }
+
+    fn wheelX:void (x:int y:int delta:int) {
+        if (this.insideGrid(x y)) {
+            grid.wheelX((x - gx) (y - gy) delta)
+            this.sync()
+        }
+    }
+
+    fn cursorAt:string (x:int y:int) {
+        if gridCapture {
+            return (grid.cursorAt((x - gx) (y - gy)))
+        }
+        def over:string (ui.hitTest((to_double x) (to_double y)))
+        if ((strlen over) > 0) {
+            return "pointer"
+        }
+        if (this.insideGrid(x y)) {
+            return (grid.cursorAt((x - gx) (y - gy)))
+        }
+        return "default"
+    }
+
+    ; Keys arrive by their DOM names ("ArrowLeft", "Enter", "F6", "a").
+    fn key:void (name:string shift:boolean ctrl:boolean) {
+        ; F6 walks the regions, the way an office suite does: menubar,
+        ; toolbar, sheet, tabs, and round again.
+        if (name == "F6") {
+            this.cycleRegion(shift)
+            this.sync()
+            return
+        }
+        ; F10 goes to the menubar, as on every desktop.
+        if (name == "F10") {
+            if showMenubar {
+                gridFocused = false
+                ui.focus((menubar.triggerTid("file")))
+            }
+            this.sync()
+            return
+        }
+        if ((this.anyMenuOpen()) || (gridFocused == false)) {
+            if ((name == "Escape") && ((this.anyMenuOpen()) == false)) {
+                gridFocused = true
+                ui.blur()
+                this.sync()
+                return
+            }
+            def target:string ui.focusId
+            def choice:string ""
+            if ((name == "Enter") || (name == " ")) {
+                choice = (this.choiceOf(target))
+            }
+            def wasCtx:boolean ctxMenu.open
+            ui.keyWith(name shift ctrl)
+            if (wasCtx && (ctxMenu.open == false)) {
+                ctxOpen = false
+                gridFocused = true
+            }
+            this.afterChrome(target choice)
+            if (((strlen ui.focusId) == 0) && ((this.anyMenuOpen()) == false)) {
+                gridFocused = true
+            }
+            return
+        }
+        def gk:string (SheetsApp.gridKeyName(name))
+        if ((strlen gk) > 0) {
+            grid.key(gk shift ctrl)
+        }
+        this.sync()
+    }
+
+    sfn gridKeyName:string (name:string) {
+        if (name == "Backspace") { return "backspace" }
+        if (name == "Enter") { return "enter" }
+        if (name == "Tab") { return "tab" }
+        if (name == "Escape") { return "escape" }
+        if (name == "ArrowLeft") { return "left" }
+        if (name == "ArrowRight") { return "right" }
+        if (name == "ArrowUp") { return "up" }
+        if (name == "ArrowDown") { return "down" }
+        if (name == "Delete") { return "delete" }
+        if (name == "Home") { return "home" }
+        if (name == "End") { return "end" }
+        if (name == "PageUp") { return "pageUp" }
+        if (name == "PageDown") { return "pageDown" }
+        if (name == "F2") { return "f2" }
+        return ""
+    }
+
+    ; Printable text, and Ctrl chords (`ctrl` true, `s` the letter). A chord
+    ; goes to the sheet wherever focus is: Ctrl+Z undoes from the toolbar too.
+    fn text:void (s:string shift:boolean ctrl:boolean) {
+        if ctrl {
+            grid.text(s shift true)
+            this.sync()
+            return
+        }
+        if ((this.anyMenuOpen()) || (gridFocused == false)) {
+            ui.type(s)
+            this.sync()
+            return
+        }
+        grid.text(s shift false)
+        this.sync()
+    }
+
+    fn pasteText:void (s:string) {
+        grid.pasteText(s)
+        this.sync()
+    }
+
+    fn idle:void () {
+        grid.idle()
+    }
+
+    fn coasting:boolean () {
+        return (grid.coasting())
+    }
+
+    ; One tick for the controllers: a submenu opens on a delay.
+    fn tick:boolean (dtMs:double) {
+        def busy:boolean (ui.tick(dtMs))
+        return (busy || (menubar.pendingSub()))
+    }
+
+    ; The regions F6 visits, in order, with the first focusable id of each.
+    fn regionStops:[string] () {
+        def a:[string]
+        if showMenubar {
+            push a (menubar.triggerTid("file"))
+        }
+        if (showRibbon && (readOnly == false)) {
+            def groups:[RibbonCtl] (this.ribbonGroups())
+            def i:int 0
+            def found:boolean false
+            while ((i < (array_length groups)) && (found == false)) {
+                def g:RibbonCtl (itemAt groups i)
+                if ((g.buttonCount()) > 0) {
+                    push a (g.itemTid(g.rovingValue))
+                    found = true
+                }
+                i = (i + 1)
+            }
+        }
+        push a "sx-grid"
+        if showTabs {
+            push a (tabs.tabTid(tabs.value))
+        }
+        return a
+    }
+
+    fn cycleRegion:void (back:boolean) {
+        this.closeMenus()
+        def stops:[string] (this.regionStops())
+        def n:int (array_length stops)
+        def cur:int 0
+        def i:int 0
+        while (i < n) {
+            def s:string (itemAt stops i)
+            if (s == "sx-grid") {
+                if gridFocused {
+                    cur = i
+                }
+            } {
+                if ((gridFocused == false) && (this.sameRegion(s ui.focusId))) {
+                    cur = i
+                }
+            }
+            i = (i + 1)
+        }
+        def next:int (cur + 1)
+        if back {
+            next = (cur - 1)
+        }
+        if (next >= n) {
+            next = 0
+        }
+        if (next < 0) {
+            next = (n - 1)
+        }
+        def want:string (itemAt stops next)
+        if (want == "sx-grid") {
+            gridFocused = true
+            ui.blur()
+        } {
+            gridFocused = false
+            ui.focus(want)
+        }
+    }
+
+    fn sameRegion:boolean (stop:string focus:string) {
+        if ((strlen focus) == 0) {
+            return false
+        }
+        if (menubar.owns(stop)) {
+            return (menubar.owns(focus))
+        }
+        if (tabs.owns(stop)) {
+            return (tabs.owns(focus))
+        }
+        ; Any ribbon control counts as the ribbon.
+        return ((indexOf focus "sx-rb-") == 0) || ((indexOf focus "sx-font") == 0) || ((indexOf focus "sx-size") == 0) || ((indexOf focus "sx-num") == 0) || ((indexOf focus "sx-borders") == 0)
+    }
+
+    ; Everything a page needs to know about the sheet, plus the chrome's own.
+    fn state:string () {
+        def s:string (grid.state())
+        def inner:string (substring s 1 ((strlen s) - 1))
+        return ("{\"gridFocused\":" + (GridApp.jsonBool(gridFocused)) + ",\"uiFocus\":" + (GridApp.jsonStr(ui.focusId)) + ",\"menuOpen\":" + (GridApp.jsonBool((this.anyMenuOpen()))) + ",\"options\":" + (this.optionsJson()) + "," + inner + "}")
+    }
+
+    ; Press a control by its id — what a test (or a reader's activation, which
+    ; the mirror turns into a press at the node's centre) does.
+    fn pressId:boolean (tid:string) {
+        def r:string (ui.rectOf(tid))
+        if ((strlen r) == 0) {
+            return false
+        }
+        def parts:[string] (strsplit r ",")
+        def x:int (?? (to_int (itemAt parts 0)) 0)
+        def y:int (?? (to_int (itemAt parts 1)) 0)
+        def w:int (?? (to_int (itemAt parts 2)) 0)
+        def h:int (?? (to_int (itemAt parts 3)) 0)
+        this.pointer((x + (idiv w 2)) (y + (idiv h 2)) true false false)
+        this.pointer((x + (idiv w 2)) (y + (idiv h 2)) false false false)
+        return true
+    }
+
+    fn rectOf:string (tid:string) {
+        return (ui.rectOf(tid))
+    }
+
+    ; The facade the page also reaches through: files, clipboard, requests.
+    fn takeFileRequest:string () {
+        return (grid.takeFileRequest())
+    }
+
+    fn copySeq:int () {
+        return (grid.copySeq())
+    }
+}
+
+; The selection's count and sum, from the model. A small class rather than
+; JSON parsed back, so the status line and `stateJson` count the same cells.
+class SxStats {
+    def count:int 0
+    def nums:int 0
+    def sum:double 0.0
+
+    Constructor () {
+    }
+
+    sfn of:SxStats (app:GridApp) {
+        def s (new SxStats())
+        def model:SpreadsheetModel app.model
+        def sel:GridSelection app.sel
+        def lastR:int (model.usedRow())
+        def lastC:int (model.usedCol())
+        def seen:int 0
+        def ri:int 0
+        while (ri < (sel.rangeCount())) {
+            def g:GridRange (sel.rangeAt(ri))
+            def r0:int g.r0
+            def r1:int g.r1
+            def c0:int g.c0
+            def c1:int g.c1
+            if (r0 > r1) {
+                def t:int r0
+                r0 = r1
+                r1 = t
+            }
+            if (c0 > c1) {
+                def t2:int c0
+                c0 = c1
+                c1 = t2
+            }
+            if (r1 > lastR) {
+                r1 = lastR
+            }
+            if (c1 > lastC) {
+                c1 = lastC
+            }
+            def r:int r0
+            while ((r <= r1) && (seen <= 50000)) {
+                def c:int c0
+                while (c <= c1) {
+                    seen = (seen + 1)
+                    def raw:string (trim (model.getCell(r c)))
+                    if ((strlen raw) > 0) {
+                        s.count = (s.count + 1)
+                        if (ChartData.looksNumeric(raw)) {
+                            s.sum = (s.sum + (ConditionalFormat.cellNumber(model r c)))
+                            s.nums = (s.nums + 1)
+                        }
+                    }
+                    c = (c + 1)
+                }
+                r = (r + 1)
+            }
+            ri = (ri + 1)
+        }
+        return s
+    }
+}

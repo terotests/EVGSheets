@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EVGSheets embeds</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2316a34a' stroke-width='2'%3E%3Crect x='3' y='3' width='18' height='18' rx='1'/%3E%3Cpath d='M3 9h18M3 15h18M9 9v12M15 9v12'/%3E%3C/svg%3E" />
+    <meta name="description" content="The same EVGSheets editor run with different parameters: full, compact, read-only viewer, bare grid, and inside a slide." />
+    <style>
+      :root {
+        --bg: #f8fafc; --card: #ffffff; --ink: #0f172a; --muted: #64748b; --rule: #e2e8f0;
+        --code: #f1f5f9; --accent: #2563eb; --slide-a: #1e3a8a; --slide-b: #0f172a;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1220; --card: #111827; --ink: #e5e7eb; --muted: #9ca3af; --rule: #1f2937;
+          --code: #1f2937; --accent: #60a5fa;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, sans-serif; }
+      header, main { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+      header { padding-top: 28px; }
+      h1 { margin: 0 0 6px; font-size: 26px; }
+      h2 { margin: 0 0 4px; font-size: 18px; }
+      p { margin: 0 0 10px; color: var(--muted); }
+      a { color: var(--accent); }
+      nav a { margin-right: 14px; }
+      section { background: var(--card); border: 1px solid var(--rule); border-radius: 12px; padding: 16px; margin: 18px 0; }
+      .frame { height: 380px; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+      .frame.tall { height: 520px; }
+      code, pre { background: var(--code); border-radius: 6px; font: 12.5px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+      code { padding: 1px 5px; }
+      pre { padding: 10px 12px; overflow-x: auto; margin: 10px 0 0; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+      .grid2 section { margin: 0; }
+      .slide {
+        aspect-ratio: 16 / 9; border-radius: 10px; padding: 4% 5%; color: #fff;
+        background: linear-gradient(135deg, var(--slide-a), var(--slide-b));
+        display: flex; flex-direction: column; gap: 3%;
+      }
+      .slide h3 { margin: 0; font-size: clamp(16px, 2.6vw, 30px); }
+      .slide .frame { flex: 1; height: auto; border: 0; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+      button {
+        font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+        border: 1px solid var(--rule); background: var(--card); color: var(--ink);
+      }
+    </style>
+    <script>globalThis.EVGSHEETS_BUILD = "__BUILD__";</script>
+  </head>
+  <body>
+    <header>
+      <h1>EVGSheets, run with parameters</h1>
+      <p>
+        One editor, one call: <code>mountSheets(element, options)</code>. Each frame below is the same
+        build with different options — which pieces are shown, which ribbon tools exist, and whether the
+        workbook can be changed. The same options work as URL parameters on the
+        <a href="./">editor page</a>, e.g. <a href="./?ui=compact&amp;theme=dark">?ui=compact&amp;theme=dark</a>
+        or <a href="./?ui=viewer">?ui=viewer</a>.
+      </p>
+      <nav><a href="./">Editor</a><a href="https://github.com/terotests/EVGSheets">Source</a></nav>
+    </header>
+    <main>
+      <section>
+        <h2>Compact, with chosen tools</h2>
+        <p>No menubar; the ribbon keeps only <code>undo,redo,bold,italic,left,center,right,sortasc,sortdesc,chart</code>.</p>
+        <div class="frame" id="compact"></div>
+        <pre>mountSheets(el, { ui: "compact", tools: "undo,redo,bold,italic,left,center,right,sortasc,sortdesc,chart" })</pre>
+      </section>
+
+      <div class="grid2">
+        <section>
+          <h2>Viewer (read-only)</h2>
+          <p>Select, scroll, copy, sort and filter; nothing writes into the workbook.</p>
+          <div class="frame" id="viewer"></div>
+          <pre>mountSheets(el, { ui: "viewer" })</pre>
+        </section>
+        <section>
+          <h2>Bare grid, dark</h2>
+          <p>Just the sheet, editable — for a host that brings its own controls.</p>
+          <div class="frame" id="bare"></div>
+          <pre>mountSheets(el, { ui: "grid", theme: "dark" })</pre>
+        </section>
+      </div>
+
+      <section>
+        <h2>Inside a slide</h2>
+        <p>
+          What a presentation would embed: the viewer, sized by the slide. The buttons switch the same instance
+          between viewing and editing without remounting it.
+        </p>
+        <div class="slide">
+          <h3>Quarterly figures</h3>
+          <div class="frame" id="slide"></div>
+        </div>
+        <div class="row">
+          <button id="edit">Edit</button>
+          <button id="view">Done</button>
+          <button id="theme">Toggle theme</button>
+        </div>
+      </section>
+    </main>
+    <script type="module">
+      import { mountSheets } from "./evgsheets.mjs?v=__BUILD__";
+      const book = "business-workbook.xlsx";
+      const made = {};
+      made.compact = await mountSheets(document.getElementById("compact"), {
+        ui: "compact", tools: "undo,redo,bold,italic,left,center,right,sortasc,sortdesc,chart",
+        xlsx: book, sheet: "Sales", theme: "light",
+      });
+      made.viewer = await mountSheets(document.getElementById("viewer"), { ui: "viewer", xlsx: book, sheet: "Summary", theme: "light" });
+      made.bare = await mountSheets(document.getElementById("bare"), { ui: "grid", xlsx: book, sheet: "Costs", theme: "dark" });
+      made.slide = await mountSheets(document.getElementById("slide"), { ui: "viewer", xlsx: book, sheet: "Forecast", theme: "light" });
+      let dark = false;
+      document.getElementById("edit").onclick = async () => {
+        await made.slide.setPreset("compact");
+        made.slide.focus();
+      };
+      document.getElementById("view").onclick = () => made.slide.setPreset("viewer");
+      document.getElementById("theme").onclick = () => {
+        dark = !dark;
+        made.slide.setTheme(dark ? "dark" : "light");
+      };
+      window.sheets = made;
+      window.__embedsReady = true;
+    </script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "evgsheets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A spreadsheet editor in Ranger: the datagrid core with an EVGUI interface, drawn by EVG through WebGL 2.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "serve": "node scripts/build.mjs && python3 -m http.server -d dist 8000",
+    "check": "node scripts/build.mjs && node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "playwright-core": "^1.55.0"
+  }
+}
