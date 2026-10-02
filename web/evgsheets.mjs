@@ -191,7 +191,11 @@ export async function mountSheets(container, options = {}) {
     return ok;
   }
   if (options.xlsx instanceof ArrayBuffer) {
-    await openBytes(options.xlsx, options.name);
+    // Opened here, before the drawing below exists; openBytes is for later.
+    if (!app.openWorkbook(asRangerBuffer(options.xlsx.slice(0)), options.name || "workbook.xlsx")) {
+      note = app.grid.note;
+      app.useDemo();
+    }
   } else if (typeof options.xlsx === "string" && options.xlsx) {
     try {
       const raw = await (await fetch(options.xlsx)).arrayBuffer();
