@@ -1924,12 +1924,6 @@ class SheetsApp {
         this.sync()
     }
 
-    ; Ctrl+Shift+V: the Paste special dialog, over the text the page was given.
-    fn pasteTextSpecial:void (s:string) {
-        grid.app.setClipboardText(s)
-        def opened:boolean (this.openPaste())
-    }
-
     fn idle:void () {
         grid.idle()
     }

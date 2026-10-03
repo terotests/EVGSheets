@@ -234,9 +234,9 @@ try {
   const pasted = await page.evaluate(() => [window.sheet.app.paste.win.open, window.sheet.app.grid.app.model.getCell(9, 5), window.sheet.app.grid.app.pasteMode]);
   ok("Paste pastes the value and closes", !pasted[0] && pasted[1] !== "" && !String(pasted[1]).startsWith("="), String(pasted[1]));
   ok("…and the next paste is a full one again", pasted[2] === 0);
-  await page.evaluate(() => window.sheet.app.pasteTextSpecial("7"));
+  await page.evaluate(() => window.sheet.run("edit.pasteSpecial", ""));
   await page.waitForTimeout(80);
-  ok("Ctrl+Shift+V's text opens it", await page.evaluate(() => window.sheet.app.paste.win.open));
+  ok("it opens again", await page.evaluate(() => window.sheet.app.paste.win.open));
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
   ok("Escape cancels it", await page.evaluate(() => !window.sheet.app.paste.win.open && window.sheet.app.gridFocused));
