@@ -36,10 +36,13 @@
       import { mountSheets, optionsFromQuery } from "./evgsheets.mjs?v=__BUILD__";
       const errorEl = document.getElementById("error");
       try {
+        // An empty workbook unless the address asks for one: ?xlsx=<url>,
+        // or ?demo for the sample business workbook.
         const opts = optionsFromQuery();
+        const demo = opts.demo && !opts.xlsx ? { xlsx: "business-workbook.xlsx", sheet: "Summary" } : {};
         const sheet = await mountSheets(document.getElementById("app"), {
-          xlsx: "business-workbook.xlsx",
-          sheet: "Summary",
+          blank: true,
+          ...demo,
           ...opts,
         });
         document.getElementById("loading").remove();

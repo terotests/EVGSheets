@@ -176,6 +176,12 @@ class SheetsApp {
         this.sync()
     }
 
+    ; One empty sheet, the same as File > New workbook.
+    fn useBlank:void () {
+        grid.app.newBlankWorkbook()
+        this.sync()
+    }
+
     fn openWorkbook:boolean (data:buffer name:string) {
         def ok:boolean (grid.openWorkbook(data name))
         this.sync()

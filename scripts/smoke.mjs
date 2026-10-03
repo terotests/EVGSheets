@@ -111,7 +111,14 @@ const state = (page) => page.evaluate(() => window.sheet.state());
 try {
   // --- the editor -------------------------------------------------------------
   console.log("== editor");
-  const page = await open("?theme=light");
+  const blank = await open("");
+  await blank.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
+  const bs = await state(blank);
+  const a1 = await blank.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 0));
+  ok("a plain visit opens an empty workbook", bs.sheets.length === 1 && !a1, bs.sheets.join(",") + " A1=" + a1);
+  await blank.close();
+
+  const page = await open("?demo&theme=light");
   await page.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
   ok("the editor started", await page.evaluate(() => !!window.__sheetsReady), await page.evaluate(() => window.__sheetsError || ""));
   let s = await state(page);
