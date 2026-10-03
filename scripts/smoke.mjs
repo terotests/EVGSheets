@@ -242,6 +242,41 @@ try {
   ok("Escape cancels it", await page.evaluate(() => !window.sheet.app.paste.win.open && window.sheet.app.gridFocused));
   await page.evaluate(() => window.sheet.run("edit.undo", ""));
 
+  // Rename sheet: an EVGUI dialog, which says why it refuses a name.
+  const oldName = await page.evaluate(() => window.sheet.app.grid.app.book.sheetAt(window.sheet.app.grid.app.book.activeIndex).name);
+  await page.evaluate(() => window.sheet.run("sheet.rename", ""));
+  await page.waitForTimeout(120);
+  ok("Rename opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.rename.win.open && !window.sheet.app.grid.app.renameDialog.visible && window.sheet.app.ui.focusId === "sx-rename-name"));
+  await page.keyboard.type("Bad/Name");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("a refused name keeps it open and says why", await page.evaluate(() => window.sheet.app.rename.win.open && window.sheet.app.rename.statusEl.textContent !== ""));
+  await shot(page, "07_rename");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Renamed");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Enter renames and closes", await page.evaluate(() => !window.sheet.app.rename.win.open && window.sheet.app.grid.app.book.sheetAt(window.sheet.app.grid.app.book.activeIndex).name === "Renamed"));
+  await page.evaluate((n) => window.sheet.run("sheet.rename", n), oldName);
+
+  // Link: an EVGUI dialog, from Ctrl+K too.
+  await page.evaluate(() => window.sheet.run("nav.goto", "H12"));
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(120);
+  ok("Ctrl+K opens Link as an EVGUI dialog", await page.evaluate(() => window.sheet.app.link.win.open && !window.sheet.app.grid.app.linkDialog.visible && window.sheet.app.ui.focusId === "sx-link-address"));
+  await page.keyboard.type("https://example.com");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("Example");
+  await shot(page, "08_link");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Enter sets the link and the text", await page.evaluate(() => { const a = window.sheet.app.grid.app; return !window.sheet.app.link.win.open && a.model.hyperlinkAt(11, 7) === "https://example.com" && a.model.getCell(11, 7) === "Example"; }));
+  await page.evaluate(() => window.sheet.run("insert.link", ""));
+  await page.waitForTimeout(80);
+  await click(page, "sx-link-remove");
+  ok("Remove takes the link off", await page.evaluate(() => !window.sheet.app.link.win.open && window.sheet.app.grid.app.model.hyperlinkAt(11, 7) === ""));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);

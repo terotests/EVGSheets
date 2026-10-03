@@ -94,6 +94,18 @@ class PasteDialog extends SxDialog {
         return (what.itemTid(what.value))
     }
 
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.pasteDialog.visible {
+            app.pasteDialog.close()
+            return true
+        }
+        return false
+    }
+
     fn act:boolean (target:string app:GridApp) {
         if (target == cancelBtn.tid) {
             this.close()

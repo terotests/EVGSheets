@@ -1,0 +1,130 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; RenameDialog — renaming a sheet, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Rename sheet ─────────────────────────────── × ┐
+;   │ Name   [Sheet1______________________]           │
+;   │ At most 31 characters.                          │
+;   │                              [Cancel] [Rename]  │
+;   └─────────────────────────────────────────────────┘
+;
+; The rules and the renaming stay the core's: renameSheetTo does it and
+; rewrites the formulas that name the sheet, and renameProblem says which rule
+; a refused name broke. The dialog stays open on a refusal, with the reason.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class RenameDialog extends SxDialog {
+    def nameIn:InputCtl (new InputCtl)
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def okBtn:ButtonCtl (new ButtonCtl)
+    def at:int 0
+
+    Constructor () {
+        this.setup("sx-rename" "Rename sheet")
+        this.field(nameIn "sx-rename-name" "Name")
+        this.button(cancelBtn "sx-rename-cancel" "Cancel" "secondary")
+        this.button(okBtn "sx-rename-ok" "Rename" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a nameIn
+        push a cancelBtn
+        push a okBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a nameIn.tid
+        push a cancelBtn.tid
+        push a okBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == cancelBtn.tid) || (target == okBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return (nameIn.owns(target))
+    }
+
+    fn defaultTid:string () {
+        return okBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.renameDialog.visible {
+            app.renameDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        def f1:EVGElement (this.row("sx-dlg-field"))
+        f1.addChild((this.label(nameIn.name)))
+        f1.addChild((unwrap nameIn.rootEl))
+        body.addChild(f1)
+        body.addChild((this.statusRow()))
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap cancelBtn.rootEl))
+        acts.addChild((unwrap okBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Opens on the sheet the core was asked to rename (renameIndex, which the
+    ; tab's double click and sheet.rename set), with its name selected.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        at = app.renameIndex
+        if ((at < 0) || (at >= (app.book.sheetCount()))) {
+            at = app.book.activeIndex
+        }
+        def sh:SpreadsheetModel (app.book.sheetAt(at))
+        nameIn.setValue(sh.name)
+        nameIn.selectAll()
+        app.renameStatus = ""
+        statusEl.textContent = ""
+        this.openOn(pageW pageH)
+        return nameIn.tid
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == cancelBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == okBtn.tid) {
+            if (app.renameSheetTo(at nameIn.value)) {
+                this.close()
+                return true
+            }
+            statusEl.textContent = (GridApp.renameProblem(app.book at nameIn.value))
+        }
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(nameIn focusId)
+    }
+}

@@ -46,6 +46,8 @@ Import "../../evgui/src/UiHost.rgr"
 Import "RibbonCtl.rgr"
 Import "FindDialog.rgr"
 Import "PasteDialog.rgr"
+Import "RenameDialog.rgr"
+Import "LinkDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -98,6 +100,8 @@ class SheetsApp {
     ; to the core's EVGWindow, moved over one at a time.
     def find:FindDialog (new FindDialog)
     def paste:PasteDialog (new PasteDialog)
+    def rename:RenameDialog (new RenameDialog)
+    def link:LinkDialog (new LinkDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -1549,6 +1553,8 @@ class SheetsApp {
         def a:[SxDialog]
         push a find
         push a paste
+        push a rename
+        push a link
         return a
     }
 
@@ -1583,14 +1589,14 @@ class SheetsApp {
     ; replaced: a command run straight on the grid, a shortcut the core reads
     ; itself. Whatever opened it, the app's dialog is shown instead.
     fn adoptCoreDialogs:void () {
-        def app:GridApp grid.app
-        if app.findDialog.visible {
-            app.findDialog.close()
-            def f:boolean (this.openFind())
-        }
-        if app.pasteDialog.visible {
-            app.pasteDialog.close()
-            def p:boolean (this.openPaste())
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if (d.adopt(grid.app)) {
+                def ok:boolean (this.openDlg(d))
+            }
+            i = (i + 1)
         }
     }
 
@@ -1602,17 +1608,20 @@ class SheetsApp {
         return true
     }
 
-    fn openFind:boolean () {
+    fn openDlg:boolean (d:SxDialog) {
         this.closeMenus()
-        return (this.shown((find.open(grid.app pageW pageH))))
+        if (readOnly && (d.writes())) {
+            return false
+        }
+        return (this.shown((d.open(grid.app pageW pageH))))
+    }
+
+    fn openFind:boolean () {
+        return (this.openDlg(find))
     }
 
     fn openPaste:boolean () {
-        this.closeMenus()
-        if readOnly {
-            return false
-        }
-        return (this.shown((paste.open(grid.app pageW pageH))))
+        return (this.openDlg(paste))
     }
 
     ; After a dialog took an input: a closed dialog gives the keyboard back
@@ -1721,6 +1730,13 @@ class SheetsApp {
         }
         if (cmd == "edit.pasteSpecial") {
             return (this.openPaste())
+        }
+        if (cmd == "insert.link") {
+            return (this.openDlg(link))
+        }
+        if ((cmd == "sheet.rename") && ((strlen a.arg) == 0)) {
+            grid.app.renameIndex = grid.app.book.activeIndex
+            return (this.openDlg(rename))
         }
         return (grid.run(cmd a.arg))
     }
