@@ -4,3 +4,4 @@ shots/
 bin/
 .stage/
 .deps/
+package-lock.json
