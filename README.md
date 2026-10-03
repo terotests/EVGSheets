@@ -20,8 +20,8 @@ embeds: <https://terotests.github.io/EVGSheets/embed.html>
 | Context menu on cells | `MenuCtl` in context mode |
 | Sheet tabs and adding a sheet | `TabsCtl`, `RibbonCtl` |
 | Status line: Ready / editing / what happened, and Sum, Average and Count of the selection | the app |
-| Find and replace dialog | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl` and `ButtonCtl`; the search is the core's |
-| Formula bar, grid, the other dialogs (colours, borders, chart picker, conditional formats, validation, paste special) | the datagrid core (`GridApp`) |
+| Dialogs: find and replace, paste special | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
+| Formula bar, grid, the other dialogs (colours, borders, chart picker, conditional formats, validation) | the datagrid core (`GridApp`) |
 | Light and dark | `@vars` palettes in `src/sheets.css`; the core's `modern` and `dark` grid themes |
 
 The two halves meet at the display list. The page is laid out by EVG, and
