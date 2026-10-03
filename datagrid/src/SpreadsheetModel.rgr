@@ -38,6 +38,23 @@ class CfRule {
 
     Constructor () {
     }
+
+    fn copy:CfRule () {
+        def r (new CfRule)
+        r.kind = kind
+        r.r0 = r0
+        r.c0 = c0
+        r.r1 = r1
+        r.c1 = c1
+        r.op = op
+        r.v1 = v1
+        r.v2 = v2
+        r.fillRgb = fillRgb
+        r.color0 = color0
+        r.color1 = color1
+        r.color2 = color2
+        return r
+    }
 }
 
 ; ------------------------------------------------------------------------------
@@ -415,6 +432,175 @@ class SpreadsheetModel {
         colGeomDirty = true
         version = (version + 1)
         this.ensureGeometry()
+    }
+
+    ; A copy of this sheet that shares nothing with it: what "Duplicate" on a
+    ; tab makes. Cells, formulas, styles, sizes, merges, rules, links, notes
+    ; and pictures come along. Tables do not — a table's name is workbook-wide,
+    ; so a second one under the same name would make `Table1[Amount]` mean two
+    ; things. The copy starts with an empty undo history and no source part.
+    fn duplicate:SpreadsheetModel () {
+        def c (new SpreadsheetModel)
+        c.name = name
+        c.rowCount = rowCount
+        c.colCount = colCount
+        c.defaultRowH = defaultRowH
+        c.defaultColW = defaultColW
+        c.defaultFontPt = defaultFontPt
+        c.freezeRows = freezeRows
+        c.freezeCols = freezeCols
+        c.filterCol = filterCol
+        c.filterEnabled = filterEnabled
+        c.sortCol = sortCol
+        c.sortAsc = sortAsc
+        c.usedMaxRow = usedMaxRow
+        c.usedMaxCol = usedMaxCol
+        ; A row map is keyed by column, and an int-keyed map has no `keys` on
+        ; every target, so the columns are walked: as far as any cell can be.
+        def lastCol:int colCount
+        if ((usedMaxCol + 1) > lastCol) {
+            lastCol = (usedMaxCol + 1)
+        }
+        def r:int 0
+        while (r < (array_length cellRows)) {
+            def src:[int:string] (itemAt cellRows r)
+            def row:[int:string]
+            def col:int 0
+            while (col < lastCol) {
+                if (has src col) {
+                    set row col (unwrap (get src col))
+                }
+                col = (col + 1)
+            }
+            push c.cellRows row
+            r = (r + 1)
+        }
+        def fk:int 0
+        while (fk < (array_length formulaKeys)) {
+            def k:string (itemAt formulaKeys fk)
+            if (has formulas k) {
+                set c.formulas k (unwrap (get formulas k))
+                push c.formulaKeys k
+            }
+            fk = (fk + 1)
+        }
+        def sk:[string] (keys cellStyleIds)
+        def si:int 0
+        while (si < (array_length sk)) {
+            def k2:string (itemAt sk si)
+            set c.cellStyleIds k2 (unwrap (get cellStyleIds k2))
+            si = (si + 1)
+        }
+        def st:int 0
+        while (st < (array_length styles)) {
+            def cs:CellStyle (itemAt styles st)
+            push c.styles (cs.copy())
+            st = (st + 1)
+        }
+        def mi:int 0
+        while (mi < (array_length merges)) {
+            push c.merges (itemAt merges mi)
+            mi = (mi + 1)
+        }
+        def ri:int 0
+        while (ri < (array_length rowHeights)) {
+            push c.rowHeights (itemAt rowHeights ri)
+            ri = (ri + 1)
+        }
+        def wi:int 0
+        while (wi < (array_length colWidths)) {
+            push c.colWidths (itemAt colWidths wi)
+            wi = (wi + 1)
+        }
+        def hi:int 0
+        while (hi < (array_length rowHidden)) {
+            push c.rowHidden (itemAt rowHidden hi)
+            hi = (hi + 1)
+        }
+        def hc:int 0
+        while (hc < (array_length colHidden)) {
+            push c.colHidden (itemAt colHidden hc)
+            hc = (hc + 1)
+        }
+        def rs:int 0
+        while (rs < (array_length rowSuppressed)) {
+            push c.rowSuppressed (itemAt rowSuppressed rs)
+            rs = (rs + 1)
+        }
+        def fv:int 0
+        while (fv < (array_length filterValues)) {
+            push c.filterValues (itemAt filterValues fv)
+            fv = (fv + 1)
+        }
+        def cf:int 0
+        while (cf < (array_length cfRules)) {
+            def rule:CfRule (itemAt cfRules cf)
+            push c.cfRules (rule.copy())
+            cf = (cf + 1)
+        }
+        def dv:int 0
+        while (dv < (array_length validations)) {
+            def v:DataValidation (itemAt validations dv)
+            push c.validations (v.copy())
+            dv = (dv + 1)
+        }
+        def sp:int 0
+        while (sp < (array_length spillKeys)) {
+            def k3:string (itemAt spillKeys sp)
+            push c.spillKeys k3
+            if (has spillSize k3) {
+                set c.spillSize k3 (unwrap (get spillSize k3))
+            }
+            sp = (sp + 1)
+        }
+        def ok:[string] (keys spillOwner)
+        def oi:int 0
+        while (oi < (array_length ok)) {
+            def k4:string (itemAt ok oi)
+            set c.spillOwner k4 (unwrap (get spillOwner k4))
+            oi = (oi + 1)
+        }
+        def im:int 0
+        while (im < (array_length images)) {
+            def pic:SheetImage (itemAt images im)
+            def pc (new SheetImage)
+            pc.copyFrom(pic)
+            push c.images pc
+            im = (im + 1)
+        }
+        def rk:int 0
+        while (rk < (array_length richKeys)) {
+            def k5:string (itemAt richKeys rk)
+            if (has richCells k5) {
+                def rt:RichText (unwrap (get richCells k5))
+                set c.richCells k5 (rt.copy())
+                push c.richKeys k5
+            }
+            rk = (rk + 1)
+        }
+        def lk:int 0
+        while (lk < (array_length linkKeys)) {
+            def k6:string (itemAt linkKeys lk)
+            if (has links k6) {
+                set c.links k6 (unwrap (get links k6))
+                push c.linkKeys k6
+            }
+            lk = (lk + 1)
+        }
+        def nk:int 0
+        while (nk < (array_length noteKeys)) {
+            def k7:string (itemAt noteKeys nk)
+            if (has notes k7) {
+                set c.notes k7 (unwrap (get notes k7))
+                push c.noteKeys k7
+            }
+            nk = (nk + 1)
+        }
+        c.rowGeomDirty = true
+        c.colGeomDirty = true
+        c.version = (c.version + 1)
+        c.ensureGeometry()
+        return c
     }
 
     fn cellKey:string (row:int col:int) {

@@ -143,6 +143,58 @@ class WorkbookModel {
         activeIndex = (WorkbookModel.remapIndex(activeIndex from dest))
     }
 
+    ; Take the sheet at `at` out. The last sheet stays: a workbook with no
+    ; sheet has nothing to show and Excel refuses it too. The sheet you were
+    ; on stays the one you are on; if it was the one removed, the one that
+    ; slid into its place is (the one before it, at the end).
+    fn removeSheet:boolean (at:int) {
+        def n:int (array_length sheets)
+        if ((at < 0) || (at >= n) || (n <= 1)) {
+            return false
+        }
+        def kept:[SpreadsheetModel]
+        def i:int 0
+        while (i < n) {
+            if (i != at) {
+                push kept (itemAt sheets i)
+            }
+            i = (i + 1)
+        }
+        clear sheets
+        def k:int 0
+        while (k < (array_length kept)) {
+            push sheets (itemAt kept k)
+            k = (k + 1)
+        }
+        if (activeIndex > at) {
+            activeIndex = (activeIndex - 1)
+        }
+        if (activeIndex >= (array_length sheets)) {
+            activeIndex = ((array_length sheets) - 1)
+        }
+        return true
+    }
+
+    ; The name a copy of `base` gets: Excel's "Sheet1 (2)", counting up, and
+    ; cut so the whole still fits the 31 characters a name may have.
+    fn copyName:string (base:string) {
+        def n:int 2
+        while (n < 10000) {
+            def tail:string ((" (" + (to_string n)) + ")")
+            def head:string base
+            def room:int (31 - (strlen tail))
+            if ((strlen head) > room) {
+                head = (substring head 0 room)
+            }
+            def candidate:string (head + tail)
+            if ((this.indexOfName(candidate)) < 0) {
+                return candidate
+            }
+            n = (n + 1)
+        }
+        return (this.nextSheetName())
+    }
+
     ; Where the sheet that was at `idx` ends up when the one at `from` is moved
     ; to `to`. Everything between the two shifts by one, in the direction
     ; opposite to the move.

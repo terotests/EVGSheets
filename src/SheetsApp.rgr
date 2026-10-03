@@ -48,6 +48,7 @@ Import "SheetsEdits.rgr"
 Import "FindDialog.rgr"
 Import "PasteDialog.rgr"
 Import "RenameDialog.rgr"
+Import "DeleteSheetDialog.rgr"
 Import "LinkDialog.rgr"
 Import "ColorDialog.rgr"
 Import "BorderDialog.rgr"
@@ -119,6 +120,7 @@ class SheetsApp {
     def chart:ChartDialog (new ChartDialog)
     def sql:SqlDialog (new SqlDialog)
     def conn:ConnDialog (new ConnDialog)
+    def delSheet:DeleteSheetDialog (new DeleteSheetDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -160,6 +162,13 @@ class SheetsApp {
     ; because they name the columns or rows they act on.
     def ctxKind:string "cell"
     def cellItems:[UiItem]
+    ; A tab carried along the strip. `tabDrag` is the sheet held (-1: none),
+    ; `tabDropAt` where it would land, shown by drawing the tabs in that
+    ; order; the sheet itself moves once, on release.
+    def tabDrag:int -1
+    def tabDropAt:int -1
+    def tabDragX:int 0
+    def tabDragMoved:boolean false
     def lastSheetsKey:string ""
     def built:boolean false
 
@@ -468,6 +477,7 @@ class SheetsApp {
         this.item(ins "link" "Link…" "insert.link" "" "Ctrl+K")
         ins.addSeparator()
         this.item(ins "sheet" "New sheet" "sheet.add" "" "")
+        this.item(ins "dupsheet" "Duplicate sheet" "sheet.duplicate" "" "")
 
         def fm:MenuCtl (menubar.attachMenu("format"))
         this.item(fm "fbold" "Bold" "format.bold" "" "Ctrl+B")
@@ -1028,13 +1038,15 @@ class SheetsApp {
     fn syncTabs:void () {
         def book:WorkbookModel grid.app.book
         def n:int (book.sheetCount())
+        def order:[int] (this.tabOrder())
         def same:boolean ((array_length tabs.items) == n)
         if same {
             def i:int 0
             while (i < n) {
                 def it:UiItem (itemAt tabs.items i)
-                def sh:SpreadsheetModel (book.sheetAt(i))
-                if (it.name != sh.name) {
+                def at:int (itemAt order i)
+                def sh:SpreadsheetModel (book.sheetAt(at))
+                if ((it.name != sh.name) || (it.value != (to_string at))) {
                     same = false
                 }
                 i = (i + 1)
@@ -1045,8 +1057,9 @@ class SheetsApp {
             tabs.items = empty
             def j:int 0
             while (j < n) {
-                def sh2:SpreadsheetModel (book.sheetAt(j))
-                tabs.addItem((to_string j) sh2.name "" false)
+                def at2:int (itemAt order j)
+                def sh2:SpreadsheetModel (book.sheetAt(at2))
+                tabs.addItem((to_string at2) sh2.name "" false)
                 j = (j + 1)
             }
         }
@@ -1057,6 +1070,139 @@ class SheetsApp {
         if (gridFocused || ((tabs.owns(ui.focusId)) == false)) {
             tabs.rovingValue = tabs.value
         }
+    }
+
+    ; The sheets in the order the strip draws them: the workbook's, except
+    ; while a tab is carried, when the carried one sits where it would land.
+    fn tabOrder:[int] () {
+        def out:[int]
+        def n:int (grid.app.book.sheetCount())
+        def carrying:boolean ((tabDrag >= 0) && (tabDrag < n) && (tabDropAt >= 0) && (tabDropAt < n))
+        def i:int 0
+        while (i < n) {
+            if ((carrying == false) || (i != tabDrag)) {
+                push out i
+            }
+            i = (i + 1)
+        }
+        if carrying {
+            def kept:[int]
+            def k:int 0
+            while (k < (array_length out)) {
+                if (k == tabDropAt) {
+                    push kept tabDrag
+                }
+                push kept (itemAt out k)
+                k = (k + 1)
+            }
+            if (tabDropAt >= (array_length out)) {
+                push kept tabDrag
+            }
+            return kept
+        }
+        return out
+    }
+
+    ; The sheet a tab target names, or -1.
+    fn tabSheetOf:int (target:string) {
+        def n:int (grid.app.book.sheetCount())
+        def i:int 0
+        while (i < n) {
+            if ((tabs.tabTid((to_string i))) == target) {
+                return i
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
+    ; [x, w] of the tab drawn at strip position `pos`, from the last layout.
+    fn tabSpan:[int] (pos:int) {
+        def out:[int]
+        def order:[int] (this.tabOrder())
+        if ((pos < 0) || (pos >= (array_length order))) {
+            return out
+        }
+        def r:string (ui.rectOf((tabs.tabTid((to_string (itemAt order pos))))))
+        if ((strlen r) == 0) {
+            return out
+        }
+        def parts:[string] (strsplit r ",")
+        push out (?? (to_int (itemAt parts 0)) 0)
+        push out (?? (to_int (itemAt parts 2)) 0)
+        return out
+    }
+
+    ; The carried tab follows the pointer one neighbour at a time. It swaps
+    ; with a neighbour once the pointer is far enough past it that, after the
+    ; swap, the pointer is over the carried tab again — so tabs of different
+    ; widths do not swap back and forth under a pointer that has stopped.
+    fn dragTabTo:void (x:int) {
+        def n:int (grid.app.book.sheetCount())
+        if ((tabDrag < 0) || (n < 2)) {
+            return
+        }
+        if (tabDragMoved == false) {
+            def dx:int (x - tabDragX)
+            if (dx < 0) {
+                dx = (0 - dx)
+            }
+            if (dx < 6) {
+                return
+            }
+            tabDragMoved = true
+            tabDropAt = tabDrag
+        }
+        def guard:int 0
+        while (guard < n) {
+            guard = (guard + 1)
+            def me:[int] (this.tabSpan(tabDropAt))
+            if ((array_length me) < 2) {
+                return
+            }
+            def mw:int (itemAt me 1)
+            def moved:boolean false
+            if ((tabDropAt + 1) < n) {
+                def right:[int] (this.tabSpan((tabDropAt + 1)))
+                if ((array_length right) == 2) {
+                    def rEnd:int ((itemAt right 0) + (itemAt right 1))
+                    if (x >= (rEnd - mw)) {
+                        tabDropAt = (tabDropAt + 1)
+                        moved = true
+                    }
+                }
+            }
+            if ((moved == false) && (tabDropAt > 0)) {
+                def left:[int] (this.tabSpan((tabDropAt - 1)))
+                if ((array_length left) == 2) {
+                    if (x < ((itemAt left 0) + mw)) {
+                        tabDropAt = (tabDropAt - 1)
+                        moved = true
+                    }
+                }
+            }
+            if moved {
+                ; The next neighbour is measured on the strip as now drawn.
+                this.sync()
+                def page:EVGElement (this.layout())
+            } {
+                return
+            }
+        }
+    }
+
+    ; Let go: the sheet moves to where its tab was drawn.
+    fn dropTab:void () {
+        def from:int tabDrag
+        def to:int tabDropAt
+        def moved:boolean tabDragMoved
+        tabDrag = -1
+        tabDropAt = -1
+        tabDragMoved = false
+        if (moved && (from >= 0) && (to >= 0) && (from != to)) {
+            def ok:boolean (grid.app.moveSheetTo(from to))
+        }
+        this.sync()
     }
 
     fn statusText:string () {
@@ -1293,6 +1439,11 @@ class SheetsApp {
             UiTree.inline(ctxHolder "top" ((to_string ctxY) + "px"))
         }
         def page:EVGElement (ui.layout())
+        if ctxOpen {
+            if (this.fitCtxMenu()) {
+                page = (ui.layout())
+            }
+        }
         ; The grid takes what the bars leave. Measured rather than left to
         ; flex-grow: the ribbon wraps onto a second row on a narrow page, and
         ; the height it wraps to is only known once it has been laid out.
@@ -1331,6 +1482,46 @@ class SheetsApp {
             grid.resize(gw gh)
         }
         return page
+    }
+
+    ; A context menu that would run off the page is moved back onto it: up,
+    ; when it was opened low (a tab's menu always opens upward, off the
+    ; strip), and left, when opened near the right edge. True if it moved.
+    fn fitCtxMenu:boolean () {
+        def r:string (ui.rectOf((ctxMenu.contentTid())))
+        if ((strlen r) == 0) {
+            return false
+        }
+        def parts:[string] (strsplit r ",")
+        def mx:int (?? (to_int (itemAt parts 0)) 0)
+        def my:int (?? (to_int (itemAt parts 1)) 0)
+        def mw:int (?? (to_int (itemAt parts 2)) 0)
+        def mh:int (?? (to_int (itemAt parts 3)) 0)
+        def pw:int (to_int pageW)
+        def ph:int (to_int pageH)
+        def nx:int ctxX
+        def ny:int ctxY
+        if ((ctxKind == "tab") || ((my + mh) > ph)) {
+            ny = (ctxY - mh)
+            if ((ctxKind != "tab") && ((my + mh) > ph)) {
+                ny = (ctxY - (((my + mh) - ph) + 4))
+            }
+            if (ny < 0) {
+                ny = 0
+            }
+        }
+        if ((mx + mw) > pw) {
+            nx = (ctxX - (((mx + mw) - pw) + 4))
+            if (nx < 0) {
+                nx = 0
+            }
+        }
+        if ((nx == ctxX) && (ny == ctxY)) {
+            return false
+        }
+        UiTree.inline(ctxHolder "left" ((to_string nx) + "px"))
+        UiTree.inline(ctxHolder "top" ((to_string ny) + "px"))
+        return true
     }
 
     fn displayList:EVGDisplayList () {
@@ -1493,11 +1684,18 @@ class SheetsApp {
             return
         }
         ; A press is an edge: the button held over the chrome is not pressed
-        ; again on every move.
+        ; again on every move — unless it is carrying a tab.
         if (down && held) {
+            if (tabDrag >= 0) {
+                this.dragTabTo(x)
+                this.sync()
+            }
             return
         }
         held = down
+        if ((down == false) && (tabDrag >= 0)) {
+            this.dropTab()
+        }
         if (down == false) {
             ; A move or a release over the chrome.
             ui.pointerUp()
@@ -1515,6 +1713,14 @@ class SheetsApp {
         def target:string (ui.hitTest((to_double x) (to_double y)))
         if ((strlen target) > 0) {
             this.pressChrome(target shift ctrl)
+            ; A press on a tab may become a carry, if it travels.
+            def held2:int (this.tabSheetOf(target))
+            if ((held2 >= 0) && (readOnly == false) && ((this.dialogOpen()) == false)) {
+                tabDrag = held2
+                tabDropAt = held2
+                tabDragX = x
+                tabDragMoved = false
+            }
             return
         }
         ; A modal dialog owns the page until it closes.
@@ -1590,6 +1796,7 @@ class SheetsApp {
         push a chart
         push a sql
         push a conn
+        push a delSheet
         return a
     }
 
@@ -1799,6 +2006,12 @@ class SheetsApp {
         if (cmd == "insert.link") {
             return (this.openDlg(link))
         }
+        if (cmd == "sheet.delete") {
+            if ((grid.app.book.sheetCount()) <= 1) {
+                return false
+            }
+            return (this.openDlg(delSheet))
+        }
         if ((cmd == "sheet.rename") && ((strlen a.arg) == 0)) {
             grid.app.renameIndex = grid.app.book.activeIndex
             return (this.openDlg(rename))
@@ -1809,6 +2022,11 @@ class SheetsApp {
     ; The secondary button on the sheet: the cell under it joins (or becomes)
     ; the selection, and the context menu opens at the pointer.
     fn rightClick:void (x:int y:int) {
+        def onTab:int (this.tabSheetOf((ui.hitTest((to_double x) (to_double y)))))
+        if (onTab >= 0) {
+            this.tabMenu(onTab x y)
+            return
+        }
         if ((this.insideGrid(x y)) == false) {
             return
         }
@@ -1857,6 +2075,37 @@ class SheetsApp {
         this.sync()
     }
 
+    ; The secondary button on a tab: that sheet is shown, and its menu opens.
+    fn tabMenu:void (at:int x:int y:int) {
+        this.closeMenus()
+        if (this.dialogOpen()) {
+            return
+        }
+        if (at != grid.app.book.activeIndex) {
+            grid.app.setActiveSheet(at)
+        }
+        if readOnly {
+            this.sync()
+            return
+        }
+        this.fillCtxMenu("tab")
+        ctxX = x
+        ctxY = y
+        ; Its bottom edge sits on the strip's top edge, clear of the tabs.
+        def r:string (ui.rectOf((tabs.tabTid((to_string at)))))
+        if ((strlen r) > 0) {
+            def parts:[string] (strsplit r ",")
+            ctxY = ((?? (to_int (itemAt parts 1)) y) - 4)
+        }
+        ctxOpen = true
+        gridFocused = false
+        def next:string (ctxMenu.contextClick((ctxMenu.triggerTid())))
+        if ((strlen next) > 0) {
+            ui.focusId = next
+        }
+        this.sync()
+    }
+
     ; The rows of the context menu for a press on a cell, a column header or
     ; a row header. Every header row is a command the core already has, run
     ; on the selection the press made.
@@ -1867,10 +2116,33 @@ class SheetsApp {
             ctxMenu.items = cellItems
             return
         }
+        def fresh:[UiItem]
+        if (kind == "tab") {
+            ctxMenu.items = fresh
+            def book:WorkbookModel grid.app.book
+            def at:int book.activeIndex
+            def n:int (book.sheetCount())
+            def t:MenuCtl ctxMenu
+            t.name = "Sheet actions"
+            this.act("t-rename" "sheet.rename" "" "")
+            t.addItem("t-rename" "Rename…" false)
+            this.act("t-dup" "sheet.duplicate" "" "")
+            t.addItem("t-dup" "Duplicate" false)
+            this.act("t-add" "sheet.add" "" "")
+            t.addItem("t-add" "Insert sheet" false)
+            t.addSeparator()
+            this.act("t-left" "sheet.move.left" "" "")
+            t.addItem("t-left" "Move left" (at <= 0))
+            this.act("t-right" "sheet.move.right" "" "")
+            t.addItem("t-right" "Move right" (at >= (n - 1)))
+            t.addSeparator()
+            this.act("t-delete" "sheet.delete" "" "")
+            t.addItem("t-delete" "Delete…" (n <= 1))
+            return
+        }
         def a:CellPos (new CellPos)
         def b:CellPos (new CellPos)
         grid.app.sel.normalized(a b)
-        def fresh:[UiItem]
         ctxMenu.items = fresh
         def m:MenuCtl ctxMenu
         if (kind == "column") {
@@ -1962,6 +2234,9 @@ class SheetsApp {
     }
 
     fn cursorAt:string (x:int y:int) {
+        if tabDragMoved {
+            return "grabbing"
+        }
         if gridCapture {
             return (grid.cursorAt((x - gx) (y - gy)))
         }
