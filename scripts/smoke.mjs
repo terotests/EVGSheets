@@ -111,7 +111,14 @@ const state = (page) => page.evaluate(() => window.sheet.state());
 try {
   // --- the editor -------------------------------------------------------------
   console.log("== editor");
-  const page = await open("?theme=light");
+  const blank = await open("");
+  await blank.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
+  const bs = await state(blank);
+  const a1 = await blank.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 0));
+  ok("a plain visit opens an empty workbook", bs.sheets.length === 1 && !a1, bs.sheets.join(",") + " A1=" + a1);
+  await blank.close();
+
+  const page = await open("?demo&theme=light");
   await page.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
   ok("the editor started", await page.evaluate(() => !!window.__sheetsReady), await page.evaluate(() => window.__sheetsError || ""));
   let s = await state(page);
@@ -258,6 +265,254 @@ try {
   await shot(page, "04_context_menu");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
+
+  // The context menu on a column header: the column is selected and the menu
+  // is the column's own. Inserting a column to the left moves C's text to D.
+  const hdr = await page.evaluate(() => {
+    const v = window.sheet.app.grid.app.grid;
+    const m = window.sheet.app.grid.app.model;
+    return { colX: v.x + v.rowHeaderW + m.colToX(2) + 10, colY: v.headerTop() + 6, rowX: v.x + 10, rowY: v.headerTop() + v.colHeaderH + m.rowToY(4) + 6 };
+  });
+  const c1 = await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 2));
+  await page.mouse.click(canvasBox.x + g.x + hdr.colX, canvasBox.y + g.y + hdr.colY, { button: "right" });
+  await page.waitForTimeout(100);
+  ok("right click on a column header opens the column menu", (await state(page)).menuOpen && (await page.evaluate(() => window.sheet.app.ctxMenu.name)) === "Column actions");
+  ok("…with column C selected", await page.evaluate(() => {
+    const s = window.sheet.app.grid.app.sel;
+    return s.active.col === 2 && s.anchor.col === 2 && s.active.row === 0 && s.anchor.row === window.sheet.app.grid.app.model.rowCount - 1;
+  }));
+  ok("…naming the column it acts on", (await page.evaluate(() => window.sheet.app.rectOf("sx-ctx-item-h-delcols"))) !== "" && (await page.evaluate(() => window.sheet.app.ctxMenu.items.find((i) => i.value === "h-delcols").name)) === "Delete column C");
+  await shot(page, "04b_column_menu");
+  await click(page, "sx-ctx-item-h-colleft");
+  ok("Insert 1 column left moves C to D", (await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 3))) === c1 && !(await state(page)).menuOpen, c1);
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(80);
+  ok("…and undo puts it back", (await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 2))) === c1);
+
+  // …and on a row header.
+  await page.mouse.click(canvasBox.x + g.x + hdr.rowX, canvasBox.y + g.y + hdr.rowY, { button: "right" });
+  await page.waitForTimeout(100);
+  ok("right click on a row header opens the row menu", (await state(page)).menuOpen && (await page.evaluate(() => window.sheet.app.ctxMenu.name)) === "Row actions");
+  ok("…with row 5 selected", await page.evaluate(() => {
+    const s = window.sheet.app.grid.app.sel;
+    return s.active.row === 4 && s.anchor.row === 4 && s.active.col === 0;
+  }));
+  await shot(page, "04c_row_menu");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+
+  // A cell gets the cell menu back.
+  await page.mouse.click(cellX, cellY, { button: "right" });
+  await page.waitForTimeout(100);
+  ok("a cell gets the cell menu back", (await page.evaluate(() => window.sheet.app.rectOf("sx-ctx-item-c-chart"))) !== "");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+
+  // Find and replace: an EVGUI dialog (WindowCtl), not the core's window.
+  await page.evaluate(() => window.sheet.run("nav.goto", "A1"));
+  await page.keyboard.press("Control+f");
+  await page.waitForTimeout(150);
+  ok("Ctrl+F opens Find and replace", await page.evaluate(() => window.sheet.app.find.win.open));
+  ok("…as an EVGUI dialog, not the core's window", await page.evaluate(() => !window.sheet.app.grid.app.findDialog.visible && window.sheet.app.rectOf("sx-find-content") !== ""));
+  ok("…with focus in the Find field", await page.evaluate(() => window.sheet.app.ui.focusId === "sx-find-query"));
+  await page.keyboard.type("Revenue");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  const found = await page.evaluate(() => window.sheet.app.grid.app.findStatus);
+  ok("Enter finds the next match", /^found /.test(found), found);
+  await shot(page, "05_find");
+  await click(page, "sx-find-case");
+  ok("a click ticks Match case", await page.evaluate(() => window.sheet.app.find.matchCase.checkState === 1));
+  await click(page, "sx-find-next");
+  ok("Find next by pointer", /^found /.test(await page.evaluate(() => window.sheet.app.grid.app.findStatus)));
+  await click(page, "sx-find-close");
+  ok("Close closes it", !(await page.evaluate(() => window.sheet.app.find.win.open)));
+  ok("…and the query is kept", (await page.evaluate(() => window.sheet.app.grid.app.findQuery)) === "Revenue");
+  await page.keyboard.press("Control+h");
+  await page.waitForTimeout(100);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape closes it and the sheet has the keyboard", await page.evaluate(() => !window.sheet.app.find.win.open && window.sheet.app.gridFocused));
+
+  // Paste special: an EVGUI dialog too, whatever opens it.
+  await page.evaluate(() => { window.sheet.run("nav.goto", "B3"); window.sheet.run("edit.copy", ""); window.sheet.run("nav.goto", "F10"); });
+  await page.evaluate(() => window.sheet.run("edit.pasteSpecial", ""));
+  await page.waitForTimeout(150);
+  ok("Paste special opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.paste.win.open && !window.sheet.app.grid.app.pasteDialog.visible));
+  await shot(page, "06_paste_special");
+  await click(page, "sx-paste-what-1");
+  ok("a click chooses Values only", (await page.evaluate(() => window.sheet.app.paste.what.value)) === "1");
+  await click(page, "sx-paste-ok");
+  const special = await page.evaluate(() => [window.sheet.app.paste.win.open, window.sheet.app.grid.app.model.getCell(9, 5), window.sheet.app.grid.app.pasteMode]);
+  ok("Paste pastes the value and closes", !special[0] && special[1] !== "" && !String(special[1]).startsWith("="), String(special[1]));
+  ok("…and the next paste is a full one again", special[2] === 0);
+  await page.evaluate(() => window.sheet.run("edit.pasteSpecial", ""));
+  await page.waitForTimeout(80);
+  ok("it opens again", await page.evaluate(() => window.sheet.app.paste.win.open));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape cancels it", await page.evaluate(() => !window.sheet.app.paste.win.open && window.sheet.app.gridFocused));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+
+  // Rename sheet: an EVGUI dialog, which says why it refuses a name.
+  const oldName = await page.evaluate(() => window.sheet.app.grid.app.book.sheetAt(window.sheet.app.grid.app.book.activeIndex).name);
+  await page.evaluate(() => window.sheet.run("sheet.rename", ""));
+  await page.waitForTimeout(120);
+  ok("Rename opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.rename.win.open && !window.sheet.app.grid.app.renameDialog.visible && window.sheet.app.ui.focusId === "sx-rename-name"));
+  await page.keyboard.type("Bad/Name");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("a refused name keeps it open and says why", await page.evaluate(() => window.sheet.app.rename.win.open && window.sheet.app.rename.statusEl.textContent !== ""));
+  await shot(page, "07_rename");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Renamed");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Enter renames and closes", await page.evaluate(() => !window.sheet.app.rename.win.open && window.sheet.app.grid.app.book.sheetAt(window.sheet.app.grid.app.book.activeIndex).name === "Renamed"));
+  await page.evaluate((n) => window.sheet.run("sheet.rename", n), oldName);
+
+  // Link: an EVGUI dialog, from Ctrl+K too.
+  await page.evaluate(() => window.sheet.run("nav.goto", "H12"));
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(120);
+  ok("Ctrl+K opens Link as an EVGUI dialog", await page.evaluate(() => window.sheet.app.link.win.open && !window.sheet.app.grid.app.linkDialog.visible && window.sheet.app.ui.focusId === "sx-link-address"));
+  await page.keyboard.type("https://example.com");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("Example");
+  await shot(page, "08_link");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Enter sets the link and the text", await page.evaluate(() => { const a = window.sheet.app.grid.app; return !window.sheet.app.link.win.open && a.model.hyperlinkAt(11, 7) === "https://example.com" && a.model.getCell(11, 7) === "Example"; }));
+  await page.evaluate(() => window.sheet.run("insert.link", ""));
+  await page.waitForTimeout(80);
+  await click(page, "sx-link-remove");
+  ok("Remove takes the link off", await page.evaluate(() => !window.sheet.app.link.win.open && window.sheet.app.grid.app.model.hyperlinkAt(11, 7) === ""));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+
+  // Fill colour: swatches in an EVGUI dialog, previewed on the sheet.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  await page.evaluate(() => window.sheet.run("format.fill", ""));
+  await page.waitForTimeout(120);
+  ok("Fill colour opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.color.win.open && !window.sheet.app.grid.app.colorDialog.visible));
+  await click(page, "sx-color-swatch-s22");
+  ok("a swatch previews on the sheet", await page.evaluate(() => { const st = window.sheet.app.grid.app.model.getCellStyle(13, 9); return st.hasFill && st.fillRgb.toUpperCase() === "#C6EFCE"; }));
+  await shot(page, "09_fill");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape takes the preview back", await page.evaluate(() => !window.sheet.app.color.win.open && !window.sheet.app.grid.app.model.getCellStyle(13, 9).hasFill));
+  await page.evaluate(() => window.sheet.run("format.color", ""));
+  await page.waitForTimeout(80);
+  await click(page, "sx-color-hex");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("#123456");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("a typed hex and Enter apply the text colour", await page.evaluate(() => !window.sheet.app.color.win.open && window.sheet.app.grid.app.model.getCellStyle(13, 9).textRgb.toUpperCase() === "#123456"));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+  ok("…as one undo", await page.evaluate(() => window.sheet.app.grid.app.model.getCellStyle(13, 9).textRgb.toUpperCase() !== "#123456"));
+
+  // Borders: an EVGUI dialog with a preview; one spec applied on Apply.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.evaluate(() => window.sheet.run("format.border", ""));
+  await page.waitForTimeout(120);
+  ok("Borders opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.border.win.open && !window.sheet.app.grid.app.borderDialog.visible && window.sheet.app.border.multi));
+  await click(page, "sx-border-box");
+  await click(page, "sx-border-line-medium");
+  await click(page, "sx-border-ink-c4");
+  ok("Box, Medium and red make the spec", (await page.evaluate(() => window.sheet.app.border.spec())) === "spec:TBLR:medium:#C00000", await page.evaluate(() => window.sheet.app.border.spec()));
+  await shot(page, "10_borders");
+  await click(page, "sx-border-apply");
+  ok("Apply draws them", await page.evaluate(() => { const st = window.sheet.app.grid.app.model.getCellStyle(13, 9); return !window.sheet.app.border.win.open && st.borderTop.has() && st.borderTop.style === "medium"; }));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+
+  // Conditional formatting: an EVGUI dialog that adds rules and stays open.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  const cfBefore = await page.evaluate(() => window.sheet.app.grid.app.model.cfRuleCount());
+  await page.evaluate(() => window.sheet.run("format.conditional", ""));
+  await page.waitForTimeout(120);
+  ok("Conditional formatting opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.cf.win.open && !window.sheet.app.grid.app.cfDialog.visible));
+  await click(page, "sx-cf-test-602");
+  await click(page, "sx-cf-v1");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("5");
+  await click(page, "sx-cf-fill-#C6EFCE");
+  await shot(page, "11_cf");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Enter adds the rule and keeps it open", await page.evaluate((n) => { const a = window.sheet.app.grid.app; return window.sheet.app.cf.win.open && a.model.cfRuleCount() === n + 1 && a.cfTest === 602 && a.cfV1 === "5"; }, cfBefore));
+  await click(page, "sx-cf-clear");
+  await click(page, "sx-cf-close");
+  ok("Clear takes it off, Close closes", await page.evaluate((n) => !window.sheet.app.cf.win.open && window.sheet.app.grid.app.model.cfRuleCount() === n, cfBefore));
+
+  // Data validation and the list picker: EVGUI dialogs.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  const dvBefore = await page.evaluate(() => window.sheet.app.grid.app.model.validationCount());
+  await page.evaluate(() => window.sheet.run("data.validation", ""));
+  await page.waitForTimeout(120);
+  ok("Data validation opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.dv.win.open && !window.sheet.app.grid.app.dvDialog.visible));
+  await click(page, "sx-dv-kind-701");
+  await click(page, "sx-dv-v1");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Yes,No,Maybe");
+  await shot(page, "12_validation");
+  await click(page, "sx-dv-add");
+  await click(page, "sx-dv-close");
+  ok("Add rule puts a list rule on the cell", await page.evaluate((n) => { const a = window.sheet.app.grid.app; return !window.sheet.app.dv.win.open && a.model.validationCount() === n + 1 && a.model.validationAt(13, 9).isList(); }, dvBefore));
+  await page.evaluate(async () => { window.sheet.app.grid.app.openListPicker(13, 9); window.sheet.app.sync(); await window.sheet.redraw(); });
+  await page.waitForTimeout(80);
+  ok("the cell's list opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.pick.win.open && !window.sheet.app.grid.app.listDialog.visible && window.sheet.app.pick.what.items.length === 3));
+  await shot(page, "13_list");
+  await click(page, "sx-list-what-2");
+  await click(page, "sx-list-ok");
+  ok("Choose writes the value", await page.evaluate(() => !window.sheet.app.pick.win.open && window.sheet.app.grid.app.model.getCell(13, 9) === "Maybe"));
+  await page.evaluate(() => { window.sheet.run("edit.undo", ""); const a = window.sheet.app.grid.app; a.model.clearValidationsIn(13, 9, 13, 9); });
+
+  // Insert chart: a chart at once, and a short editor window beside it.
+  await page.evaluate(() => window.sheet.run("nav.goto", "B4"));
+  const charts0 = await page.evaluate(() => window.sheet.app.grid.app.view.chartLayer.count());
+  await page.evaluate(() => window.sheet.run("insert.chart", ""));
+  await page.waitForTimeout(120);
+  ok("Insert chart makes the chart and opens its editor", await page.evaluate((n) => window.sheet.app.chart.win.open && !window.sheet.app.chart.win.isModal && !window.sheet.app.grid.app.chartDialog.visible && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
+  const kinds = await page.evaluate(() => window.sheet.app.chart.kind.items.map((it) => it.value));
+  ok("…offering only the types the data suits", kinds.length > 0 && kinds.length < 20, kinds.join(","));
+  const pickKind = kinds[kinds.length - 1];
+  await click(page, "sx-chart-kind-trigger");
+  ok("the type is a drop-down", await page.evaluate(() => window.sheet.app.chart.kind.open));
+  await shot(page, "14_chart_type");
+  await click(page, "sx-chart-kind-item-" + pickKind);
+  ok("a type chosen redraws the chart on the sheet", await page.evaluate((k) => { const a = window.sheet.app.grid.app; const l = a.view.chartLayer; const p = l.panelAt(l.count() - 1); return !window.sheet.app.chart.kind.open && String(p.chart.kind) === k; }, pickKind));
+  await shot(page, "14_chart");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape leaves the chart on the sheet", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
+  await page.evaluate(() => { const a = window.sheet.app.grid.app; const p = a.view.chartLayer.panelAt(a.view.chartLayer.count() - 1); a.chartEditId = 0; a.openChartDialog(p.chart.id); window.sheet.app.sync(); });
+  await page.evaluate(() => window.sheet.redraw());
+  await click(page, "sx-chart-delete");
+  ok("its editor deletes it", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n, charts0));
+
+  // The SQL box and the connection window: EVGUI dialogs too.
+  await page.evaluate(() => window.sheet.run("db.sql.dialog", ""));
+  await page.waitForTimeout(100);
+  ok("the SQL box opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.sql.win.open && !window.sheet.app.grid.app.sqlDialog.visible && window.sheet.app.ui.focusId === "sx-sql-text"));
+  await shot(page, "15_sql");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  await page.evaluate(() => window.sheet.run("db.connection", ""));
+  await page.waitForTimeout(100);
+  ok("the connection window opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.conn.win.open && !window.sheet.app.grid.app.connDialog.visible));
+  await click(page, "sx-conn-table");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("sales");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Connect leaves the host a request", await page.evaluate(() => { const a = window.sheet.app.grid.app; return window.sheet.app.conn.win.open && a.dbRequest === "connect" && a.dbRequestTable === "sales"; }));
+  await shot(page, "16_connection");
+  await page.evaluate(() => { window.sheet.app.grid.app.takeDbRequest(); window.sheet.app.grid.app.dbConnStatus = ""; });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape closes it", await page.evaluate(() => !window.sheet.app.conn.win.open));
 
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");

@@ -17,17 +17,17 @@ embeds: <https://terotests.github.io/EVGSheets/embed.html>
 |---|---|
 | Menubar: File, Edit, View, Insert, Format (with Number and Alignment submenus), Data | `MenubarCtl` / `MenuCtl` |
 | Ribbon: undo/redo, format painter, font and size, B I U S, text and fill colour, alignment, wrap, merge, number formats, borders, sort, filters, freeze, chart, link, find | `RibbonCtl` (an EVGUI controller in this repository) and `MenuCtl` dropdowns |
-| Context menu on cells | `MenuCtl` in context mode |
+| Context menu on cells, and on column and row headers (insert, delete, clear, move, fit, sort, conditional formatting, validation) | `MenuCtl` in context mode |
 | Sheet tabs and adding a sheet | `TabsCtl`, `RibbonCtl` |
 | Status line: Ready / editing / what happened, and Sum, Average and Count of the selection | the app |
-| Formula bar, grid, dialogs (colours, borders, chart picker, conditional formats, validation, find and replace, paste special) | the datagrid core (`GridApp`) |
+| Dialogs: find and replace, paste special, rename sheet, link, text and fill colour, borders, conditional formatting, data validation and its list, chart picker, SQL query, database connection | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
+| Formula bar, grid | the datagrid core (`GridApp`) |
 | Light and dark | `@vars` palettes in `src/sheets.css`; the core's `modern` and `dark` grid themes |
 
 The two halves meet at the display list. The page is laid out by EVG, and
 the element `sx-grid` is a placeholder whose rectangle becomes `GridApp`'s
 window. `GridApp`'s own frame is painted into that element with
-`EVGDisplayList.paintAt`, so menus drop over the grid and the grid's dialogs
-stay inside it.
+`EVGDisplayList.paintAt`, so menus and dialogs drop over the grid.
 
 State is not duplicated. The Bold button is pressed because the core says
 the active cell is bold, and that is read again after every input.
@@ -63,6 +63,7 @@ options to `mountSheets`.
 | `menubar`, `ribbon`, `formulaBar`, `tabs`, `status`, `title` | `true` / `false` | Show or hide each part. |
 | `theme` | `light` · `dark` | Defaults to the system setting. |
 | `xlsx`, `name`, `sheet` | URL, file name, sheet name | The workbook to open, and the sheet to show first. |
+| `demo` | (no value) | Open the sample business workbook. Without `demo` or `xlsx` the editor starts with an empty workbook. |
 
 Ribbon tool names: `undo redo painter font size bold italic underline strike color fill left center right wrap merge numfmt currency percent decmore decless borders sortasc sortdesc filterclear freeze chart link find`.
 
@@ -100,10 +101,13 @@ once per page.
 
 ## Building
 
-The sources expect to sit at `gallery/evgsheets/` in a Ranger checkout. That
-checkout also needs `gallery/datagrid` (the core) and `gallery/evgui` (EVGUI).
-`scripts/build.mjs` puts everything in place and compiles with Ranger's
-committed compiler:
+The datagrid core lives in this repository under `datagrid/` (moved here from
+Ranger's `gallery/datagrid` with its history). A Ranger checkout is still
+needed for the compiler and the libraries the core imports. The sources import
+each other as if they sat in a Ranger tree (`gallery/evgsheets`,
+`gallery/datagrid`, `gallery/evgui`), so `scripts/build.mjs` assembles that
+tree under `.stage/` out of links, with this repository's `datagrid/` in place
+of Ranger's, and compiles it with Ranger's committed compiler:
 
 ```sh
 git clone https://github.com/terotests/Ranger
@@ -120,8 +124,8 @@ python3 -m http.server -d dist 8000
 
 - **Ranger:** `--ranger`, then `$RANGER_DIR`, then the enclosing checkout, then
   `../Ranger`.
-- **EVGUI:** `--evgui`, then `$EVGUI_DIR`, then `../EVGUI`. If none is found, it
-  clones EVGUI.
+- **EVGUI:** `--evgui`, then `$EVGUI_DIR`, then `<ranger>/gallery/evgui`, then
+  `../EVGUI`. If none is found, it clones EVGUI into `.deps/EVGUI`.
 
 It runs Ranger's `scripts/deps.mjs`, which fetches `lib/evg`.
 

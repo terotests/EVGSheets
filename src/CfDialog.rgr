@@ -1,0 +1,276 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; CfDialog — conditional formatting rules, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Conditional formatting ─────────────────────────────── × ┐
+;   │ Rule for B2:B9                                             │
+;   │ Format cells where the value is                            │
+;   │ (Greater than) (At least) (Less than) (At most) (Equal) …  │
+;   │ Value  [0______]     and  [______]                         │
+;   │ Fill   ■■■■■■■■■■■■■                                       │
+;   │ 2 rule(s) on this sheet                                    │
+;   │                   [Close] [Clear] [± colours] [Add rule]   │
+;   └────────────────────────────────────────────────────────────┘
+;
+; The form remembers itself in the core's fields (cfTest, cfV1, cfV2,
+; cfFillHex), so it opens on what was last asked, as the core's window did.
+; Rules go into the model with addCfRule / clearCfRulesIn; Add rule keeps the
+; dialog open, so several rules are one visit.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class CfDialog extends SxDialog {
+    def test:RadioGroupCtl (new RadioGroupCtl)
+    def v1In:InputCtl (new InputCtl)
+    def v2In:InputCtl (new InputCtl)
+    def fill:RadioGroupCtl (new RadioGroupCtl)
+    def closeBtn:ButtonCtl (new ButtonCtl)
+    def clearBtn:ButtonCtl (new ButtonCtl)
+    def posNegBtn:ButtonCtl (new ButtonCtl)
+    def addBtn:ButtonCtl (new ButtonCtl)
+    def rangeEl:EVGElement (EVGElement.createSpan())
+
+    Constructor () {
+        this.setup("sx-cf" "Conditional formatting")
+        test.tid = "sx-cf-test"
+        test.name = "Format cells where the value is"
+        test.addItem("601" "Greater than" false)
+        test.addItem("606" "At least" false)
+        test.addItem("602" "Less than" false)
+        test.addItem("607" "At most" false)
+        test.addItem("603" "Equal to" false)
+        test.addItem("604" "Between" false)
+        test.addItem("605" "Colour scale" false)
+        this.field(v1In "sx-cf-v1" "Value")
+        v1In.boxWidth = 110.0
+        this.field(v2In "sx-cf-v2" "and")
+        v2In.boxWidth = 110.0
+        fill.tid = "sx-cf-fill"
+        fill.name = "Fill"
+        ; The classic four first, then the theme row without repeats.
+        fill.addItem("#FFC7CE" "#FFC7CE" false)
+        fill.addItem("#FFE59A" "#FFE59A" false)
+        fill.addItem("#C6EFCE" "#C6EFCE" false)
+        fill.addItem("#BDD7EE" "#BDD7EE" false)
+        def i:int 0
+        while (i < (GridApp.paletteThemeCount())) {
+            def h:string (GridApp.paletteTheme(i))
+            if ((fill.indexOfValue(h)) < 0) {
+                fill.addItem(h h false)
+            }
+            i = (i + 1)
+        }
+        this.button(closeBtn "sx-cf-close" "Close" "secondary")
+        this.button(clearBtn "sx-cf-clear" "Clear" "secondary")
+        this.button(posNegBtn "sx-cf-posneg" "± colours" "secondary")
+        this.button(addBtn "sx-cf-add" "Add rule" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a test
+        push a v1In
+        push a v2In
+        push a fill
+        push a closeBtn
+        push a clearBtn
+        push a posNegBtn
+        push a addBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a (test.itemTid(test.rovingValue))
+        push a v1In.tid
+        push a v2In.tid
+        push a (fill.itemTid(fill.rovingValue))
+        push a closeBtn.tid
+        push a clearBtn.tid
+        push a posNegBtn.tid
+        push a addBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == closeBtn.tid) || (target == clearBtn.tid) || (target == posNegBtn.tid) || (target == addBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((test.owns(target)) || (v1In.owns(target)) || (v2In.owns(target)) || (fill.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return addBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.cfDialog.visible {
+            app.cfDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        rangeEl.className = "sx-dlg-note"
+        rangeEl.elementType = 1
+        body.addChild(rangeEl)
+        body.addChild((this.heading(test.name)))
+        body.addChild((unwrap test.rootEl))
+        def vals:EVGElement (this.row("sx-dlg-field"))
+        vals.addChild((this.label(v1In.name)))
+        vals.addChild((unwrap v1In.rootEl))
+        def andEl:EVGElement (this.label(v2In.name))
+        andEl.className = "sx-dlg-label-short"
+        vals.addChild(andEl)
+        vals.addChild((unwrap v2In.rootEl))
+        body.addChild(vals)
+        def f:EVGElement (this.row("sx-dlg-field"))
+        f.addChild((this.label(fill.name)))
+        def sw:EVGElement (this.row("sx-swatches"))
+        sw.addChild((unwrap fill.rootEl))
+        f.addChild(sw)
+        body.addChild(f)
+        body.addChild((this.statusRow()))
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap closeBtn.rootEl))
+        acts.addChild((unwrap clearBtn.rootEl))
+        acts.addChild((unwrap posNegBtn.rootEl))
+        acts.addChild((unwrap addBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    fn rangeText:string (app:GridApp) {
+        def g:GridRange (app.sel.liveRange())
+        return ((SpreadsheetModel.cellLabel(g.r0 g.c0)) + ":" + (SpreadsheetModel.cellLabel(g.r1 g.c1)))
+    }
+
+    ; Opens on what the core remembers; focus on the chosen test.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        rangeEl.textContent = ("Rule for " + (this.rangeText(app)))
+        test.value = (to_string app.cfTest)
+        test.rovingValue = test.value
+        v1In.setValue(app.cfV1)
+        v1In.selectAll()
+        v2In.setValue(app.cfV2)
+        def h:string (to_uppercase app.cfFillHex)
+        if ((fill.indexOfValue(h)) < 0) {
+            h = "#FFC7CE"
+        }
+        fill.value = h
+        fill.rovingValue = h
+        statusEl.textContent = ((to_string (app.model.cfRuleCount())) + " rule(s) on this sheet")
+        this.openOn(pageW pageH)
+        this.paint()
+        return (test.itemTid(test.value))
+    }
+
+    fn paint:void () {
+        SxDialog.restyle(test "sx-chip-group" "sx-chip" "sx-chip-on")
+        SxDialog.restyle(fill "sx-swatch-group" "sx-swatch" "sx-swatch-on")
+        def i:int 0
+        while (i < (array_length fill.items)) {
+            def it:UiItem (itemAt fill.items i)
+            UiTree.inline((unwrap it.el) "background-color" it.value)
+            i = (i + 1)
+        }
+    }
+
+    fn follow:void (app:GridApp) {
+        if win.open {
+            this.paint()
+        }
+    }
+
+    ; The form into the core, so the next opening starts from it.
+    fn store:void (app:GridApp) {
+        app.cfTest = (?? (to_int test.value) 601)
+        app.cfV1 = v1In.value
+        app.cfV2 = v2In.value
+        app.cfFillHex = fill.value
+    }
+
+    fn rule:CfRule (app:GridApp) {
+        def g:GridRange (app.sel.liveRange())
+        def r:CfRule (new CfRule)
+        r.r0 = g.r0
+        r.c0 = g.c0
+        r.r1 = g.r1
+        r.c1 = g.c1
+        return r
+    }
+
+    fn redraw:void (app:GridApp) {
+        app.sheetView.markDirty()
+        app.grid.updateVisible(app.model)
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        this.store(app)
+        if (target == closeBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == addBtn.tid) {
+            def r:CfRule (this.rule(app))
+            if (app.cfTest == 605) {
+                r.kind = 0
+            } {
+                r.kind = 1
+                r.op = (GridApp.cfOpFor(app.cfTest))
+                r.v1 = (GridApp.cfNumber(app.cfV1))
+                r.v2 = (GridApp.cfNumber(app.cfV2))
+                r.fillRgb = app.cfFillHex
+            }
+            app.model.addCfRule(r)
+            statusEl.textContent = ("Added. " + (to_string (app.model.cfRuleCount())) + " rule(s) on this sheet")
+        }
+        if (target == posNegBtn.tid) {
+            ; The usual profit and loss pair: at least 0 green, below 0 red.
+            def pos:CfRule (this.rule(app))
+            pos.kind = 1
+            pos.op = "greaterThanOrEqual"
+            pos.v1 = 0.0
+            pos.fillRgb = "#C6EFCE"
+            app.model.addCfRule(pos)
+            def neg:CfRule (this.rule(app))
+            neg.kind = 1
+            neg.op = "lessThan"
+            neg.v1 = 0.0
+            neg.fillRgb = "#FFC7CE"
+            app.model.addCfRule(neg)
+            statusEl.textContent = ("Added ± colours. " + (to_string (app.model.cfRuleCount())) + " rule(s) on this sheet")
+        }
+        if (target == clearBtn.tid) {
+            def g:GridRange (app.sel.liveRange())
+            app.model.clearCfRulesIn(g.r0 g.c0 g.r1 g.c1)
+            statusEl.textContent = ("Cleared. " + (to_string (app.model.cfRuleCount())) + " rule(s) left")
+        }
+        this.redraw(app)
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(v1In focusId)
+        this.caretFor(v2In focusId)
+    }
+}

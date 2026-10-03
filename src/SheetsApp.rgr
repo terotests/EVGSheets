@@ -45,6 +45,18 @@ Import "../../datagrid/web/datagrid_web.rgr"
 Import "../../evgui/src/UiHost.rgr"
 Import "RibbonCtl.rgr"
 Import "SheetsEdits.rgr"
+Import "FindDialog.rgr"
+Import "PasteDialog.rgr"
+Import "RenameDialog.rgr"
+Import "LinkDialog.rgr"
+Import "ColorDialog.rgr"
+Import "BorderDialog.rgr"
+Import "CfDialog.rgr"
+Import "ValidationDialog.rgr"
+Import "ListDialog.rgr"
+Import "ChartDialog.rgr"
+Import "SqlDialog.rgr"
+Import "ConnDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -93,6 +105,21 @@ class SheetsApp {
     def statsEl:EVGElement (EVGElement.createSpan())
     def badgeEl:EVGElement (EVGElement.createSpan())
     def ctxHolder:EVGElement (EVGElement.createDiv())
+    ; The dialogs the app draws with EVGUI controllers instead of leaving them
+    ; to the core's EVGWindow, moved over one at a time.
+    def find:FindDialog (new FindDialog)
+    def paste:PasteDialog (new PasteDialog)
+    def rename:RenameDialog (new RenameDialog)
+    def link:LinkDialog (new LinkDialog)
+    def color:ColorDialog (new ColorDialog)
+    def border:BorderDialog (new BorderDialog)
+    def cf:CfDialog (new CfDialog)
+    def dv:ValidationDialog (new ValidationDialog)
+    def pick:ListDialog (new ListDialog)
+    def chart:ChartDialog (new ChartDialog)
+    def sql:SqlDialog (new SqlDialog)
+    def conn:ConnDialog (new ConnDialog)
+    def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
 
@@ -128,6 +155,11 @@ class SheetsApp {
     def ctxOpen:boolean false
     def ctxX:int 0
     def ctxY:int 0
+    ; The context menu has three faces: a cell, a column header, a row header.
+    ; The cell rows are built once and put back; a header's are made per press,
+    ; because they name the columns or rows they act on.
+    def ctxKind:string "cell"
+    def cellItems:[UiItem]
     def lastSheetsKey:string ""
     def built:boolean false
 
@@ -169,6 +201,12 @@ class SheetsApp {
 
     fn useDemo:void () {
         grid.useDemo()
+        this.sync()
+    }
+
+    ; One empty sheet, the same as File > New workbook.
+    fn useBlank:void () {
+        grid.app.newBlankWorkbook()
         this.sync()
     }
 
@@ -544,6 +582,8 @@ class SheetsApp {
         this.item(ctxMenu "c-chart" "Insert chart…" "insert.chart" "" "")
         this.item(ctxMenu "c-link" "Insert link…" "insert.link" "" "Ctrl+K")
         this.item(ctxMenu "c-clear" "Clear contents" "edit.clear" "" "Del")
+        cellItems = ctxMenu.items
+        ctxKind = "cell"
 
         this.buildRibbon()
 
@@ -796,6 +836,26 @@ class SheetsApp {
         this.mount(ctxHolder ctxMenu)
         root.addChild(ctxHolder)
 
+        ; --- the dialogs: modal overlays, so they take no room in the page --
+        dlgHolder.id = "sx-dlg-holder"
+        dlgHolder.className = "sx-dlg-holder"
+        UiTree.clearChildren(dlgHolder)
+        def dl:[SxDialog] (this.dialogs())
+        def di:int 0
+        while (di < (array_length dl)) {
+            def d:SxDialog (itemAt dl di)
+            this.mount(dlgHolder d.win)
+            def fc:[UiCtl] (d.ctls())
+            def fi:int 1
+            while (fi < (array_length fc)) {
+                push ui.ctls (itemAt fc fi)
+                fi = (fi + 1)
+            }
+            d.buildAll()
+            di = (di + 1)
+        }
+        root.addChild(dlgHolder)
+
         grid.app.setChrome(false showFormulaBar false false)
         grid.setReadOnly(readOnly)
         this.sync()
@@ -832,6 +892,7 @@ class SheetsApp {
     ; =========================================================================
 
     fn sync:void () {
+        this.adoptCoreDialogs()
         def app:GridApp grid.app
         def model:SpreadsheetModel app.model
         def sel:GridSelection app.sel
@@ -909,6 +970,14 @@ class SheetsApp {
         def onlyList:[EVGElement]
         push onlyList (unwrap tabs.listEl)
         troot.children = onlyList
+        def sd:[SxDialog] (this.dialogs())
+        def si:int 0
+        while (si < (array_length sd)) {
+            def d:SxDialog (itemAt sd si)
+            d.follow(grid.app)
+            d.showFocus(ui.focusId)
+            si = (si + 1)
+        }
     }
 
     sfn baseName:string (p:string) {
@@ -1231,7 +1300,7 @@ class SheetsApp {
         def ki:int 0
         while (ki < (array_length root.children)) {
             def kid:EVGElement (itemAt root.children ki)
-            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder")) {
+            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder") && (kid.id != "sx-dlg-holder")) {
                 used = (used + kid.calculatedHeight + 1.0)
             }
             ki = (ki + 1)
@@ -1448,6 +1517,10 @@ class SheetsApp {
             this.pressChrome(target shift ctrl)
             return
         }
+        ; A modal dialog owns the page until it closes.
+        if (this.dialogOpen()) {
+            return
+        }
         ; A press outside an open menu closes it and does nothing else.
         if (this.anyMenuOpen()) {
             this.closeMenus()
@@ -1488,7 +1561,147 @@ class SheetsApp {
         gridFocused = false
         ui.pressTidValue = target
         ui.clickWith(target shift ctrl)
+        if (this.dialogOpen()) {
+            def d:SxDialog (this.openDialog())
+            if (d.isButton(target)) {
+                def closed:boolean (d.act(target grid.app))
+            }
+            this.afterDialog()
+            return
+        }
         this.afterChrome(target choice)
+    }
+
+    ; =========================================================================
+    ; Dialogs drawn with EVGUI controllers
+    ; =========================================================================
+
+    fn dialogs:[SxDialog] () {
+        def a:[SxDialog]
+        push a find
+        push a paste
+        push a rename
+        push a link
+        push a color
+        push a border
+        push a cf
+        push a dv
+        push a pick
+        push a chart
+        push a sql
+        push a conn
+        return a
+    }
+
+    fn dialogOpen:boolean () {
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if d.win.open {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    ; The open one. Only asked while `dialogOpen()` is true; Find otherwise.
+    fn openDialog:SxDialog () {
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if d.win.open {
+                return d
+            }
+            i = (i + 1)
+        }
+        return find
+    }
+
+    ; The core can still open its own EVGWindow for a dialog the app has
+    ; replaced: a command run straight on the grid, a shortcut the core reads
+    ; itself. Whatever opened it, the app's dialog is shown instead.
+    fn adoptCoreDialogs:void () {
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if (d.adopt(grid.app)) {
+                def ok:boolean (this.openDlg(d))
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; A dialog has opened with focus going to `at`.
+    fn shown:boolean (at:string) {
+        gridFocused = false
+        ui.focus(at)
+        this.sync()
+        return true
+    }
+
+    fn openDlg:boolean (d:SxDialog) {
+        this.closeMenus()
+        if (readOnly && (d.writes())) {
+            return false
+        }
+        return (this.shown((d.open(grid.app pageW pageH))))
+    }
+
+    fn openFind:boolean () {
+        return (this.openDlg(find))
+    }
+
+    fn openPaste:boolean () {
+        return (this.openDlg(paste))
+    }
+
+    ; After a dialog took an input: a closed dialog gives the keyboard back
+    ; to the sheet.
+    fn afterDialog:void () {
+        if ((this.dialogOpen()) == false) {
+            gridFocused = true
+            ui.blur()
+        }
+        this.sync()
+    }
+
+    ; Keys while a dialog is up. Escape closes it, Tab walks its ring, Enter
+    ; where the dialog says so is the default button, and Enter or Space on a
+    ; button presses it; the rest goes to the focused controller.
+    fn dialogKey:void (name:string shift:boolean ctrl:boolean) {
+        def d:SxDialog (this.openDialog())
+        def at:string ui.focusId
+        if (d.holdsKeys(at)) {
+            ui.keyWith(name shift ctrl)
+            this.afterDialog()
+            return
+        }
+        if (name == "Escape") {
+            d.close()
+            this.afterDialog()
+            return
+        }
+        if (name == "Tab") {
+            ui.focus((d.nextFocus(at shift)))
+            this.sync()
+            return
+        }
+        if ((name == "Enter") && (d.entersDefault(at))) {
+            def c1:boolean (d.act((d.defaultTid()) grid.app))
+            this.afterDialog()
+            return
+        }
+        if (((name == "Enter") || (name == " ")) && (d.isButton(at))) {
+            def c2:boolean (d.act(at grid.app))
+            this.afterDialog()
+            return
+        }
+        ui.keyWith(name shift ctrl)
+        this.afterDialog()
     }
 
     ; After the chrome took an input: run what it chose, and hand the keyboard
@@ -1561,6 +1774,35 @@ class SheetsApp {
             this.rebuildChrome()
             return true
         }
+        if (cmd == "edit.find") {
+            return (this.openFind())
+        }
+        if (cmd == "edit.pasteSpecial") {
+            return (this.openPaste())
+        }
+        if (((cmd == "format.color") || (cmd == "format.fill")) && ((strlen a.arg) == 0)) {
+            color.op = "color"
+            if (cmd == "format.fill") {
+                color.op = "fill"
+            }
+            return (this.openDlg(color))
+        }
+        if ((cmd == "format.border") && ((strlen a.arg) == 0)) {
+            return (this.openDlg(border))
+        }
+        if (cmd == "format.conditional") {
+            return (this.openDlg(cf))
+        }
+        if (cmd == "data.validation") {
+            return (this.openDlg(dv))
+        }
+        if (cmd == "insert.link") {
+            return (this.openDlg(link))
+        }
+        if ((cmd == "sheet.rename") && ((strlen a.arg) == 0)) {
+            grid.app.renameIndex = grid.app.book.activeIndex
+            return (this.openDlg(rename))
+        }
         return (grid.run(cmd a.arg))
     }
 
@@ -1575,16 +1817,35 @@ class SheetsApp {
         def lx:int (x - gx)
         def ly:int (y - gy)
         def hit:CellPos (app.grid.hitTest(app.model lx ly))
+        def kind:string "cell"
         if ((hit.row >= 0) && (hit.col >= 0)) {
             if ((app.sel.contains(hit.row hit.col)) == false) {
                 grid.pointer(lx ly true false false)
                 grid.pointer(lx ly false false false)
             }
         }
+        ; A header: the band under the pointer becomes the selection, unless
+        ; it is already part of a selection of whole columns (or rows).
+        def a:CellPos (new CellPos)
+        def b:CellPos (new CellPos)
+        app.sel.normalized(a b)
+        if ((hit.row == -2) && (hit.col >= 0)) {
+            kind = "column"
+            if ((hit.col < a.col) || (hit.col > b.col) || (a.row > 0) || (b.row < (app.model.rowCount - 1))) {
+                app.selectColumn(hit.col)
+            }
+        }
+        if ((hit.col == -2) && (hit.row >= 0)) {
+            kind = "row"
+            if ((hit.row < a.row) || (hit.row > b.row) || (a.col > 0) || (b.col < (app.model.colCount - 1))) {
+                app.selectRow(hit.row)
+            }
+        }
         if readOnly {
             this.sync()
             return
         }
+        this.fillCtxMenu(kind)
         ctxX = x
         ctxY = y
         ctxOpen = true
@@ -1594,6 +1855,77 @@ class SheetsApp {
             ui.focusId = next
         }
         this.sync()
+    }
+
+    ; The rows of the context menu for a press on a cell, a column header or
+    ; a row header. Every header row is a command the core already has, run
+    ; on the selection the press made.
+    fn fillCtxMenu:void (kind:string) {
+        ctxKind = kind
+        if (kind == "cell") {
+            ctxMenu.name = "Cell actions"
+            ctxMenu.items = cellItems
+            return
+        }
+        def a:CellPos (new CellPos)
+        def b:CellPos (new CellPos)
+        grid.app.sel.normalized(a b)
+        def fresh:[UiItem]
+        ctxMenu.items = fresh
+        def m:MenuCtl ctxMenu
+        if (kind == "column") {
+            def span:string (SpreadsheetModel.colLabel(a.col))
+            def noun:string "column "
+            if (b.col > a.col) {
+                span = ((span + " – ") + (SpreadsheetModel.colLabel(b.col)))
+                noun = "columns "
+            }
+            m.name = "Column actions"
+            this.item(m "h-cut" "Cut" "edit.cut" "" "Ctrl+X")
+            this.item(m "h-copy" "Copy" "edit.copy" "" "Ctrl+C")
+            this.item(m "h-paste" "Paste" "edit.paste" "" "Ctrl+V")
+            this.item(m "h-pastespecial" "Paste special…" "edit.pasteSpecial" "" "")
+            m.addSeparator()
+            this.item(m "h-colleft" "Insert 1 column left" "insert.column.left" "" "")
+            this.item(m "h-colright" "Insert 1 column right" "insert.column.right" "" "")
+            this.item(m "h-delcols" ("Delete " + (noun + span)) "delete.columns" "" "")
+            this.item(m "h-clearcols" ("Clear " + (noun + span)) "edit.clear" "" "Del")
+            m.addSeparator()
+            this.item(m "h-moveleft" "Move column left" "move.column.left" "" "")
+            this.item(m "h-moveright" "Move column right" "move.column.right" "" "")
+            this.item(m "h-fitcol" "Fit column width" "format.autofit.column" "" "")
+            m.addSeparator()
+            this.item(m "h-sortasc" "Sort sheet A → Z" "data.sort.asc" "" "")
+            this.item(m "h-sortdesc" "Sort sheet Z → A" "data.sort.desc" "" "")
+            this.item(m "h-filterclear" "Clear filters" "data.filter.clear" "" "")
+            m.addSeparator()
+            this.item(m "h-cf" "Conditional formatting…" "format.conditional" "" "")
+            this.item(m "h-dv" "Data validation…" "data.validation" "" "")
+            return
+        }
+        def rspan:string (to_string (a.row + 1))
+        def rnoun:string "row "
+        if (b.row > a.row) {
+            rspan = ((rspan + " – ") + (to_string (b.row + 1)))
+            rnoun = "rows "
+        }
+        m.name = "Row actions"
+        this.item(m "r-cut" "Cut" "edit.cut" "" "Ctrl+X")
+        this.item(m "r-copy" "Copy" "edit.copy" "" "Ctrl+C")
+        this.item(m "r-paste" "Paste" "edit.paste" "" "Ctrl+V")
+        this.item(m "r-pastespecial" "Paste special…" "edit.pasteSpecial" "" "")
+        m.addSeparator()
+        this.item(m "r-rowabove" "Insert 1 row above" "insert.row.above" "" "")
+        this.item(m "r-rowbelow" "Insert 1 row below" "insert.row.below" "" "")
+        this.item(m "r-delrows" ("Delete " + (rnoun + rspan)) "delete.rows" "" "")
+        this.item(m "r-clearrows" ("Clear " + (rnoun + rspan)) "edit.clear" "" "Del")
+        m.addSeparator()
+        this.item(m "r-moveup" "Move row up" "move.row.up" "" "")
+        this.item(m "r-movedown" "Move row down" "move.row.down" "" "")
+        this.item(m "r-fitrow" "Fit row height" "format.autofit.row" "" "")
+        m.addSeparator()
+        this.item(m "r-cf" "Conditional formatting…" "format.conditional" "" "")
+        this.item(m "r-dv" "Data validation…" "data.validation" "" "")
     }
 
     fn doubleClick:void (x:int y:int) {
@@ -1661,6 +1993,10 @@ class SheetsApp {
             this.sync()
             return
         }
+        if (this.dialogOpen()) {
+            this.dialogKey(name shift ctrl)
+            return
+        }
         if ((this.anyMenuOpen()) || (gridFocused == false)) {
             if ((name == "Escape") && ((this.anyMenuOpen()) == false)) {
                 gridFocused = true
@@ -1718,6 +2054,28 @@ class SheetsApp {
     ; Printable text, and Ctrl chords (`ctrl` true, `s` the letter). A chord
     ; goes to the sheet wherever focus is: Ctrl+Z undoes from the toolbar too.
     fn text:void (s:string shift:boolean ctrl:boolean) {
+        ; While a dialog is up its fields take the text, and a chord is the
+        ; field's (Ctrl+A selects the query), not the sheet's.
+        if (this.dialogOpen()) {
+            ; Space presses a button; on a field it is a space.
+            def od:SxDialog (this.openDialog())
+            if ((s == " ") && (od.isButton(ui.focusId))) {
+                this.dialogKey(" " shift ctrl)
+                return
+            }
+            if ctrl {
+                ui.keyWith(s shift true)
+            } {
+                ui.type(s)
+            }
+            this.sync()
+            return
+        }
+        ; Ctrl+F and Ctrl+H open Find and replace, as in Excel.
+        if (ctrl && (((to_lowercase s) == "f") || ((to_lowercase s) == "h"))) {
+            def opened:boolean (this.openFind())
+            return
+        }
         if ctrl {
             grid.text(s shift true)
             this.sync()
@@ -1733,12 +2091,22 @@ class SheetsApp {
     }
 
     fn pasteText:void (s:string) {
+        if (this.dialogOpen()) {
+            ui.type(s)
+            this.sync()
+            return
+        }
         SheetsEdits.paste(grid.app s (SheetsEdits.modeAll()))
         this.sync()
     }
 
     ; Ctrl+Shift+V: values only, into the cells' own formats.
     fn pasteTextValues:void (s:string) {
+        if (this.dialogOpen()) {
+            ui.type(s)
+            this.sync()
+            return
+        }
         SheetsEdits.paste(grid.app s (SheetsEdits.modeValues()))
         this.sync()
     }

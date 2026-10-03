@@ -1,0 +1,216 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; ConnDialog — the database connection window, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Database connection ──────────────────────────── × ┐
+;   │ Engine        [auto______________]                   │
+;   │ Data source   [:memory:__________]                   │
+;   │ Table         [sales_____________]                   │
+;   │ connected: sqlite                                    │
+;   │ rows: 120 · key columns: id · engine can: …          │
+;   │                        [Close] [Refresh] [Connect]   │
+;   └──────────────────────────────────────────────────────┘
+;
+; Connecting is the host's part: Connect leaves a request in the core
+; (requestConnection), the host opens the engine and calls noteConnection.
+; The facts below the fields are read from the core after every input, so
+; the window says what is connected once the host has answered.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class ConnDialog extends SxDialog {
+    def engineIn:InputCtl (new InputCtl)
+    def sourceIn:InputCtl (new InputCtl)
+    def tableIn:InputCtl (new InputCtl)
+    def closeBtn:ButtonCtl (new ButtonCtl)
+    def refreshBtn:ButtonCtl (new ButtonCtl)
+    def connectBtn:ButtonCtl (new ButtonCtl)
+    def info:EVGElement (EVGElement.createDiv())
+    def shown:string ""
+
+    Constructor () {
+        this.setup("sx-conn" "Database connection")
+        this.field(engineIn "sx-conn-engine" "Engine")
+        this.field(sourceIn "sx-conn-source" "Data source")
+        this.field(tableIn "sx-conn-table" "Table")
+        this.button(closeBtn "sx-conn-close" "Close" "secondary")
+        this.button(refreshBtn "sx-conn-refresh" "Refresh" "secondary")
+        this.button(connectBtn "sx-conn-connect" "Connect" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a engineIn
+        push a sourceIn
+        push a tableIn
+        push a closeBtn
+        push a refreshBtn
+        push a connectBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a engineIn.tid
+        push a sourceIn.tid
+        push a tableIn.tid
+        push a closeBtn.tid
+        push a refreshBtn.tid
+        push a connectBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == closeBtn.tid) || (target == refreshBtn.tid) || (target == connectBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((engineIn.owns(target)) || (sourceIn.owns(target)) || (tableIn.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return connectBtn.tid
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.connDialog.visible {
+            app.connDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn field3:EVGElement (c:InputCtl) {
+        def f:EVGElement (this.row("sx-dlg-field"))
+        f.addChild((this.label(c.name)))
+        f.addChild((unwrap c.rootEl))
+        return f
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        body.addChild((this.field3(engineIn)))
+        body.addChild((this.field3(sourceIn)))
+        body.addChild((this.field3(tableIn)))
+        info.className = "sx-dlg-col-wide"
+        body.addChild(info)
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap closeBtn.rootEl))
+        acts.addChild((unwrap refreshBtn.rootEl))
+        acts.addChild((unwrap connectBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; The facts, one line each, as the core's window listed them.
+    fn facts:[string] (app:GridApp) {
+        def out:[string]
+        push out ("connected: " + (app.connectionEngine()))
+        if app.db.bound {
+            push out ("rows: " + (app.connectionRows()))
+            push out ("key columns: " + (app.connectionKeys()))
+            def caps:DBCapabilities (app.db.session.capabilities())
+            push out ("engine can: " + (caps.describe()))
+            def fb:string app.db.session.lastFallback
+            if ((strlen fb) > 0) {
+                push out ("ranger did: " + fb)
+            } {
+                push out "ranger did: nothing - the engine took it all"
+            }
+            if app.db.readOnly {
+                push out ("read only: " + app.db.readOnlyReason)
+            }
+            def err:string (app.db.session.lastError())
+            if ((strlen err) > 0) {
+                push out ("last error: " + err)
+            }
+        } {
+            push out "no database is open"
+        }
+        if ((strlen app.dbConnStatus) > 0) {
+            push out app.dbConnStatus
+        }
+        return out
+    }
+
+    fn refresh:void (app:GridApp) {
+        def lines:[string] (this.facts(app))
+        def key:string (join lines "\n")
+        if (key == shown) {
+            return
+        }
+        shown = key
+        UiTree.clearChildren(info)
+        def i:int 0
+        while (i < (array_length lines)) {
+            def l:EVGElement (EVGElement.createSpan())
+            l.className = "sx-dlg-note"
+            l.elementType = 1
+            l.textContent = (itemAt lines i)
+            info.addChild(l)
+            i = (i + 1)
+        }
+    }
+
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        def driver:string app.dbDriver
+        if ((strlen driver) == 0) {
+            driver = "auto"
+        }
+        engineIn.setValue(driver)
+        engineIn.selectAll()
+        sourceIn.setValue((app.connectionSource()))
+        tableIn.setValue((app.connectionTable()))
+        shown = "-"
+        this.refresh(app)
+        this.openOn(pageW pageH)
+        return engineIn.tid
+    }
+
+    ; The host answers after the click, so the facts are read again after
+    ; every input rather than only when the window opened.
+    fn follow:void (app:GridApp) {
+        if win.open {
+            this.refresh(app)
+        }
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == closeBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == refreshBtn.tid) {
+            def ok:boolean (app.refreshDatabaseSheet())
+            app.dbConnStatus = app.db.status
+        }
+        if (target == connectBtn.tid) {
+            def table:string (trim tableIn.value)
+            if ((strlen table) == 0) {
+                app.dbConnStatus = "name a table to open"
+            } {
+                app.requestConnection((trim engineIn.value) (trim sourceIn.value) table)
+            }
+        }
+        this.refresh(app)
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(engineIn focusId)
+        this.caretFor(sourceIn focusId)
+        this.caretFor(tableIn focusId)
+    }
+}

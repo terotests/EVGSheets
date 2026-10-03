@@ -1,0 +1,143 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; ListDialog — a list rule's choices, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Value for C4 ────────────── × ┐
+;   │ ( Yes )                         │
+;   │ ( No  )                         │
+;   │ ( Maybe )                       │
+;   │             [Cancel] [Choose]   │
+;   └─────────────────────────────────┘
+;
+; The core opens its own picker from the cell's arrow (openListPicker), and
+; holds the choices in listValues; this shows them as a radio group and
+; writes the chosen one into the active cell, as one undoable edit.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class ListDialog extends SxDialog {
+    def what:RadioGroupCtl (new RadioGroupCtl)
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def okBtn:ButtonCtl (new ButtonCtl)
+    def values:[string]
+
+    Constructor () {
+        this.setup("sx-list" "Choose a value")
+        what.tid = "sx-list-what"
+        what.name = "Value"
+        this.button(cancelBtn "sx-list-cancel" "Cancel" "secondary")
+        this.button(okBtn "sx-list-ok" "Choose" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a what
+        push a cancelBtn
+        push a okBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a (what.itemTid(what.rovingValue))
+        push a cancelBtn.tid
+        push a okBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == cancelBtn.tid) || (target == okBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return (what.owns(target))
+    }
+
+    fn defaultTid:string () {
+        return okBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.listDialog.visible {
+            app.listDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        body.addChild((unwrap what.rootEl))
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap cancelBtn.rootEl))
+        acts.addChild((unwrap okBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Opens on the core's listValues for the active cell, the current value
+    ; chosen; focus on it (or the first).
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        def r:int app.sel.active.row
+        def c:int app.sel.active.col
+        win.title = ("Value for " + (SpreadsheetModel.cellLabel(r c)))
+        win.name = win.title
+        def current:string (app.model.getCell(r c))
+        clear what.items
+        clear values
+        what.value = ""
+        def i:int 0
+        while (i < (array_length app.listValues)) {
+            def v:string (itemAt app.listValues i)
+            what.addItem((to_string i) v false)
+            push values v
+            if (v == current) {
+                what.value = (to_string i)
+            }
+            i = (i + 1)
+        }
+        what.rovingValue = what.value
+        if ((strlen what.rovingValue) == 0) {
+            what.rovingValue = "0"
+        }
+        this.openOn(pageW pageH)
+        return (what.itemTid(what.rovingValue))
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == cancelBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == okBtn.tid) {
+            this.close()
+            ; The item focus is on: Enter on a value picks it, as in a
+            ; drop-down, whether or not Space marked it first.
+            def at:string what.rovingValue
+            if ((strlen at) == 0) {
+                at = what.value
+            }
+            def idx:int (?? (to_int at) -1)
+            if ((idx >= 0) && (idx < (array_length values))) {
+                def r:int app.sel.active.row
+                def c:int app.sel.active.col
+                app.model.beginTx()
+                app.model.applyEdit(r c (itemAt values idx) "")
+                app.model.endTx()
+                app.syncTouched()
+            }
+            return true
+        }
+        return false
+    }
+}

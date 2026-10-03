@@ -1,0 +1,258 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; SqlDialog — the SQL box, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ SQL query ───────────────────────────────────────────────── × ┐
+;   │ SQL  [SELECT * FROM sales LIMIT 20______________________]       │
+;   │ engine: sqlite                                                  │
+;   │ Tables (* is a key column)                                      │
+;   │   sales(id*, region, country, month, revenue, units)            │
+;   │ Examples  [first 20] [group] [filter] [top 10] [count]          │
+;   │ New sheet adds a tab; Update replaces the sheet you are on      │
+;   │                               [Close] [Update] [New sheet]      │
+;   └─────────────────────────────────────────────────────────────────┘
+;
+; The query, the schema, the examples and running them are the core's
+; (dbSqlText, schemaLines, exampleQueries, runSqlInto, dbSqlStatus); this
+; shows them and stays open after a run, so the status says what happened
+; with the query still in the box.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class SqlDialog extends SxDialog {
+    def sqlIn:InputCtl (new InputCtl)
+    def ex0:ButtonCtl (new ButtonCtl)
+    def ex1:ButtonCtl (new ButtonCtl)
+    def ex2:ButtonCtl (new ButtonCtl)
+    def ex3:ButtonCtl (new ButtonCtl)
+    def ex4:ButtonCtl (new ButtonCtl)
+    def closeBtn:ButtonCtl (new ButtonCtl)
+    def updateBtn:ButtonCtl (new ButtonCtl)
+    def newBtn:ButtonCtl (new ButtonCtl)
+    def info:EVGElement (EVGElement.createDiv())
+    def whereEl:EVGElement (EVGElement.createSpan())
+    def examples:[string]
+    ; The sheet in front is a query's own, so Update is the default.
+    def onSql:boolean false
+
+    Constructor () {
+        this.setup("sx-sql" "SQL query")
+        this.field(sqlIn "sx-sql-text" "SQL")
+        sqlIn.boxWidth = 470.0
+        this.button(ex0 "sx-sql-ex0" (GridApp.exampleLabel(0)) "secondary")
+        this.button(ex1 "sx-sql-ex1" (GridApp.exampleLabel(1)) "secondary")
+        this.button(ex2 "sx-sql-ex2" (GridApp.exampleLabel(2)) "secondary")
+        this.button(ex3 "sx-sql-ex3" (GridApp.exampleLabel(3)) "secondary")
+        this.button(ex4 "sx-sql-ex4" (GridApp.exampleLabel(4)) "secondary")
+        this.button(closeBtn "sx-sql-close" "Close" "secondary")
+        this.button(updateBtn "sx-sql-update" "Update" "secondary")
+        this.button(newBtn "sx-sql-new" "New sheet" "primary")
+    }
+
+    fn exButtons:[ButtonCtl] () {
+        def a:[ButtonCtl]
+        push a ex0
+        push a ex1
+        push a ex2
+        push a ex3
+        push a ex4
+        return a
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a sqlIn
+        push a ex0
+        push a ex1
+        push a ex2
+        push a ex3
+        push a ex4
+        push a closeBtn
+        push a updateBtn
+        push a newBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a sqlIn.tid
+        def ex:[ButtonCtl] (this.exButtons())
+        def i:int 0
+        while (i < (array_length examples)) {
+            def b:ButtonCtl (itemAt ex i)
+            push a b.tid
+            i = (i + 1)
+        }
+        push a closeBtn.tid
+        push a updateBtn.tid
+        push a newBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn exampleAt:int (target:string) {
+        def ex:[ButtonCtl] (this.exButtons())
+        def i:int 0
+        while (i < (array_length examples)) {
+            def b:ButtonCtl (itemAt ex i)
+            if (target == b.tid) {
+                return i
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
+    fn isButton:boolean (target:string) {
+        if ((this.exampleAt(target)) >= 0) {
+            return true
+        }
+        return ((target == closeBtn.tid) || (target == updateBtn.tid) || (target == newBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return (sqlIn.owns(target))
+    }
+
+    fn defaultTid:string () {
+        if onSql {
+            return updateBtn.tid
+        }
+        return newBtn.tid
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.sqlDialog.visible {
+            app.sqlDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn note:EVGElement (text:string) {
+        def l:EVGElement (EVGElement.createSpan())
+        l.className = "sx-dlg-note"
+        l.elementType = 1
+        l.textContent = text
+        return l
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        def f:EVGElement (this.row("sx-dlg-field"))
+        f.addChild((this.label(sqlIn.name)))
+        f.addChild((unwrap sqlIn.rootEl))
+        body.addChild(f)
+        body.addChild((this.statusRow()))
+        info.className = "sx-dlg-col-wide"
+        body.addChild(info)
+        if ((array_length examples) > 0) {
+            body.addChild((this.heading("Examples, written for this database")))
+            def exRow:EVGElement (this.row("sx-dlg-presets"))
+            def ex:[ButtonCtl] (this.exButtons())
+            def i:int 0
+            while (i < (array_length examples)) {
+                def b:ButtonCtl (itemAt ex i)
+                exRow.addChild((unwrap b.rootEl))
+                i = (i + 1)
+            }
+            body.addChild(exRow)
+        }
+        whereEl.className = "sx-dlg-note"
+        whereEl.elementType = 1
+        body.addChild(whereEl)
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap closeBtn.rootEl))
+        acts.addChild((unwrap updateBtn.rootEl))
+        acts.addChild((unwrap newBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; What the core says now: the status, the tables, where a run goes.
+    fn refresh:void (app:GridApp) {
+        if ((strlen app.dbSqlStatus) > 0) {
+            statusEl.textContent = app.dbSqlStatus
+        } {
+            if app.db.bound {
+                statusEl.textContent = ("engine: " + (app.db.session.engineName()))
+            } {
+                statusEl.textContent = "no database is open"
+            }
+        }
+        UiTree.clearChildren(info)
+        def schema:[string] (app.schemaLines())
+        if ((array_length schema) > 0) {
+            info.addChild((this.heading("Tables (* is a key column)")))
+            def i:int 0
+            while (i < (array_length schema)) {
+                info.addChild((this.note((itemAt schema i))))
+                i = (i + 1)
+            }
+        }
+        onSql = (app.sqlSheetActive())
+        if onSql {
+            whereEl.textContent = ("Update replaces the sheet you are on: " + (app.activeSheetName()))
+            updateBtn.variant = "primary"
+            newBtn.variant = "secondary"
+        } {
+            whereEl.textContent = "New sheet adds a tab; Update replaces the sheet you are on"
+            updateBtn.variant = "secondary"
+            newBtn.variant = "primary"
+        }
+    }
+
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        sqlIn.setValue(app.dbSqlText)
+        examples = (app.exampleQueries())
+        this.refresh(app)
+        this.openOn(pageW pageH)
+        UiTree.inline((unwrap win.frameEl) "width" "620px")
+        return sqlIn.tid
+    }
+
+    fn follow:void (app:GridApp) {
+        if win.open {
+            UiTree.inline((unwrap win.frameEl) "width" "620px")
+        }
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        app.dbSqlText = sqlIn.value
+        if (target == closeBtn.tid) {
+            this.close()
+            return true
+        }
+        def ex:int (this.exampleAt(target))
+        if (ex >= 0) {
+            app.dbSqlText = (itemAt examples ex)
+            app.dbSqlStatus = "example put in the box - Update replaces this sheet, New sheet adds one"
+            sqlIn.setValue(app.dbSqlText)
+        }
+        if (target == updateBtn.tid) {
+            def ok1:boolean (app.runSqlInto(app.dbSqlText (app.sqlSheetActive())))
+        }
+        if (target == newBtn.tid) {
+            def ok2:boolean (app.runSqlInto(app.dbSqlText false))
+        }
+        examples = (app.exampleQueries())
+        this.refresh(app)
+        this.buildAll()
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(sqlIn focusId)
+    }
+}

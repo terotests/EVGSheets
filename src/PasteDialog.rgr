@@ -1,0 +1,126 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; PasteDialog — Paste special, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Paste special ──────────────────────────────── × ┐
+;   │ Paste                                             │
+;   │  ( All (values, formulas, formats)              ) │
+;   │  ( Values only                                  ) │
+;   │  ( Formats only                                 ) │
+;   │  ( Values and formulas, no formats              ) │
+;   │                               [Cancel] [Paste]    │
+;   └───────────────────────────────────────────────────┘
+;
+; The core's own Paste special is an EVGWindow with four radios. This is a
+; modal WindowCtl with a RadioGroupCtl and two ButtonCtls (see SxDialog).
+; Pasting stays the core's: Paste sets GridApp.pasteMode for one
+; pasteClipboard() and puts the remembered mode back, as the core's dialog
+; does.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class PasteDialog extends SxDialog {
+    def what:RadioGroupCtl (new RadioGroupCtl)
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def pasteBtn:ButtonCtl (new ButtonCtl)
+
+    Constructor () {
+        this.setup("sx-paste" "Paste special")
+        what.tid = "sx-paste-what"
+        what.name = "Paste"
+        ; The values are GridApp.pasteMode's: 0 all, 1 values, 2 formats,
+        ; 3 values and formulas without formats.
+        what.addItem("0" "All (values, formulas, formats)" false)
+        what.addItem("1" "Values only" false)
+        what.addItem("2" "Formats only" false)
+        what.addItem("3" "Values and formulas, no formats" false)
+        this.button(cancelBtn "sx-paste-cancel" "Cancel" "secondary")
+        this.button(pasteBtn "sx-paste-ok" "Paste" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a what
+        push a cancelBtn
+        push a pasteBtn
+        return a
+    }
+
+    ; One stop for the group, on its chosen item, as a radio group has.
+    fn ring:[string] () {
+        def a:[string]
+        push a (what.itemTid(what.value))
+        push a cancelBtn.tid
+        push a pasteBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == cancelBtn.tid) || (target == pasteBtn.tid))
+    }
+
+    ; Enter on a choice pastes with it, as Enter does in a desktop dialog.
+    fn entersDefault:boolean (target:string) {
+        return (what.owns(target))
+    }
+
+    fn defaultTid:string () {
+        return pasteBtn.tid
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        body.addChild((this.heading(what.name)))
+        body.addChild((unwrap what.rootEl))
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap cancelBtn.rootEl))
+        acts.addChild((unwrap pasteBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Opens on the mode the core pastes with, and returns where focus goes:
+    ; the chosen item.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        what.value = (to_string app.pasteMode)
+        what.rovingValue = what.value
+        this.openOn(pageW pageH)
+        return (what.itemTid(what.value))
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.pasteDialog.visible {
+            app.pasteDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == cancelBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == pasteBtn.tid) {
+            ; Close first: the paste ends in the core's own redraw, and the
+            ; dialog must not be the thing it draws under.
+            this.close()
+            def prev:int app.pasteMode
+            app.pasteMode = (?? (to_int what.value) 0)
+            app.pasteClipboard()
+            app.pasteMode = prev
+            return true
+        }
+        return false
+    }
+}

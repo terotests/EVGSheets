@@ -1,13 +1,14 @@
 # Build EVGSheets, test it in a real Chromium, and publish it to GitHub Pages
 # (https://terotests.github.io/EVGSheets/).
 #
-#   /             the editor (?ui=full|compact|viewer|grid, ?tools=, ?theme=, ?readonly=)
+#   /             the editor, empty workbook (?demo for the sample, ?ui=full|compact|viewer|grid, ?tools=, ?theme=, ?readonly=)
 #   /embed.html   the same build mounted four times with different parameters
 #
-# The app is Ranger source. It is compiled by the compiler committed in Ranger
-# (dist/rgrc.js) together with the parts of Ranger it imports — the datagrid
-# core, the EVG library (fetched by Ranger's `npm run deps`) — and EVGUI's
-# controllers. A sparse, shallow checkout of each is enough; no compiler build.
+# The app and its datagrid core (datagrid/) are Ranger source. They are
+# compiled by the compiler committed in Ranger (dist/rgrc.js) together with the
+# Ranger libraries the core imports, the EVG library (fetched by Ranger's
+# `npm run deps`) and EVGUI's controllers. A sparse, shallow checkout of each
+# is enough; no compiler build. Ranger's own gallery/datagrid is not used.
 name: Deploy EVGSheets to GitHub Pages
 
 on:
@@ -24,11 +25,10 @@ on:
         required: false
         default: ""
 
-# The core API this app uses (GridApp.setChrome, stateJson, sceneList, the
-# modern/dark themes) and EVGUI's pressed-state fix are on these branches
-# until they are merged; then both go back to master / main.
+# EVGUI's pressed-state fix is on this branch until it is merged; then it goes
+# back to main.
 env:
-  RANGER_REF: ${{ inputs.ranger_ref || 'claude/bold-ride-6h3zlv' }}
+  RANGER_REF: ${{ inputs.ranger_ref || 'master' }}
   EVGUI_REF: ${{ inputs.evgui_ref || 'claude/bold-ride-6h3zlv' }}
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
         with:
           path: evgsheets
 
-      - name: Checkout Ranger (compiler, datagrid core, EVG)
+      - name: Checkout Ranger (compiler, the libraries the core imports, EVG)
         uses: actions/checkout@v4
         with:
           repository: terotests/Ranger
@@ -64,9 +64,6 @@ jobs:
             bin
             scripts
             gallery/ts_parser
-            gallery/datagrid/src
-            gallery/datagrid/web
-            gallery/datagrid/fixtures
             gallery/evg_window
             gallery/game_engine/ui
             gallery/office/assets
