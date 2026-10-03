@@ -45,6 +45,7 @@ Import "../../datagrid/web/datagrid_web.rgr"
 Import "../../evgui/src/UiHost.rgr"
 Import "RibbonCtl.rgr"
 Import "FindDialog.rgr"
+Import "PasteDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -94,8 +95,9 @@ class SheetsApp {
     def badgeEl:EVGElement (EVGElement.createSpan())
     def ctxHolder:EVGElement (EVGElement.createDiv())
     ; The dialogs the app draws with EVGUI controllers instead of leaving them
-    ; to the core's EVGWindow. One at a time; Find and replace is the first.
+    ; to the core's EVGWindow, moved over one at a time.
     def find:FindDialog (new FindDialog)
+    def paste:PasteDialog (new PasteDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -808,14 +810,20 @@ class SheetsApp {
         dlgHolder.id = "sx-dlg-holder"
         dlgHolder.className = "sx-dlg-holder"
         UiTree.clearChildren(dlgHolder)
-        this.mount(dlgHolder find.win)
-        def fc:[UiCtl] (find.ctls())
-        def fi:int 1
-        while (fi < (array_length fc)) {
-            push ui.ctls (itemAt fc fi)
-            fi = (fi + 1)
+        def dl:[SxDialog] (this.dialogs())
+        def di:int 0
+        while (di < (array_length dl)) {
+            def d:SxDialog (itemAt dl di)
+            this.mount(dlgHolder d.win)
+            def fc:[UiCtl] (d.ctls())
+            def fi:int 1
+            while (fi < (array_length fc)) {
+                push ui.ctls (itemAt fc fi)
+                fi = (fi + 1)
+            }
+            d.buildAll()
+            di = (di + 1)
         }
-        find.buildAll()
         root.addChild(dlgHolder)
 
         grid.app.setChrome(false showFormulaBar false false)
@@ -854,6 +862,7 @@ class SheetsApp {
     ; =========================================================================
 
     fn sync:void () {
+        this.adoptCoreDialogs()
         def app:GridApp grid.app
         def model:SpreadsheetModel app.model
         def sel:GridSelection app.sel
@@ -931,7 +940,13 @@ class SheetsApp {
         def onlyList:[EVGElement]
         push onlyList (unwrap tabs.listEl)
         troot.children = onlyList
-        find.showCarets(ui.focusId)
+        def sd:[SxDialog] (this.dialogs())
+        def si:int 0
+        while (si < (array_length sd)) {
+            def d:SxDialog (itemAt sd si)
+            d.showFocus(ui.focusId)
+            si = (si + 1)
+        }
     }
 
     sfn baseName:string (p:string) {
@@ -1516,8 +1531,9 @@ class SheetsApp {
         ui.pressTidValue = target
         ui.clickWith(target shift ctrl)
         if (this.dialogOpen()) {
-            if (find.isButton(target)) {
-                def closed:boolean (find.act(target grid.app))
+            def d:SxDialog (this.openDialog())
+            if (d.isButton(target)) {
+                def closed:boolean (d.act(target grid.app))
             }
             this.afterDialog()
             return
@@ -1529,17 +1545,74 @@ class SheetsApp {
     ; Dialogs drawn with EVGUI controllers
     ; =========================================================================
 
-    fn dialogOpen:boolean () {
-        return find.win.open
+    fn dialogs:[SxDialog] () {
+        def a:[SxDialog]
+        push a find
+        push a paste
+        return a
     }
 
-    fn openFind:boolean () {
-        this.closeMenus()
-        def at:string (find.open(grid.app pageW pageH))
+    fn dialogOpen:boolean () {
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if d.win.open {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    ; The open one. Only asked while `dialogOpen()` is true; Find otherwise.
+    fn openDialog:SxDialog () {
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if d.win.open {
+                return d
+            }
+            i = (i + 1)
+        }
+        return find
+    }
+
+    ; The core can still open its own EVGWindow for a dialog the app has
+    ; replaced: a command run straight on the grid, a shortcut the core reads
+    ; itself. Whatever opened it, the app's dialog is shown instead.
+    fn adoptCoreDialogs:void () {
+        def app:GridApp grid.app
+        if app.findDialog.visible {
+            app.findDialog.close()
+            def f:boolean (this.openFind())
+        }
+        if app.pasteDialog.visible {
+            app.pasteDialog.close()
+            def p:boolean (this.openPaste())
+        }
+    }
+
+    ; A dialog has opened with focus going to `at`.
+    fn shown:boolean (at:string) {
         gridFocused = false
         ui.focus(at)
         this.sync()
         return true
+    }
+
+    fn openFind:boolean () {
+        this.closeMenus()
+        return (this.shown((find.open(grid.app pageW pageH))))
+    }
+
+    fn openPaste:boolean () {
+        this.closeMenus()
+        if readOnly {
+            return false
+        }
+        return (this.shown((paste.open(grid.app pageW pageH))))
     }
 
     ; After a dialog took an input: a closed dialog gives the keyboard back
@@ -1553,27 +1626,28 @@ class SheetsApp {
     }
 
     ; Keys while a dialog is up. Escape closes it, Tab walks its ring, Enter
-    ; in a field is the default button, and Enter or Space on a button
-    ; presses it; the rest goes to the focused controller.
+    ; where the dialog says so is the default button, and Enter or Space on a
+    ; button presses it; the rest goes to the focused controller.
     fn dialogKey:void (name:string shift:boolean ctrl:boolean) {
+        def d:SxDialog (this.openDialog())
         def at:string ui.focusId
         if (name == "Escape") {
-            find.close()
+            d.close()
             this.afterDialog()
             return
         }
         if (name == "Tab") {
-            ui.focus((find.nextFocus(at shift)))
+            ui.focus((d.nextFocus(at shift)))
             this.sync()
             return
         }
-        if ((name == "Enter") && (find.isField(at))) {
-            def c1:boolean (find.act(find.nextBtn.tid grid.app))
+        if ((name == "Enter") && (d.entersDefault(at))) {
+            def c1:boolean (d.act((d.defaultTid()) grid.app))
             this.afterDialog()
             return
         }
-        if (((name == "Enter") || (name == " ")) && (find.isButton(at))) {
-            def c2:boolean (find.act(at grid.app))
+        if (((name == "Enter") || (name == " ")) && (d.isButton(at))) {
+            def c2:boolean (d.act(at grid.app))
             this.afterDialog()
             return
         }
@@ -1644,6 +1718,9 @@ class SheetsApp {
         }
         if (cmd == "edit.find") {
             return (this.openFind())
+        }
+        if (cmd == "edit.pasteSpecial") {
+            return (this.openPaste())
         }
         return (grid.run(cmd a.arg))
     }
@@ -1804,6 +1881,12 @@ class SheetsApp {
         ; While a dialog is up its fields take the text, and a chord is the
         ; field's (Ctrl+A selects the query), not the sheet's.
         if (this.dialogOpen()) {
+            ; Space presses a button; on a field it is a space.
+            def od:SxDialog (this.openDialog())
+            if ((s == " ") && (od.isButton(ui.focusId))) {
+                this.dialogKey(" " shift ctrl)
+                return
+            }
             if ctrl {
                 ui.keyWith(s shift true)
             } {

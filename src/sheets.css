@@ -530,6 +530,7 @@
 .sx-dlg-label { color: var(--text); font-size: 13px; line-height: 18px; width: 92px; flex-shrink: 0; }
 .sx-dlg-options { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 24px; padding: 4px 0px; }
 .sx-dlg-col { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 10px; width: 180px; }
+.sx-dlg-heading { color: var(--text); font-size: 13px; font-weight: 600; line-height: 18px; }
 .sx-dlg-status { color: var(--muted); font-size: 12px; line-height: 16px; height: 16px; }
 .sx-dlg-actions {
   display: flex;
@@ -614,6 +615,25 @@
 .ui-button-primary:hover { background-color: var(--accent-ink); }
 .ui-button-primary .ui-button-label { color: var(--on-accent); font-weight: 600; }
 .ui-button-state-pressed { transform: scale(0.97); }
+
+/* A radio group in a dialog: one row per choice, the chosen one marked. */
+.ui-radiogroup { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; width: 404px; }
+/* A text leaf shrink-wraps, so the row's width is stated: the group's, less
+ * the padding and the border. */
+.ui-radio {
+  width: 378px;
+  padding: 7px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background-color: var(--field);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 18px;
+}
+.ui-radio:hover { background-color: var(--hover); }
+.ui-radio:focus { border: 1px solid var(--accent); }
+.ui-radio-state-checked { background-color: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.ui-radio-disabled { opacity: 0.45; }
 
 /* --- a phone ------------------------------------------------------------------------- */
 

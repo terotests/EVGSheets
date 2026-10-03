@@ -222,6 +222,26 @@ try {
   await page.waitForTimeout(80);
   ok("Escape closes it and the sheet has the keyboard", await page.evaluate(() => !window.sheet.app.find.win.open && window.sheet.app.gridFocused));
 
+  // Paste special: an EVGUI dialog too, whatever opens it.
+  await page.evaluate(() => { window.sheet.run("nav.goto", "B3"); window.sheet.run("edit.copy", ""); window.sheet.run("nav.goto", "F10"); });
+  await page.evaluate(() => window.sheet.run("edit.pasteSpecial", ""));
+  await page.waitForTimeout(150);
+  ok("Paste special opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.paste.win.open && !window.sheet.app.grid.app.pasteDialog.visible));
+  await shot(page, "06_paste_special");
+  await click(page, "sx-paste-what-1");
+  ok("a click chooses Values only", (await page.evaluate(() => window.sheet.app.paste.what.value)) === "1");
+  await click(page, "sx-paste-ok");
+  const pasted = await page.evaluate(() => [window.sheet.app.paste.win.open, window.sheet.app.grid.app.model.getCell(9, 5), window.sheet.app.grid.app.pasteMode]);
+  ok("Paste pastes the value and closes", !pasted[0] && pasted[1] !== "" && !String(pasted[1]).startsWith("="), String(pasted[1]));
+  ok("…and the next paste is a full one again", pasted[2] === 0);
+  await page.evaluate(() => window.sheet.run("edit.pasteSpecial", ""));
+  await page.waitForTimeout(80);
+  ok("it opens again", await page.evaluate(() => window.sheet.app.paste.win.open));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape cancels it", await page.evaluate(() => !window.sheet.app.paste.win.open && window.sheet.app.gridFocused));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);
