@@ -20,7 +20,7 @@ embeds: <https://terotests.github.io/EVGSheets/embed.html>
 | Context menu on cells, and on column and row headers (insert, delete, clear, move, fit, sort, conditional formatting, validation) | `MenuCtl` in context mode |
 | Sheet tabs: add, drag to reorder, and a right-click menu (rename, duplicate, insert, move left/right, delete with confirmation) | `TabsCtl`, `RibbonCtl`, `MenuCtl` in context mode |
 | Status line: Ready / editing / what happened, and Sum, Average and Count of the selection | the app |
-| Dialogs: find and replace, paste special, rename sheet, link, text and fill colour, borders, conditional formatting, data validation and its list, chart picker, SQL query, database connection | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
+| Dialogs: find and replace, paste special, rename sheet, link, text and fill colour, borders, conditional formatting (with the sheet's rules listed to edit or delete), data validation and its list, chart picker, SQL query, database connection | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
 | Formula bar, grid | the datagrid core (`GridApp`) |
 | Light and dark | `@vars` palettes in `src/sheets.css`; the core's `modern` and `dark` grid themes |
 

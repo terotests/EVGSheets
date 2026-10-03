@@ -209,6 +209,12 @@ class SpreadsheetUndoOp {
     def otherSheetIdx:[int]
     def otherKeys:[string]
     def otherTexts:[string]
+    ; A change to the sheet's conditional formatting rules: the whole list
+    ; before and after. Rules are few, and a whole list is the only shape that
+    ; covers add, edit, delete and clear alike.
+    def cfSwap:boolean false
+    def cfBefore:[CfRule]
+    def cfAfter:[CfRule]
 
     Constructor () {
     }
@@ -283,6 +289,9 @@ class SpreadsheetUndoOp {
             push otherTexts (itemAt o.otherTexts ot)
             ot = (ot + 1)
         }
+        cfSwap = o.cfSwap
+        cfBefore = (SpreadsheetModel.copyCfRules(o.cfBefore))
+        cfAfter = (SpreadsheetModel.copyCfRules(o.cfAfter))
     }
 }
 
@@ -1852,8 +1861,64 @@ class SpreadsheetModel {
 
     ; --- conditional formatting rules -----------------------------------------
     ; Rules are sheet metadata rather than cell contents, so they live beside
-    ; the cells and not on the undo stack: undoing a paste must not silently
-    ; drop a rule the paste never touched.
+    ; the cells, and undoing a paste must not silently drop a rule the paste
+    ; never touched. A change made to the rules themselves (add, edit, delete,
+    ; clear) is an action of its own on the undo stack: the caller takes
+    ; `cfSnapshot()` first, changes the rules, then `pushCfOp`.
+    sfn copyCfRules:[CfRule] (list:[CfRule]) {
+        def out:[CfRule]
+        def i:int 0
+        while (i < (array_length list)) {
+            def rule:CfRule (itemAt list i)
+            push out (rule.copy())
+            i = (i + 1)
+        }
+        return out
+    }
+
+    fn cfSnapshot:[CfRule] () {
+        return (SpreadsheetModel.copyCfRules(cfRules))
+    }
+
+    ; `row`, `col` is where the selection goes back to on undo.
+    fn pushCfOp:void (before:[CfRule] row:int col:int) {
+        def op:SpreadsheetUndoOp (new SpreadsheetUndoOp)
+        op.cfSwap = true
+        op.row = row
+        op.col = col
+        op.cfBefore = (SpreadsheetModel.copyCfRules(before))
+        op.cfAfter = (this.cfSnapshot())
+        history.record(op)
+    }
+
+    fn cfRuleAt:CfRule (i:int) {
+        return (itemAt cfRules i)
+    }
+
+    fn replaceCfRule:void (i:int rule:CfRule) {
+        if ((i < 0) || (i >= (array_length cfRules))) {
+            return
+        }
+        set_at cfRules i rule
+        version = (version + 1)
+    }
+
+    fn removeCfRuleAt:void (i:int) {
+        if ((i < 0) || (i >= (array_length cfRules))) {
+            return
+        }
+        def keep:[CfRule]
+        def k:int 0
+        while (k < (array_length cfRules)) {
+            if (k != i) {
+                push keep (itemAt cfRules k)
+            }
+            k = (k + 1)
+        }
+        cfRules = keep
+        version = (version + 1)
+    }
+
     fn addCfRule:void (rule:CfRule) {
         push cfRules rule
         version = (version + 1)
@@ -2445,6 +2510,15 @@ class SpreadsheetModel {
     }
 
     fn applyOp:void (op:SpreadsheetUndoOp toAfter:boolean) {
+        if op.cfSwap {
+            if toAfter {
+                cfRules = (SpreadsheetModel.copyCfRules(op.cfAfter))
+            } {
+                cfRules = (SpreadsheetModel.copyCfRules(op.cfBefore))
+            }
+            version = (version + 1)
+            return
+        }
         if (op.structKind != (SheetStructKind.none())) {
             this.applyStructOp(op toAfter)
             structDirty = true

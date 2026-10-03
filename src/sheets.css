@@ -658,6 +658,13 @@
 .sx-chip-row { flex-direction: row; flex-wrap: wrap; gap: 6px; width: 300px; }
 .sx-chip-wide { flex-direction: row; flex-wrap: wrap; gap: 6px; width: 476px; }
 .sx-chip-off { opacity: 0.4; }
+/* The rules of the conditional formatting dialog: a toggle group drawn as a
+ * list, each row painted in its rule's fill (inline). */
+.sx-rule-list { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 4px; width: 404px; }
+.sx-rule { width: 402px; padding: 5px 10px; border: 1px solid var(--field-border); border-radius: 6px; font-size: 13px; line-height: 18px; cursor: pointer; }
+.sx-rule:focus { border: 1px solid var(--accent); }
+.sx-rule-on { border: 2px solid var(--accent); }
+.sx-gone { display: none; }
 .sx-dlg-label-mid { color: var(--text); font-size: 13px; line-height: 18px; width: 64px; flex-shrink: 0; }
 .sx-dlg-actions-split { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: space-between; gap: 8px; padding-top: 4px; }
 

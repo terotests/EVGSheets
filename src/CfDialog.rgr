@@ -5,7 +5,11 @@
 ; =============================================================================
 ;
 ;   ┌─ Conditional formatting ─────────────────────────────── × ┐
-;   │ Rule for B2:B9                                             │
+;   │ Rules on this sheet                                        │
+;   │ [ B2:B9   Value > 0                                    ]   │
+;   │ [ C2:C21  Colour scale                                 ]   │
+;   │                            [Delete rule] [Update rule]    │
+;   │ Applies to [B2:B9____]                                     │
 ;   │ Format cells where the value is                            │
 ;   │ (Greater than) (At least) (Less than) (At most) (Equal) …  │
 ;   │ Value  [0______]     and  [______]                         │
@@ -16,13 +20,21 @@
 ;
 ; The form remembers itself in the core's fields (cfTest, cfV1, cfV2,
 ; cfFillHex), so it opens on what was last asked, as the core's window did.
-; Rules go into the model with addCfRule / clearCfRulesIn; Add rule keeps the
-; dialog open, so several rules are one visit.
+; Add rule keeps the dialog open, so several rules are one visit.
+;
+; The list is Excel's "Manage rules": every rule on the sheet, each row
+; painted in its fill. Choosing one loads it into the form; Update rule writes
+; the form back into it and Delete rule removes it. Choosing it again lets go,
+; and the form adds new rules again. Every change to the rules is one undo.
 ; =============================================================================
 
 Import "SxDialog.rgr"
 
 class CfDialog extends SxDialog {
+    def rules:RadioGroupCtl (new RadioGroupCtl)
+    def deleteBtn:ButtonCtl (new ButtonCtl)
+    def updateBtn:ButtonCtl (new ButtonCtl)
+    def rangeIn:InputCtl (new InputCtl)
     def test:RadioGroupCtl (new RadioGroupCtl)
     def v1In:InputCtl (new InputCtl)
     def v2In:InputCtl (new InputCtl)
@@ -31,10 +43,23 @@ class CfDialog extends SxDialog {
     def clearBtn:ButtonCtl (new ButtonCtl)
     def posNegBtn:ButtonCtl (new ButtonCtl)
     def addBtn:ButtonCtl (new ButtonCtl)
-    def rangeEl:EVGElement (EVGElement.createSpan())
+    def emptyEl:EVGElement (EVGElement.createSpan())
+    ; The rule the form was last loaded from ("" none), and the model version
+    ; the list was made from.
+    def loaded:string ""
+    def seenVersion:int -1
+    def rowFills:[string]
+    def ruleActs:EVGElement (EVGElement.createDiv())
 
     Constructor () {
         this.setup("sx-cf" "Conditional formatting")
+        rules.tid = "sx-cf-rules"
+        rules.name = "Rules on this sheet"
+        rules.toggleMode = true
+        this.button(deleteBtn "sx-cf-delete" "Delete rule" "secondary")
+        this.button(updateBtn "sx-cf-update" "Update rule" "secondary")
+        this.field(rangeIn "sx-cf-range" "Applies to")
+        rangeIn.boxWidth = 140.0
         test.tid = "sx-cf-test"
         test.name = "Format cells where the value is"
         test.addItem("601" "Greater than" false)
@@ -72,6 +97,10 @@ class CfDialog extends SxDialog {
     fn ctls:[UiCtl] () {
         def a:[UiCtl]
         push a win
+        push a rules
+        push a deleteBtn
+        push a updateBtn
+        push a rangeIn
         push a test
         push a v1In
         push a v2In
@@ -85,6 +114,18 @@ class CfDialog extends SxDialog {
 
     fn ring:[string] () {
         def a:[string]
+        if ((array_length rules.items) > 0) {
+            def rv:string rules.rovingValue
+            if ((rules.indexOfValue(rv)) < 0) {
+                rv = (rules.valueAtIndex(0))
+            }
+            push a (rules.itemTid(rv))
+        }
+        if ((this.picked()) >= 0) {
+            push a deleteBtn.tid
+            push a updateBtn.tid
+        }
+        push a rangeIn.tid
         push a (test.itemTid(test.rovingValue))
         push a v1In.tid
         push a v2In.tid
@@ -98,15 +139,27 @@ class CfDialog extends SxDialog {
     }
 
     fn isButton:boolean (target:string) {
-        return ((target == closeBtn.tid) || (target == clearBtn.tid) || (target == posNegBtn.tid) || (target == addBtn.tid))
+        return ((target == closeBtn.tid) || (target == clearBtn.tid) || (target == posNegBtn.tid) || (target == addBtn.tid) || (target == deleteBtn.tid) || (target == updateBtn.tid))
     }
 
     fn entersDefault:boolean (target:string) {
-        return ((test.owns(target)) || (v1In.owns(target)) || (v2In.owns(target)) || (fill.owns(target)))
+        return ((rangeIn.owns(target)) || (test.owns(target)) || (v1In.owns(target)) || (v2In.owns(target)) || (fill.owns(target)))
     }
 
+    ; With a rule chosen, Enter saves it; otherwise it adds a new one.
     fn defaultTid:string () {
+        if ((this.picked()) >= 0) {
+            return updateBtn.tid
+        }
         return addBtn.tid
+    }
+
+    ; The index of the chosen rule, or -1.
+    fn picked:int () {
+        if ((strlen rules.value) == 0) {
+            return -1
+        }
+        return (rules.indexOfValue(rules.value))
     }
 
     fn writes:boolean () {
@@ -125,9 +178,21 @@ class CfDialog extends SxDialog {
         def body:EVGElement (unwrap win.bodyEl)
         body.className = "sx-dlg-body"
         UiTree.clearChildren(body)
-        rangeEl.className = "sx-dlg-note"
-        rangeEl.elementType = 1
-        body.addChild(rangeEl)
+        body.addChild((this.heading(rules.name)))
+        emptyEl.className = "sx-dlg-note"
+        emptyEl.elementType = 1
+        emptyEl.textContent = "No rules yet. Make one below."
+        body.addChild(emptyEl)
+        body.addChild((unwrap rules.rootEl))
+        ruleActs.className = "sx-dlg-actions"
+        UiTree.clearChildren(ruleActs)
+        ruleActs.addChild((unwrap deleteBtn.rootEl))
+        ruleActs.addChild((unwrap updateBtn.rootEl))
+        body.addChild(ruleActs)
+        def rr:EVGElement (this.row("sx-dlg-field"))
+        rr.addChild((this.label(rangeIn.name)))
+        rr.addChild((unwrap rangeIn.rootEl))
+        body.addChild(rr)
         body.addChild((this.heading(test.name)))
         body.addChild((unwrap test.rootEl))
         def vals:EVGElement (this.row("sx-dlg-field"))
@@ -163,7 +228,11 @@ class CfDialog extends SxDialog {
         if app.editing {
             app.commitEdit()
         }
-        rangeEl.textContent = ("Rule for " + (this.rangeText(app)))
+        rules.value = ""
+        rules.rovingValue = ""
+        loaded = ""
+        this.listRules(app)
+        rangeIn.setValue((this.rangeText(app)))
         test.value = (to_string app.cfTest)
         test.rovingValue = test.value
         v1In.setValue(app.cfV1)
@@ -175,13 +244,33 @@ class CfDialog extends SxDialog {
         }
         fill.value = h
         fill.rovingValue = h
-        statusEl.textContent = ((to_string (app.model.cfRuleCount())) + " rule(s) on this sheet")
+        statusEl.textContent = ""
         this.openOn(pageW pageH)
         this.paint()
         return (test.itemTid(test.value))
     }
 
     fn paint:void () {
+        SxDialog.restyle(rules "sx-rule-list" "sx-rule" "sx-rule-on")
+        def k:int 0
+        while (k < (array_length rules.items)) {
+            def ri:UiItem (itemAt rules.items k)
+            def bg:string (itemAt rowFills k)
+            UiTree.inline((unwrap ri.el) "background-color" bg)
+            UiTree.inline((unwrap ri.el) "color" (CfDialog.inkOn(bg)))
+            k = (k + 1)
+        }
+        def any:boolean ((array_length rules.items) > 0)
+        CfDialog.shown(emptyEl (any == false))
+        CfDialog.shown((unwrap rules.rootEl) any)
+        CfDialog.shown(ruleActs any)
+        def none:boolean ((this.picked()) < 0)
+        if ((deleteBtn.disabled != none) || (updateBtn.disabled != none)) {
+            deleteBtn.disabled = none
+            updateBtn.disabled = none
+            deleteBtn.build()
+            updateBtn.build()
+        }
         SxDialog.restyle(test "sx-chip-group" "sx-chip" "sx-chip-on")
         SxDialog.restyle(fill "sx-swatch-group" "sx-swatch" "sx-swatch-on")
         def i:int 0
@@ -192,10 +281,182 @@ class CfDialog extends SxDialog {
         }
     }
 
-    fn follow:void (app:GridApp) {
-        if win.open {
-            this.paint()
+    ; The list, from the model: one row per rule, painted in its fill.
+    fn listRules:void (app:GridApp) {
+        def fresh:[UiItem]
+        rules.items = fresh
+        def fills:[string]
+        rowFills = fills
+        def n:int (app.model.cfRuleCount())
+        def i:int 0
+        while (i < n) {
+            def r:CfRule (app.model.cfRuleAt(i))
+            rules.addItem((to_string i) (CfDialog.describe(r)) false)
+            push rowFills (CfDialog.fillOf(r))
+            i = (i + 1)
         }
+        if ((rules.indexOfValue(rules.value)) < 0) {
+            rules.value = ""
+            loaded = ""
+        }
+        if ((rules.indexOfValue(rules.rovingValue)) < 0) {
+            rules.rovingValue = ""
+        }
+        seenVersion = app.model.version
+        rules.build()
+    }
+
+    sfn shown:void (el:EVGElement on:boolean) {
+        if on {
+            UiTree.removeClass(el "sx-gone")
+        } {
+            UiTree.addClass(el "sx-gone")
+        }
+    }
+
+    ; "B2:B9   Value > 0" — what a row of the list says.
+    sfn describe:string (r:CfRule) {
+        def where:string (CfDialog.rangeOf(r))
+        if (r.kind == 0) {
+            return (where + "   Colour scale")
+        }
+        def a:string (CfDialog.numText(r.v1))
+        def b:string (CfDialog.numText(r.v2))
+        def what:string (r.op + " " + a)
+        if (r.op == "greaterThan") {
+            what = ("Value > " + a)
+        }
+        if (r.op == "greaterThanOrEqual") {
+            what = ("Value ≥ " + a)
+        }
+        if (r.op == "lessThan") {
+            what = ("Value < " + a)
+        }
+        if (r.op == "lessThanOrEqual") {
+            what = ("Value ≤ " + a)
+        }
+        if (r.op == "equal") {
+            what = ("Value = " + a)
+        }
+        if (r.op == "between") {
+            what = ("Value between " + a + " and " + b)
+        }
+        return (where + "   " + what)
+    }
+
+    sfn rangeOf:string (r:CfRule) {
+        def a:string (SpreadsheetModel.cellLabel(r.r0 r.c0))
+        if ((r.r0 == r.r1) && (r.c0 == r.c1)) {
+            return a
+        }
+        return (a + ":" + (SpreadsheetModel.cellLabel(r.r1 r.c1)))
+    }
+
+    sfn numText:string (v:double) {
+        def iv:int (to_int v)
+        if ((to_double iv) == v) {
+            return (to_string iv)
+        }
+        return (to_string v)
+    }
+
+    ; #RRGGBB of a rule's fill; a colour scale shows its middle colour.
+    sfn fillOf:string (r:CfRule) {
+        def c:string r.fillRgb
+        if (r.kind == 0) {
+            c = r.color1
+        }
+        if ((strlen c) == 0) {
+            return "#FFFFFF"
+        }
+        return (ConditionalFormat.mixRgb(c c 0.0))
+    }
+
+    ; Black or white text, whichever reads on `bg`.
+    sfn inkOn:string (bg:string) {
+        if ((strlen bg) < 7) {
+            return "#000000"
+        }
+        def r:int (((ConditionalFormat.parseHexByte(bg 1)) * 16) + (ConditionalFormat.parseHexByte(bg 2)))
+        def g:int (((ConditionalFormat.parseHexByte(bg 3)) * 16) + (ConditionalFormat.parseHexByte(bg 4)))
+        def b:int (((ConditionalFormat.parseHexByte(bg 5)) * 16) + (ConditionalFormat.parseHexByte(bg 6)))
+        def lum:int (idiv (((r * 299) + (g * 587)) + (b * 114)) 1000)
+        if (lum < 140) {
+            return "#FFFFFF"
+        }
+        return "#1F2328"
+    }
+
+    sfn testFor:int (op:string) {
+        if (op == "lessThan") {
+            return 602
+        }
+        if (op == "equal") {
+            return 603
+        }
+        if (op == "between") {
+            return 604
+        }
+        if (op == "greaterThanOrEqual") {
+            return 606
+        }
+        if (op == "lessThanOrEqual") {
+            return 607
+        }
+        return 601
+    }
+
+    ; A chosen rule into the form.
+    fn load:void (app:GridApp i:int) {
+        def r:CfRule (app.model.cfRuleAt(i))
+        rangeIn.setValue((CfDialog.rangeOf(r)))
+        if (r.kind == 0) {
+            test.value = "605"
+        } {
+            test.value = (to_string (CfDialog.testFor(r.op)))
+            v1In.setValue((CfDialog.numText(r.v1)))
+            if (r.op == "between") {
+                v2In.setValue((CfDialog.numText(r.v2)))
+            } {
+                v2In.setValue("")
+            }
+            def h:string (to_uppercase (CfDialog.fillOf(r)))
+            if ((fill.indexOfValue(h)) < 0) {
+                fill.addItem(h h false)
+            }
+            fill.value = h
+            fill.rovingValue = h
+            fill.build()
+        }
+        test.rovingValue = test.value
+        test.build()
+        rangeIn.build()
+        v1In.build()
+        v2In.build()
+        this.store(app)
+        statusEl.textContent = ("Editing the rule on " + (CfDialog.rangeOf(r)))
+    }
+
+    fn follow:void (app:GridApp) {
+        if (win.open == false) {
+            return
+        }
+        ; An undo, or the rules changed under the list.
+        if (app.model.version != seenVersion) {
+            this.listRules(app)
+        }
+        if (rules.value != loaded) {
+            loaded = rules.value
+            def at:int (this.picked())
+            if (at >= 0) {
+                this.load(app at)
+            } {
+                rangeIn.setValue((this.rangeText(app)))
+                rangeIn.build()
+                statusEl.textContent = ""
+            }
+        }
+        this.paint()
     }
 
     ; The form into the core, so the next opening starts from it.
@@ -206,13 +467,64 @@ class CfDialog extends SxDialog {
         app.cfFillHex = fill.value
     }
 
-    fn rule:CfRule (app:GridApp) {
-        def g:GridRange (app.sel.liveRange())
-        def r:CfRule (new CfRule)
-        r.r0 = g.r0
-        r.c0 = g.c0
-        r.r1 = g.r1
-        r.c1 = g.c1
+    ; The range the "Applies to" field names; false when it names none.
+    fn rangeInto:boolean (r:CfRule) {
+        def text:string ""
+        def i:int 0
+        def src:string rangeIn.value
+        while (i < (strlen src)) {
+            def ch:int (charAt src i)
+            if ((ch != 36) && (ch != 32)) {
+                text = (text + (substring src i (i + 1)))
+            }
+            i = (i + 1)
+        }
+        if ((strlen text) == 0) {
+            return false
+        }
+        def r1:[int]
+        def c1:[int]
+        def r2:[int]
+        def c2:[int]
+        XlsxWorksheet.parseMergeRef(text r1 c1 r2 c2)
+        if (((array_length r1) == 0) || ((array_length r2) == 0)) {
+            return false
+        }
+        def a:int (itemAt r1 0)
+        def b:int (itemAt c1 0)
+        def c:int (itemAt r2 0)
+        def d:int (itemAt c2 0)
+        if ((a < 0) || (b < 0) || (c < 0) || (d < 0)) {
+            return false
+        }
+        r.r0 = a
+        r.c0 = b
+        r.r1 = c
+        r.c1 = d
+        if (c < a) {
+            r.r0 = c
+            r.r1 = a
+        }
+        if (d < b) {
+            r.c0 = d
+            r.c1 = b
+        }
+        return true
+    }
+
+    ; The form as a rule; `base` keeps what the form does not show (a colour
+    ; scale's colours).
+    fn formRule:CfRule (app:GridApp base:CfRule) {
+        def r:CfRule (base.copy())
+        if (app.cfTest == 605) {
+            r.kind = 0
+        } {
+            r.kind = 1
+            r.op = (GridApp.cfOpFor(app.cfTest))
+            r.v1 = (GridApp.cfNumber(app.cfV1))
+            r.v2 = (GridApp.cfNumber(app.cfV2))
+            r.fillRgb = app.cfFillHex
+        }
         return r
     }
 
@@ -221,46 +533,79 @@ class CfDialog extends SxDialog {
         app.grid.updateVisible(app.model)
     }
 
+    fn count:string (app:GridApp) {
+        return ((to_string (app.model.cfRuleCount())) + " rule(s) on this sheet")
+    }
+
     fn act:boolean (target:string app:GridApp) {
         this.store(app)
         if (target == closeBtn.tid) {
             this.close()
             return true
         }
+        def before:[CfRule] (app.model.cfSnapshot())
+        def where:CfRule (new CfRule)
+        if (((this.rangeInto(where)) == false) && (target != deleteBtn.tid)) {
+            statusEl.textContent = "Applies to: give a range such as B2:B9"
+            return false
+        }
+        def changed:boolean false
+        def at:int (this.picked())
         if (target == addBtn.tid) {
-            def r:CfRule (this.rule(app))
-            if (app.cfTest == 605) {
-                r.kind = 0
-            } {
-                r.kind = 1
-                r.op = (GridApp.cfOpFor(app.cfTest))
-                r.v1 = (GridApp.cfNumber(app.cfV1))
-                r.v2 = (GridApp.cfNumber(app.cfV2))
-                r.fillRgb = app.cfFillHex
-            }
-            app.model.addCfRule(r)
-            statusEl.textContent = ("Added. " + (to_string (app.model.cfRuleCount())) + " rule(s) on this sheet")
+            app.model.addCfRule((this.formRule(app where)))
+            changed = true
+            rules.value = ""
+            statusEl.textContent = ("Added. " + (this.count(app)))
+        }
+        if ((target == updateBtn.tid) && (at >= 0)) {
+            def old:CfRule (app.model.cfRuleAt(at))
+            def keep:CfRule (old.copy())
+            keep.r0 = where.r0
+            keep.c0 = where.c0
+            keep.r1 = where.r1
+            keep.c1 = where.c1
+            app.model.replaceCfRule(at (this.formRule(app keep)))
+            changed = true
+            statusEl.textContent = ("Updated. " + (this.count(app)))
+        }
+        if ((target == deleteBtn.tid) && (at >= 0)) {
+            def gone:CfRule (app.model.cfRuleAt(at))
+            where = (gone.copy())
+            app.model.removeCfRuleAt(at)
+            rules.value = ""
+            changed = true
+            statusEl.textContent = ("Deleted. " + (this.count(app)))
         }
         if (target == posNegBtn.tid) {
             ; The usual profit and loss pair: at least 0 green, below 0 red.
-            def pos:CfRule (this.rule(app))
+            def pos:CfRule (where.copy())
             pos.kind = 1
             pos.op = "greaterThanOrEqual"
             pos.v1 = 0.0
             pos.fillRgb = "#C6EFCE"
             app.model.addCfRule(pos)
-            def neg:CfRule (this.rule(app))
+            def neg:CfRule (where.copy())
             neg.kind = 1
             neg.op = "lessThan"
             neg.v1 = 0.0
             neg.fillRgb = "#FFC7CE"
             app.model.addCfRule(neg)
-            statusEl.textContent = ("Added ± colours. " + (to_string (app.model.cfRuleCount())) + " rule(s) on this sheet")
+            rules.value = ""
+            changed = true
+            statusEl.textContent = ("Added ± colours. " + (this.count(app)))
         }
         if (target == clearBtn.tid) {
-            def g:GridRange (app.sel.liveRange())
-            app.model.clearCfRulesIn(g.r0 g.c0 g.r1 g.c1)
-            statusEl.textContent = ("Cleared. " + (to_string (app.model.cfRuleCount())) + " rule(s) left")
+            app.model.clearCfRulesIn(where.r0 where.c0 where.r1 where.c1)
+            rules.value = ""
+            changed = true
+            statusEl.textContent = ("Cleared. " + (this.count(app)))
+        }
+        if changed {
+            app.model.pushCfOp(before where.r0 where.c0)
+            def keepStatus:string statusEl.textContent
+            this.listRules(app)
+            loaded = rules.value
+            statusEl.textContent = keepStatus
         }
         this.redraw(app)
         return false
@@ -270,6 +615,7 @@ class CfDialog extends SxDialog {
         if (win.open == false) {
             return
         }
+        this.caretFor(rangeIn focusId)
         this.caretFor(v1In focusId)
         this.caretFor(v2In focusId)
     }
