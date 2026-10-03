@@ -34,6 +34,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { sanitizeFont } from "./webfonts.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -169,7 +170,10 @@ const FONTS = [
   "Noto_Emoji/NotoEmoji-Regular.ttf", "El_Messiri/ElMessiri-Regular.ttf",
 ];
 fs.mkdirSync(path.join(OUT, "fonts"), { recursive: true });
-for (const f of FONTS) fs.copyFileSync(path.join(FONT_SRC, f), path.join(OUT, "fonts", path.basename(f)));
+// Cleaned so the browser's font sanitizer has nothing to report (webfonts.mjs).
+for (const f of FONTS) {
+  fs.writeFileSync(path.join(OUT, "fonts", path.basename(f)), sanitizeFont(fs.readFileSync(path.join(FONT_SRC, f))));
+}
 fs.copyFileSync(path.join(REPO, "datagrid", "fixtures", "business-workbook.xlsx"), path.join(OUT, "business-workbook.xlsx"));
 fs.writeFileSync(path.join(OUT, ".nojekyll"), "");
 

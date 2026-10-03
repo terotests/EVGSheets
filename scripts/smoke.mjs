@@ -111,7 +111,14 @@ const state = (page) => page.evaluate(() => window.sheet.state());
 try {
   // --- the editor -------------------------------------------------------------
   console.log("== editor");
-  const page = await open("?theme=light");
+  const blank = await open("");
+  await blank.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
+  const bs = await state(blank);
+  const a1 = await blank.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 0));
+  ok("a plain visit opens an empty workbook", bs.sheets.length === 1 && !a1, bs.sheets.join(",") + " A1=" + a1);
+  await blank.close();
+
+  const page = await open("?demo&theme=light");
   await page.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
   ok("the editor started", await page.evaluate(() => !!window.__sheetsReady), await page.evaluate(() => window.__sheetsError || ""));
   let s = await state(page);
@@ -258,6 +265,52 @@ try {
   await shot(page, "04_context_menu");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
+
+  // Find and replace: an EVGUI dialog (WindowCtl), not the core's window.
+  await page.evaluate(() => window.sheet.run("nav.goto", "A1"));
+  await page.keyboard.press("Control+f");
+  await page.waitForTimeout(150);
+  ok("Ctrl+F opens Find and replace", await page.evaluate(() => window.sheet.app.find.win.open));
+  ok("…as an EVGUI dialog, not the core's window", await page.evaluate(() => !window.sheet.app.grid.app.findDialog.visible && window.sheet.app.rectOf("sx-find-content") !== ""));
+  ok("…with focus in the Find field", await page.evaluate(() => window.sheet.app.ui.focusId === "sx-find-query"));
+  await page.keyboard.type("Revenue");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  const found = await page.evaluate(() => window.sheet.app.grid.app.findStatus);
+  ok("Enter finds the next match", /^found /.test(found), found);
+  await shot(page, "05_find");
+  await click(page, "sx-find-case");
+  ok("a click ticks Match case", await page.evaluate(() => window.sheet.app.find.matchCase.checkState === 1));
+  await click(page, "sx-find-next");
+  ok("Find next by pointer", /^found /.test(await page.evaluate(() => window.sheet.app.grid.app.findStatus)));
+  await click(page, "sx-find-close");
+  ok("Close closes it", !(await page.evaluate(() => window.sheet.app.find.win.open)));
+  ok("…and the query is kept", (await page.evaluate(() => window.sheet.app.grid.app.findQuery)) === "Revenue");
+  await page.keyboard.press("Control+h");
+  await page.waitForTimeout(100);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape closes it and the sheet has the keyboard", await page.evaluate(() => !window.sheet.app.find.win.open && window.sheet.app.gridFocused));
+
+  // Paste special: an EVGUI dialog too, whatever opens it.
+  await page.evaluate(() => { window.sheet.run("nav.goto", "B3"); window.sheet.run("edit.copy", ""); window.sheet.run("nav.goto", "F10"); });
+  await page.evaluate(() => window.sheet.run("edit.pasteSpecial", ""));
+  await page.waitForTimeout(150);
+  ok("Paste special opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.paste.win.open && !window.sheet.app.grid.app.pasteDialog.visible));
+  await shot(page, "06_paste_special");
+  await click(page, "sx-paste-what-1");
+  ok("a click chooses Values only", (await page.evaluate(() => window.sheet.app.paste.what.value)) === "1");
+  await click(page, "sx-paste-ok");
+  const special = await page.evaluate(() => [window.sheet.app.paste.win.open, window.sheet.app.grid.app.model.getCell(9, 5), window.sheet.app.grid.app.pasteMode]);
+  ok("Paste pastes the value and closes", !special[0] && special[1] !== "" && !String(special[1]).startsWith("="), String(special[1]));
+  ok("…and the next paste is a full one again", special[2] === 0);
+  await page.evaluate(() => window.sheet.run("edit.pasteSpecial", ""));
+  await page.waitForTimeout(80);
+  ok("it opens again", await page.evaluate(() => window.sheet.app.paste.win.open));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape cancels it", await page.evaluate(() => !window.sheet.app.paste.win.open && window.sheet.app.gridFocused));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
 
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");

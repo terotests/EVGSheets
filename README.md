@@ -20,7 +20,8 @@ embeds: <https://terotests.github.io/EVGSheets/embed.html>
 | Context menu on cells | `MenuCtl` in context mode |
 | Sheet tabs and adding a sheet | `TabsCtl`, `RibbonCtl` |
 | Status line: Ready / editing / what happened, and Sum, Average and Count of the selection | the app |
-| Formula bar, grid, dialogs (colours, borders, chart picker, conditional formats, validation, find and replace, paste special) | the datagrid core (`GridApp`) |
+| Dialogs: find and replace, paste special | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
+| Formula bar, grid, the other dialogs (colours, borders, chart picker, conditional formats, validation) | the datagrid core (`GridApp`) |
 | Light and dark | `@vars` palettes in `src/sheets.css`; the core's `modern` and `dark` grid themes |
 
 The two halves meet at the display list. The page is laid out by EVG, and
@@ -63,6 +64,7 @@ options to `mountSheets`.
 | `menubar`, `ribbon`, `formulaBar`, `tabs`, `status`, `title` | `true` / `false` | Show or hide each part. |
 | `theme` | `light` · `dark` | Defaults to the system setting. |
 | `xlsx`, `name`, `sheet` | URL, file name, sheet name | The workbook to open, and the sheet to show first. |
+| `demo` | (no value) | Open the sample business workbook. Without `demo` or `xlsx` the editor starts with an empty workbook. |
 
 Ribbon tool names: `undo redo painter font size bold italic underline strike color fill left center right wrap merge numfmt currency percent decmore decless borders sortasc sortdesc filterclear freeze chart link find`.
 

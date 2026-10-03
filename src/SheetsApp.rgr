@@ -45,6 +45,8 @@ Import "../../datagrid/web/datagrid_web.rgr"
 Import "../../evgui/src/UiHost.rgr"
 Import "RibbonCtl.rgr"
 Import "SheetsEdits.rgr"
+Import "FindDialog.rgr"
+Import "PasteDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -93,6 +95,11 @@ class SheetsApp {
     def statsEl:EVGElement (EVGElement.createSpan())
     def badgeEl:EVGElement (EVGElement.createSpan())
     def ctxHolder:EVGElement (EVGElement.createDiv())
+    ; The dialogs the app draws with EVGUI controllers instead of leaving them
+    ; to the core's EVGWindow, moved over one at a time.
+    def find:FindDialog (new FindDialog)
+    def paste:PasteDialog (new PasteDialog)
+    def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
 
@@ -169,6 +176,12 @@ class SheetsApp {
 
     fn useDemo:void () {
         grid.useDemo()
+        this.sync()
+    }
+
+    ; One empty sheet, the same as File > New workbook.
+    fn useBlank:void () {
+        grid.app.newBlankWorkbook()
         this.sync()
     }
 
@@ -796,6 +809,26 @@ class SheetsApp {
         this.mount(ctxHolder ctxMenu)
         root.addChild(ctxHolder)
 
+        ; --- the dialogs: modal overlays, so they take no room in the page --
+        dlgHolder.id = "sx-dlg-holder"
+        dlgHolder.className = "sx-dlg-holder"
+        UiTree.clearChildren(dlgHolder)
+        def dl:[SxDialog] (this.dialogs())
+        def di:int 0
+        while (di < (array_length dl)) {
+            def d:SxDialog (itemAt dl di)
+            this.mount(dlgHolder d.win)
+            def fc:[UiCtl] (d.ctls())
+            def fi:int 1
+            while (fi < (array_length fc)) {
+                push ui.ctls (itemAt fc fi)
+                fi = (fi + 1)
+            }
+            d.buildAll()
+            di = (di + 1)
+        }
+        root.addChild(dlgHolder)
+
         grid.app.setChrome(false showFormulaBar false false)
         grid.setReadOnly(readOnly)
         this.sync()
@@ -832,6 +865,7 @@ class SheetsApp {
     ; =========================================================================
 
     fn sync:void () {
+        this.adoptCoreDialogs()
         def app:GridApp grid.app
         def model:SpreadsheetModel app.model
         def sel:GridSelection app.sel
@@ -909,6 +943,13 @@ class SheetsApp {
         def onlyList:[EVGElement]
         push onlyList (unwrap tabs.listEl)
         troot.children = onlyList
+        def sd:[SxDialog] (this.dialogs())
+        def si:int 0
+        while (si < (array_length sd)) {
+            def d:SxDialog (itemAt sd si)
+            d.showFocus(ui.focusId)
+            si = (si + 1)
+        }
     }
 
     sfn baseName:string (p:string) {
@@ -1231,7 +1272,7 @@ class SheetsApp {
         def ki:int 0
         while (ki < (array_length root.children)) {
             def kid:EVGElement (itemAt root.children ki)
-            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder")) {
+            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder") && (kid.id != "sx-dlg-holder")) {
                 used = (used + kid.calculatedHeight + 1.0)
             }
             ki = (ki + 1)
@@ -1448,6 +1489,10 @@ class SheetsApp {
             this.pressChrome(target shift ctrl)
             return
         }
+        ; A modal dialog owns the page until it closes.
+        if (this.dialogOpen()) {
+            return
+        }
         ; A press outside an open menu closes it and does nothing else.
         if (this.anyMenuOpen()) {
             this.closeMenus()
@@ -1488,7 +1533,129 @@ class SheetsApp {
         gridFocused = false
         ui.pressTidValue = target
         ui.clickWith(target shift ctrl)
+        if (this.dialogOpen()) {
+            def d:SxDialog (this.openDialog())
+            if (d.isButton(target)) {
+                def closed:boolean (d.act(target grid.app))
+            }
+            this.afterDialog()
+            return
+        }
         this.afterChrome(target choice)
+    }
+
+    ; =========================================================================
+    ; Dialogs drawn with EVGUI controllers
+    ; =========================================================================
+
+    fn dialogs:[SxDialog] () {
+        def a:[SxDialog]
+        push a find
+        push a paste
+        return a
+    }
+
+    fn dialogOpen:boolean () {
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if d.win.open {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    ; The open one. Only asked while `dialogOpen()` is true; Find otherwise.
+    fn openDialog:SxDialog () {
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if d.win.open {
+                return d
+            }
+            i = (i + 1)
+        }
+        return find
+    }
+
+    ; The core can still open its own EVGWindow for a dialog the app has
+    ; replaced: a command run straight on the grid, a shortcut the core reads
+    ; itself. Whatever opened it, the app's dialog is shown instead.
+    fn adoptCoreDialogs:void () {
+        def app:GridApp grid.app
+        if app.findDialog.visible {
+            app.findDialog.close()
+            def f:boolean (this.openFind())
+        }
+        if app.pasteDialog.visible {
+            app.pasteDialog.close()
+            def p:boolean (this.openPaste())
+        }
+    }
+
+    ; A dialog has opened with focus going to `at`.
+    fn shown:boolean (at:string) {
+        gridFocused = false
+        ui.focus(at)
+        this.sync()
+        return true
+    }
+
+    fn openFind:boolean () {
+        this.closeMenus()
+        return (this.shown((find.open(grid.app pageW pageH))))
+    }
+
+    fn openPaste:boolean () {
+        this.closeMenus()
+        if readOnly {
+            return false
+        }
+        return (this.shown((paste.open(grid.app pageW pageH))))
+    }
+
+    ; After a dialog took an input: a closed dialog gives the keyboard back
+    ; to the sheet.
+    fn afterDialog:void () {
+        if ((this.dialogOpen()) == false) {
+            gridFocused = true
+            ui.blur()
+        }
+        this.sync()
+    }
+
+    ; Keys while a dialog is up. Escape closes it, Tab walks its ring, Enter
+    ; where the dialog says so is the default button, and Enter or Space on a
+    ; button presses it; the rest goes to the focused controller.
+    fn dialogKey:void (name:string shift:boolean ctrl:boolean) {
+        def d:SxDialog (this.openDialog())
+        def at:string ui.focusId
+        if (name == "Escape") {
+            d.close()
+            this.afterDialog()
+            return
+        }
+        if (name == "Tab") {
+            ui.focus((d.nextFocus(at shift)))
+            this.sync()
+            return
+        }
+        if ((name == "Enter") && (d.entersDefault(at))) {
+            def c1:boolean (d.act((d.defaultTid()) grid.app))
+            this.afterDialog()
+            return
+        }
+        if (((name == "Enter") || (name == " ")) && (d.isButton(at))) {
+            def c2:boolean (d.act(at grid.app))
+            this.afterDialog()
+            return
+        }
+        ui.keyWith(name shift ctrl)
+        this.afterDialog()
     }
 
     ; After the chrome took an input: run what it chose, and hand the keyboard
@@ -1560,6 +1727,12 @@ class SheetsApp {
             }
             this.rebuildChrome()
             return true
+        }
+        if (cmd == "edit.find") {
+            return (this.openFind())
+        }
+        if (cmd == "edit.pasteSpecial") {
+            return (this.openPaste())
         }
         return (grid.run(cmd a.arg))
     }
@@ -1661,6 +1834,10 @@ class SheetsApp {
             this.sync()
             return
         }
+        if (this.dialogOpen()) {
+            this.dialogKey(name shift ctrl)
+            return
+        }
         if ((this.anyMenuOpen()) || (gridFocused == false)) {
             if ((name == "Escape") && ((this.anyMenuOpen()) == false)) {
                 gridFocused = true
@@ -1718,6 +1895,28 @@ class SheetsApp {
     ; Printable text, and Ctrl chords (`ctrl` true, `s` the letter). A chord
     ; goes to the sheet wherever focus is: Ctrl+Z undoes from the toolbar too.
     fn text:void (s:string shift:boolean ctrl:boolean) {
+        ; While a dialog is up its fields take the text, and a chord is the
+        ; field's (Ctrl+A selects the query), not the sheet's.
+        if (this.dialogOpen()) {
+            ; Space presses a button; on a field it is a space.
+            def od:SxDialog (this.openDialog())
+            if ((s == " ") && (od.isButton(ui.focusId))) {
+                this.dialogKey(" " shift ctrl)
+                return
+            }
+            if ctrl {
+                ui.keyWith(s shift true)
+            } {
+                ui.type(s)
+            }
+            this.sync()
+            return
+        }
+        ; Ctrl+F and Ctrl+H open Find and replace, as in Excel.
+        if (ctrl && (((to_lowercase s) == "f") || ((to_lowercase s) == "h"))) {
+            def opened:boolean (this.openFind())
+            return
+        }
         if ctrl {
             grid.text(s shift true)
             this.sync()
@@ -1733,12 +1932,22 @@ class SheetsApp {
     }
 
     fn pasteText:void (s:string) {
+        if (this.dialogOpen()) {
+            ui.type(s)
+            this.sync()
+            return
+        }
         SheetsEdits.paste(grid.app s (SheetsEdits.modeAll()))
         this.sync()
     }
 
     ; Ctrl+Shift+V: values only, into the cells' own formats.
     fn pasteTextValues:void (s:string) {
+        if (this.dialogOpen()) {
+            ui.type(s)
+            this.sync()
+            return
+        }
         SheetsEdits.paste(grid.app s (SheetsEdits.modeValues()))
         this.sync()
     }

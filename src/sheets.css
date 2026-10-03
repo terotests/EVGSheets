@@ -38,6 +38,11 @@
   --badge: #fef3c7;
   --badge-ink: #92400e;
   --logo: #16a34a;
+  --field: #ffffff;
+  --field-border: #cbd5e1;
+  --on-accent: #ffffff;
+  --scrim: rgba(15, 23, 42, 0.28);
+  --dialog-shadow: rgba(15, 23, 42, 0.22);
 }
 
 @vars dark {
@@ -58,6 +63,11 @@
   --badge: #422006;
   --badge-ink: #fcd34d;
   --logo: #4ade80;
+  --field: #111827;
+  --field-border: #4b5563;
+  --on-accent: #0f172a;
+  --scrim: rgba(0, 0, 0, 0.45);
+  --dialog-shadow: rgba(0, 0, 0, 0.6);
 }
 
 /* --- the page ------------------------------------------------------------ */
@@ -461,6 +471,169 @@
 .ui-contextmenu { width: 1px; height: 1px; }
 /* The trigger is a point, and its name is for a reader only. */
 .ui-contextmenu-trigger { width: 1px; height: 1px; font-size: 1px; color: rgba(0, 0, 0, 0); }
+
+/* --- dialogs (WindowCtl, modal) --------------------------------------------------- */
+
+/* The holder takes no room: the dialog is an overlay centred on the page. */
+.sx-dlg-holder {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 1px;
+  height: 1px;
+}
+.ui-dialog { width: 1px; height: 1px; }
+/* A dialog here is opened by a command, never by a button of its own. */
+.ui-dialog-trigger { width: 1px; height: 1px; font-size: 1px; color: rgba(0, 0, 0, 0); }
+.ui-dialog-scrim { background-color: var(--scrim); }
+.ui-dialog-content {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  width: 440px;
+  border: 1px solid var(--menu-border);
+  border-radius: 10px;
+  background-color: var(--raised);
+  shadow-color: var(--dialog-shadow);
+  shadow-radius: 28px;
+  shadow-offset-y: 10px;
+}
+.ui-dialog-titlebar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 12px 12px 4px 18px;
+}
+.ui-dialog-handle { flex-grow: 1; }
+.ui-dialog-title { color: var(--text); font-size: 15px; font-weight: bold; line-height: 22px; }
+.ui-dialog-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 26px;
+  text-align: center;
+}
+.ui-dialog-close:hover { background-color: var(--hover); color: var(--text); }
+.ui-dialog-close:focus { background-color: var(--hover); color: var(--text); }
+
+.sx-dlg-body {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 8px 18px 16px 18px;
+}
+.sx-dlg-field { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 12px; }
+.sx-dlg-label { color: var(--text); font-size: 13px; line-height: 18px; width: 92px; flex-shrink: 0; }
+.sx-dlg-options { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 24px; padding: 4px 0px; }
+.sx-dlg-col { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 10px; width: 180px; }
+.sx-dlg-heading { color: var(--text); font-size: 13px; font-weight: 600; line-height: 18px; }
+.sx-dlg-status { color: var(--muted); font-size: 12px; line-height: 16px; height: 16px; }
+.sx-dlg-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* --- the controls a dialog is made of (InputCtl, CheckboxCtl, ButtonCtl) ---------- */
+
+.ui-input {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background-color: var(--field);
+  padding: 0px 10px;
+  flex-grow: 1;
+  height: 32px;
+}
+.ui-input:focus { border: 1px solid var(--accent); }
+.ui-input-text { color: var(--text); font-size: 13px; height: 18px; }
+.ui-input-placeholder { color: var(--muted); }
+.ui-input-caret { width: 2px; height: 18px; background-color: var(--accent); }
+.ui-input-selection { background-color: var(--accent-soft); }
+.sx-caret-off { background-color: rgba(0, 0, 0, 0); }
+
+.ui-checkbox {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+.ui-checkbox-box {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  border: 1px solid var(--field-border);
+  border-radius: 4px;
+  background-color: var(--field);
+}
+.ui-checkbox-box-state-checked { background-color: var(--accent); border-color: var(--accent); }
+.ui-checkbox-mark {
+  width: 12px;
+  min-width: 12px;
+  height: 12px;
+  min-height: 12px;
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 2.2;
+}
+.ui-checkbox-label { color: var(--text); font-size: 13px; line-height: 18px; }
+.ui-checkbox:focus { background-color: var(--hover); border-radius: 4px; }
+
+.ui-button {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--field-border);
+  background-color: var(--field);
+  color: var(--text);
+}
+.ui-button-label { font-size: 13px; line-height: 18px; color: var(--text); }
+.ui-button:hover { background-color: var(--hover); }
+.ui-button:focus { border: 1px solid var(--accent); }
+.ui-button-primary { background-color: var(--accent); border-color: var(--accent); }
+.ui-button-primary:hover { background-color: var(--accent-ink); }
+.ui-button-primary .ui-button-label { color: var(--on-accent); font-weight: 600; }
+.ui-button-state-pressed { transform: scale(0.97); }
+
+/* A radio group in a dialog: one row per choice, the chosen one marked. */
+.ui-radiogroup { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; width: 404px; }
+/* A text leaf shrink-wraps, so the row's width is stated: the group's, less
+ * the padding and the border. */
+.ui-radio {
+  width: 378px;
+  padding: 7px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background-color: var(--field);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 18px;
+}
+.ui-radio:hover { background-color: var(--hover); }
+.ui-radio:focus { border: 1px solid var(--accent); }
+.ui-radio-state-checked { background-color: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.ui-radio-disabled { opacity: 0.45; }
 
 /* --- a phone ------------------------------------------------------------------------- */
 
