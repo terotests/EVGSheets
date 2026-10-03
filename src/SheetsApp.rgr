@@ -392,6 +392,7 @@ class SheetsApp {
         this.item(e "cut" "Cut" "edit.cut" "" "Ctrl+X")
         this.item(e "copy" "Copy" "edit.copy" "" "Ctrl+C")
         this.item(e "paste" "Paste" "edit.paste" "" "Ctrl+V")
+        this.item(e "pastevalues" "Paste values only" "edit.pasteValues" "" "")
         this.item(e "pastespecial" "Paste special…" "edit.pasteSpecial" "" "Ctrl+⇧V")
         e.addSeparator()
         this.item(e "find" "Find and replace…" "edit.find" "" "Ctrl+F")
@@ -527,6 +528,7 @@ class SheetsApp {
         this.item(ctxMenu "c-cut" "Cut" "edit.cut" "" "Ctrl+X")
         this.item(ctxMenu "c-copy" "Copy" "edit.copy" "" "Ctrl+C")
         this.item(ctxMenu "c-paste" "Paste" "edit.paste" "" "Ctrl+V")
+        this.item(ctxMenu "c-pastevalues" "Paste values only" "edit.pasteValues" "" "")
         ctxMenu.addSeparator()
         this.item(ctxMenu "c-rowabove" "Insert row above" "insert.row.above" "" "")
         this.item(ctxMenu "c-rowbelow" "Insert row below" "insert.row.below" "" "")
@@ -1717,6 +1719,12 @@ class SheetsApp {
 
     fn pasteText:void (s:string) {
         grid.pasteText(s)
+        this.sync()
+    }
+
+    ; Ctrl+Shift+V: the Paste special dialog, over the text the page was given.
+    fn pasteTextSpecial:void (s:string) {
+        grid.pasteTextSpecial(s)
         this.sync()
     }
 
