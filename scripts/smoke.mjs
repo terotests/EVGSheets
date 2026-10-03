@@ -334,6 +334,29 @@ try {
   await click(page, "sx-cf-close");
   ok("Clear takes it off, Close closes", await page.evaluate((n) => !window.sheet.app.cf.win.open && window.sheet.app.grid.app.model.cfRuleCount() === n, cfBefore));
 
+  // Data validation and the list picker: EVGUI dialogs.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  const dvBefore = await page.evaluate(() => window.sheet.app.grid.app.model.validationCount());
+  await page.evaluate(() => window.sheet.run("data.validation", ""));
+  await page.waitForTimeout(120);
+  ok("Data validation opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.dv.win.open && !window.sheet.app.grid.app.dvDialog.visible));
+  await click(page, "sx-dv-kind-701");
+  await click(page, "sx-dv-v1");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("Yes,No,Maybe");
+  await shot(page, "12_validation");
+  await click(page, "sx-dv-add");
+  await click(page, "sx-dv-close");
+  ok("Add rule puts a list rule on the cell", await page.evaluate((n) => { const a = window.sheet.app.grid.app; return !window.sheet.app.dv.win.open && a.model.validationCount() === n + 1 && a.model.validationAt(13, 9).isList(); }, dvBefore));
+  await page.evaluate(async () => { window.sheet.app.grid.app.openListPicker(13, 9); window.sheet.app.sync(); await window.sheet.redraw(); });
+  await page.waitForTimeout(80);
+  ok("the cell's list opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.pick.win.open && !window.sheet.app.grid.app.listDialog.visible && window.sheet.app.pick.what.items.length === 3));
+  await shot(page, "13_list");
+  await click(page, "sx-list-what-2");
+  await click(page, "sx-list-ok");
+  ok("Choose writes the value", await page.evaluate(() => !window.sheet.app.pick.win.open && window.sheet.app.grid.app.model.getCell(13, 9) === "Maybe"));
+  await page.evaluate(() => { window.sheet.run("edit.undo", ""); const a = window.sheet.app.grid.app; a.model.clearValidationsIn(13, 9, 13, 9); });
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);

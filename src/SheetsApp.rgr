@@ -51,6 +51,8 @@ Import "LinkDialog.rgr"
 Import "ColorDialog.rgr"
 Import "BorderDialog.rgr"
 Import "CfDialog.rgr"
+Import "ValidationDialog.rgr"
+Import "ListDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -108,6 +110,8 @@ class SheetsApp {
     def color:ColorDialog (new ColorDialog)
     def border:BorderDialog (new BorderDialog)
     def cf:CfDialog (new CfDialog)
+    def dv:ValidationDialog (new ValidationDialog)
+    def pick:ListDialog (new ListDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -1565,6 +1569,8 @@ class SheetsApp {
         push a color
         push a border
         push a cf
+        push a dv
+        push a pick
         return a
     }
 
@@ -1753,6 +1759,9 @@ class SheetsApp {
         }
         if (cmd == "format.conditional") {
             return (this.openDlg(cf))
+        }
+        if (cmd == "data.validation") {
+            return (this.openDlg(dv))
         }
         if (cmd == "insert.link") {
             return (this.openDlg(link))
