@@ -10,6 +10,7 @@
  *     readOnly: false,
  *     formulaBar: true, tabs: true, status: true, menubar: true, ribbon: true,
  *     xlsx: "book.xlsx",          // a URL, an ArrayBuffer, or nothing (demo sheet)
+ *     blank: false,               // true: one empty sheet instead of the demo sheet
  *     name: "book.xlsx",
  *     sheet: "Summary",           // which sheet to show first
  *     base: "./",                 // where gl/, fonts/, evgsheets.js and sheets.css are
@@ -131,6 +132,7 @@ export function optionsFromQuery(search = location.search) {
     if (v !== null) o[k] = boolOpt(v);
   }
   if (q.has("readonly")) o.readOnly = boolOpt(q.get("readonly"));
+  if (q.has("demo")) o.demo = q.get("demo") === "" || boolOpt(q.get("demo"));
   return o;
 }
 
@@ -204,6 +206,8 @@ export async function mountSheets(container, options = {}) {
       console.warn("evgsheets: could not open " + options.xlsx, e);
       app.useDemo();
     }
+  } else if (options.blank) {
+    app.useBlank();
   } else {
     app.useDemo();
   }
