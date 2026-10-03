@@ -315,6 +315,25 @@ try {
   ok("Apply draws them", await page.evaluate(() => { const st = window.sheet.app.grid.app.model.getCellStyle(13, 9); return !window.sheet.app.border.win.open && st.borderTop.has() && st.borderTop.style === "medium"; }));
   await page.evaluate(() => window.sheet.run("edit.undo", ""));
 
+  // Conditional formatting: an EVGUI dialog that adds rules and stays open.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  const cfBefore = await page.evaluate(() => window.sheet.app.grid.app.model.cfRuleCount());
+  await page.evaluate(() => window.sheet.run("format.conditional", ""));
+  await page.waitForTimeout(120);
+  ok("Conditional formatting opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.cf.win.open && !window.sheet.app.grid.app.cfDialog.visible));
+  await click(page, "sx-cf-test-602");
+  await click(page, "sx-cf-v1");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("5");
+  await click(page, "sx-cf-fill-#C6EFCE");
+  await shot(page, "11_cf");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Enter adds the rule and keeps it open", await page.evaluate((n) => { const a = window.sheet.app.grid.app; return window.sheet.app.cf.win.open && a.model.cfRuleCount() === n + 1 && a.cfTest === 602 && a.cfV1 === "5"; }, cfBefore));
+  await click(page, "sx-cf-clear");
+  await click(page, "sx-cf-close");
+  ok("Clear takes it off, Close closes", await page.evaluate((n) => !window.sheet.app.cf.win.open && window.sheet.app.grid.app.model.cfRuleCount() === n, cfBefore));
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);

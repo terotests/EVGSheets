@@ -50,6 +50,7 @@ Import "RenameDialog.rgr"
 Import "LinkDialog.rgr"
 Import "ColorDialog.rgr"
 Import "BorderDialog.rgr"
+Import "CfDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -106,6 +107,7 @@ class SheetsApp {
     def link:LinkDialog (new LinkDialog)
     def color:ColorDialog (new ColorDialog)
     def border:BorderDialog (new BorderDialog)
+    def cf:CfDialog (new CfDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -1562,6 +1564,7 @@ class SheetsApp {
         push a link
         push a color
         push a border
+        push a cf
         return a
     }
 
@@ -1747,6 +1750,9 @@ class SheetsApp {
         }
         if ((cmd == "format.border") && ((strlen a.arg) == 0)) {
             return (this.openDlg(border))
+        }
+        if (cmd == "format.conditional") {
+            return (this.openDlg(cf))
         }
         if (cmd == "insert.link") {
             return (this.openDlg(link))
