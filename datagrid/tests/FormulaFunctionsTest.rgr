@@ -279,6 +279,39 @@ class FormulaFunctionsTest {
         r = (FormulaFunctionsTest.invokeN("T" args))
         c.eqStr("T" r.text "z")
 
+        print "== RAND / RANDBETWEEN =="
+        clear args
+        push args (FormulaValue.fromNumber(25.0))
+        push args (FormulaValue.fromNumber(30.0))
+        r = (FormulaFunctions.fnRandBetween(args 0.0))
+        c.eqNum("RANDBETWEEN low end" r.num 25.0)
+        r = (FormulaFunctions.fnRandBetween(args 0.999999))
+        c.eqNum("RANDBETWEEN high end" r.num 30.0)
+        r = (FormulaFunctions.fnRandBetween(args 0.5))
+        c.eqNum("RANDBETWEEN middle" r.num 28.0)
+        r = (FormulaFunctionsTest.invokeN("RANDBETWEEN" args))
+        c.ok("RANDBETWEEN(25,30) in range" ((r.num >= 25.0) && (r.num <= 30.0) && (r.num == (to_double (floor r.num)))))
+        c.ok("RANDBETWEEN known" (FormulaFunctions.isKnown("RANDBETWEEN")))
+        c.ok("RAND known" (FormulaFunctions.isKnown("rand")))
+        clear args
+        push args (FormulaValue.fromNumber(30.0))
+        push args (FormulaValue.fromNumber(25.0))
+        r = (FormulaFunctions.fnRandBetween(args 0.5))
+        c.eqStr("RANDBETWEEN top < bottom #NUM!" r.err "#NUM!")
+        clear args
+        push args (FormulaValue.fromNumber(1.2))
+        push args (FormulaValue.fromNumber(1.8))
+        r = (FormulaFunctions.fnRandBetween(args 0.0))
+        c.eqStr("RANDBETWEEN(1.2,1.8) has no integer #NUM!" r.err "#NUM!")
+        clear args
+        push args (FormulaValue.fromString("x"))
+        push args (FormulaValue.fromNumber(3.0))
+        r = (FormulaFunctions.fnRandBetween(args 0.0))
+        c.eqStr("RANDBETWEEN text #VALUE!" r.err "#VALUE!")
+        clear args
+        r = (FormulaFunctionsTest.invokeN("RAND" args))
+        c.ok("RAND in [0,1)" ((r.num >= 0.0) && (r.num < 1.0)))
+
         print "== unknown =="
         FormulaFunctionsTest.args1((FormulaValue.fromNumber(1.0)) args)
         r = (FormulaFunctionsTest.invokeN("NOPE" args))

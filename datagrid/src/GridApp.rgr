@@ -138,6 +138,9 @@ class GridApp {
     ; the sheet a little, a fast one carries.
     ; Where a text selection started inside the edit buffer, or -1 for none.
     def editSelAnchor:int -1
+    ; A press in the formula bar is held: dragging moves the caret and leaves
+    ; the anchor where the press landed, which is how text gets painted.
+    def fbTextDrag:boolean false
     def flingX:double 0.0
     def flingY:double 0.0
     ; What is left over when a frame's travel is not a whole number of pixels.
@@ -2513,6 +2516,11 @@ class GridApp {
         if (onTab >= 0) {
             renameStatus = ""
             this.openRenameDialog(onTab)
+            return true
+        }
+        def fbHit:CellPos (grid.hitTest(model px py))
+        if ((fbHit.row == -3) && (fbHit.col == -3)) {
+            this.selectWordInFormulaBar(px)
             return true
         }
         def edgeCol:int (grid.hitColResize(model px py))
@@ -6852,6 +6860,46 @@ class GridApp {
         this.clampCaret()
     }
 
+    ; Double-click in the formula bar selects the word under the pointer:
+    ; letters, digits, `_`, `.` and `$`, so a reference or a function name
+    ; comes out whole.
+    fn selectWordInFormulaBar:void (px:int) {
+        if readOnly {
+            return
+        }
+        this.beginFormulaBarEditAt(px)
+        def n:int (strlen editBuf)
+        def a:int editCaret
+        def b:int editCaret
+        while ((a > 0) && (GridApp.isWordChar((charAt editBuf (a - 1))))) {
+            a = (a - 1)
+        }
+        while ((b < n) && (GridApp.isWordChar((charAt editBuf b)))) {
+            b = (b + 1)
+        }
+        if (a == b) {
+            return
+        }
+        editSelAnchor = a
+        editCaret = b
+    }
+
+    sfn isWordChar:boolean (ch:int) {
+        if ((ch >= 48) && (ch <= 57)) {
+            return true
+        }
+        if ((ch >= 65) && (ch <= 90)) {
+            return true
+        }
+        if ((ch >= 97) && (ch <= 122)) {
+            return true
+        }
+        if ((ch == 95) || (ch == 46) || (ch == 36)) {
+            return true
+        }
+        return (ch >= 128)
+    }
+
     ; --- in-cell edit buffer: caret-relative editing --------------------------
     fn clampCaret:void () {
         def n:int (strlen editBuf)
@@ -8045,7 +8093,19 @@ class GridApp {
                         this.closeHeaderMenu()
                     }
                     if ((hit.row == -3) && (hit.col == -3)) {
+                        ; Shift+click extends from where the caret was; a
+                        ; plain press starts a new selection at the click.
+                        def wasEditing:boolean editing
+                        def before:int editCaret
                         this.beginFormulaBarEditAt(input.pointerX)
+                        if (input.shiftDown && wasEditing) {
+                            if (editSelAnchor < 0) {
+                                editSelAnchor = before
+                            }
+                        } {
+                            editSelAnchor = editCaret
+                        }
+                        fbTextDrag = true
                     } {
                         if ((hit.row >= 0) && (hit.col >= 0)) {
                             view.focused = true
@@ -8310,6 +8370,13 @@ class GridApp {
     }
 
     fn handleDrag:void (input:UIInput) {
+        if fbTextDrag {
+            if editInFormulaBar {
+                editCaret = (this.caretIndexAtFormulaBarX(input.pointerX))
+                this.clampCaret()
+            }
+            return
+        }
         ; A tab press becomes a carry the same way a column header press does.
         if tabDragArmed {
             def moved:int (input.pointerX - tabDragStartX)
@@ -8607,6 +8674,14 @@ class GridApp {
                 return
             }
             colDragArmed = false
+            if fbTextDrag {
+                fbTextDrag = false
+                ; A press that never moved is a click: a caret, not an
+                ; empty selection.
+                if (editSelAnchor == editCaret) {
+                    editSelAnchor = -1
+                }
+            }
             if formulaRangeDrag {
                 def commitRange:boolean formulaRangeStartedEdit
                 formulaRangeDrag = false

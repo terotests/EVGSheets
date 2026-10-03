@@ -367,13 +367,19 @@ class FormulaFunctions {
         if (n == "IFS") {
             return true
         }
+        if (n == "RAND") {
+            return true
+        }
+        if (n == "RANDBETWEEN") {
+            return true
+        }
         return false
     }
 
     ; Every function name this library answers, space-separated — for docs,
     ; hosts, and "what do we actually have?" checks.
     sfn catalog:string () {
-        return "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW"
+        return "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW RAND RANDBETWEEN"
     }
 
     ; Dispatch by uppercase function name. (`call` is reserved in Ranger.)
@@ -660,6 +666,12 @@ class FormulaFunctions {
         }
         if (n == "TRANSPOSE") {
             return (FormulaFunctions.fnTranspose(args))
+        }
+        if (n == "RAND") {
+            return (FormulaFunctions.fnRand(args (random)))
+        }
+        if (n == "RANDBETWEEN") {
+            return (FormulaFunctions.fnRandBetween(args (random)))
         }
         return (FormulaValue.fromError("#NAME?"))
     }
@@ -1127,6 +1139,52 @@ class FormulaFunctions {
         def q:int (to_int (x / y))
         def r:double (x - ((to_double q) * y))
         return (FormulaValue.fromNumber(r))
+    }
+
+    ; RAND and RANDBETWEEN take the random draw `r` (0 <= r < 1) as an
+    ; argument so a test can say what it is; `invoke` passes a real one.
+    sfn fnRand:FormulaValue (args:[FormulaValue] r:double) {
+        if ((array_length args) > 0) {
+            return (FormulaValue.fromError("#VALUE!"))
+        }
+        return (FormulaValue.fromNumber(r))
+    }
+
+    ; RANDBETWEEN(bottom, top): a whole number from bottom to top inclusive.
+    ; Like Excel, bottom is rounded up and top down; top below bottom is
+    ; #NUM!.
+    sfn fnRandBetween:FormulaValue (args:[FormulaValue] r:double) {
+        if ((array_length args) != 2) {
+            return (FormulaValue.fromError("#VALUE!"))
+        }
+        def a:FormulaValue (itemAt args 0)
+        def b:FormulaValue (itemAt args 1)
+        def ea:boolean (a.isError())
+        if ea {
+            return a
+        }
+        def eb:boolean (b.isError())
+        if eb {
+            return b
+        }
+        def na:[double]
+        def nb:[double]
+        def oka:boolean (a.tryNumber(na))
+        def okb:boolean (b.tryNumber(nb))
+        if ((oka == false) || (okb == false)) {
+            return (FormulaValue.fromError("#VALUE!"))
+        }
+        def lo:double (0.0 - (to_double (floor (0.0 - (itemAt na 0)))))
+        def hi:double (to_double (floor (itemAt nb 0)))
+        if (hi < lo) {
+            return (FormulaValue.fromError("#NUM!"))
+        }
+        def span:double ((hi - lo) + 1.0)
+        def pick:double (lo + (to_double (floor (r * span))))
+        if (pick > hi) {
+            pick = hi
+        }
+        return (FormulaValue.fromNumber(pick))
     }
 
     sfn fnPower:FormulaValue (args:[FormulaValue]) {
