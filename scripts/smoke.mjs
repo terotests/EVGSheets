@@ -189,6 +189,48 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
 
+  // The context menu on a column header: the column is selected and the menu
+  // is the column's own. Inserting a column to the left moves C's text to D.
+  const hdr = await page.evaluate(() => {
+    const v = window.sheet.app.grid.app.grid;
+    const m = window.sheet.app.grid.app.model;
+    return { colX: v.x + v.rowHeaderW + m.colToX(2) + 10, colY: v.headerTop() + 6, rowX: v.x + 10, rowY: v.headerTop() + v.colHeaderH + m.rowToY(4) + 6 };
+  });
+  const c1 = await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 2));
+  await page.mouse.click(canvasBox.x + g.x + hdr.colX, canvasBox.y + g.y + hdr.colY, { button: "right" });
+  await page.waitForTimeout(100);
+  ok("right click on a column header opens the column menu", (await state(page)).menuOpen && (await page.evaluate(() => window.sheet.app.ctxMenu.name)) === "Column actions");
+  ok("…with column C selected", await page.evaluate(() => {
+    const s = window.sheet.app.grid.app.sel;
+    return s.active.col === 2 && s.anchor.col === 2 && s.active.row === 0 && s.anchor.row === window.sheet.app.grid.app.model.rowCount - 1;
+  }));
+  ok("…naming the column it acts on", (await page.evaluate(() => window.sheet.app.rectOf("sx-ctx-item-h-delcols"))) !== "" && (await page.evaluate(() => window.sheet.app.ctxMenu.items.find((i) => i.value === "h-delcols").name)) === "Delete column C");
+  await shot(page, "04b_column_menu");
+  await click(page, "sx-ctx-item-h-colleft");
+  ok("Insert 1 column left moves C to D", (await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 3))) === c1 && !(await state(page)).menuOpen, c1);
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(80);
+  ok("…and undo puts it back", (await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 2))) === c1);
+
+  // …and on a row header.
+  await page.mouse.click(canvasBox.x + g.x + hdr.rowX, canvasBox.y + g.y + hdr.rowY, { button: "right" });
+  await page.waitForTimeout(100);
+  ok("right click on a row header opens the row menu", (await state(page)).menuOpen && (await page.evaluate(() => window.sheet.app.ctxMenu.name)) === "Row actions");
+  ok("…with row 5 selected", await page.evaluate(() => {
+    const s = window.sheet.app.grid.app.sel;
+    return s.active.row === 4 && s.anchor.row === 4 && s.active.col === 0;
+  }));
+  await shot(page, "04c_row_menu");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+
+  // A cell gets the cell menu back.
+  await page.mouse.click(cellX, cellY, { button: "right" });
+  await page.waitForTimeout(100);
+  ok("a cell gets the cell menu back", (await page.evaluate(() => window.sheet.app.rectOf("sx-ctx-item-c-chart"))) !== "");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+
   // Find and replace: an EVGUI dialog (WindowCtl), not the core's window.
   await page.evaluate(() => window.sheet.run("nav.goto", "A1"));
   await page.keyboard.press("Control+f");
