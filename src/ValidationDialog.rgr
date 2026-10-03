@@ -1,0 +1,232 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; ValidationDialog — data validation rules, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Data validation ─────────────────────────────── × ┐
+;   │ Rule for C2:C20                                    │
+;   │ Allow   (List) (Whole number) (Decimal) (Text…)    │
+;   │ Values  [Yes,No____________]                       │
+;   │ Max     [__________________]                       │
+;   │ Test    (Between) (At least) (At most)             │
+;   │ ☑ Allow blank                                      │
+;   │ 1 rule(s) on this sheet                            │
+;   │                        [Close] [Clear] [Add rule]  │
+;   └────────────────────────────────────────────────────┘
+;
+; It opens on the rule already on the range's first cell, else on what the
+; core remembers (dvKind, dvOp, dvV1, dvV2, dvBlank). Rules go into the model
+; with addValidation / clearValidationsIn; Add rule stays open.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class ValidationDialog extends SxDialog {
+    def kind:RadioGroupCtl (new RadioGroupCtl)
+    def v1In:InputCtl (new InputCtl)
+    def v2In:InputCtl (new InputCtl)
+    def test:RadioGroupCtl (new RadioGroupCtl)
+    def blank:CheckboxCtl (new CheckboxCtl)
+    def closeBtn:ButtonCtl (new ButtonCtl)
+    def clearBtn:ButtonCtl (new ButtonCtl)
+    def addBtn:ButtonCtl (new ButtonCtl)
+    def rangeEl:EVGElement (EVGElement.createSpan())
+
+    Constructor () {
+        this.setup("sx-dv" "Data validation")
+        kind.tid = "sx-dv-kind"
+        kind.name = "Allow"
+        kind.addItem("701" "List" false)
+        kind.addItem("702" "Whole number" false)
+        kind.addItem("703" "Decimal" false)
+        kind.addItem("704" "Text length" false)
+        this.field(v1In "sx-dv-v1" "Values")
+        this.field(v2In "sx-dv-v2" "Max")
+        test.tid = "sx-dv-test"
+        test.name = "Test"
+        test.addItem("721" "Between" false)
+        test.addItem("722" "At least" false)
+        test.addItem("723" "At most" false)
+        this.check(blank "sx-dv-blank" "Allow blank")
+        this.button(closeBtn "sx-dv-close" "Close" "secondary")
+        this.button(clearBtn "sx-dv-clear" "Clear" "secondary")
+        this.button(addBtn "sx-dv-add" "Add rule" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a kind
+        push a v1In
+        push a v2In
+        push a test
+        push a blank
+        push a closeBtn
+        push a clearBtn
+        push a addBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a (kind.itemTid(kind.rovingValue))
+        push a v1In.tid
+        push a v2In.tid
+        push a (test.itemTid(test.rovingValue))
+        push a blank.tid
+        push a closeBtn.tid
+        push a clearBtn.tid
+        push a addBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == closeBtn.tid) || (target == clearBtn.tid) || (target == addBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((kind.owns(target)) || (v1In.owns(target)) || (v2In.owns(target)) || (test.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return addBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.dvDialog.visible {
+            app.dvDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        rangeEl.className = "sx-dlg-note"
+        rangeEl.elementType = 1
+        body.addChild(rangeEl)
+        def k:EVGElement (this.row("sx-dlg-field"))
+        k.addChild((this.label(kind.name)))
+        k.addChild((unwrap kind.rootEl))
+        body.addChild(k)
+        def f1:EVGElement (this.row("sx-dlg-field"))
+        f1.addChild((this.label(v1In.name)))
+        f1.addChild((unwrap v1In.rootEl))
+        body.addChild(f1)
+        def f2:EVGElement (this.row("sx-dlg-field"))
+        f2.addChild((this.label(v2In.name)))
+        f2.addChild((unwrap v2In.rootEl))
+        body.addChild(f2)
+        def t:EVGElement (this.row("sx-dlg-field"))
+        t.addChild((this.label(test.name)))
+        t.addChild((unwrap test.rootEl))
+        body.addChild(t)
+        body.addChild((unwrap blank.rootEl))
+        body.addChild((this.statusRow()))
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap closeBtn.rootEl))
+        acts.addChild((unwrap clearBtn.rootEl))
+        acts.addChild((unwrap addBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Opens on the range's rule if it has one, else on what the core
+    ; remembers; focus on the kind.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        def g:GridRange (app.sel.liveRange())
+        rangeEl.textContent = ("Rule for " + (SpreadsheetModel.cellLabel(g.r0 g.c0)) + ":" + (SpreadsheetModel.cellLabel(g.r1 g.c1)))
+        def ex:DataValidation (app.model.validationAt(g.r0 g.c0))
+        if ((strlen ex.kind) > 0) {
+            if (ex.kind == "list") { app.dvKind = 701 }
+            if (ex.kind == "whole") { app.dvKind = 702 }
+            if (ex.kind == "decimal") { app.dvKind = 703 }
+            if (ex.kind == "textLength") { app.dvKind = 704 }
+            app.dvV1 = ex.f1
+            app.dvV2 = ex.f2
+            app.dvBlank = ex.allowBlank
+            app.dvOp = 721
+            if (ex.op == "greaterThanOrEqual") { app.dvOp = 722 }
+            if (ex.op == "lessThanOrEqual") { app.dvOp = 723 }
+        }
+        kind.value = (to_string app.dvKind)
+        kind.rovingValue = kind.value
+        test.value = (to_string app.dvOp)
+        test.rovingValue = test.value
+        v1In.setValue(app.dvV1)
+        v1In.selectAll()
+        v2In.setValue(app.dvV2)
+        blank.checkState = (SxDialog.tri(app.dvBlank))
+        statusEl.textContent = ((to_string (app.model.validationCount())) + " rule(s) on this sheet")
+        this.openOn(pageW pageH)
+        this.paint()
+        return (kind.itemTid(kind.value))
+    }
+
+    fn paint:void () {
+        SxDialog.restyle(kind "sx-chip-row" "sx-chip" "sx-chip-on")
+        SxDialog.restyle(test "sx-chip-row" "sx-chip" "sx-chip-on")
+    }
+
+    fn follow:void (app:GridApp) {
+        if win.open {
+            this.paint()
+        }
+    }
+
+    fn store:void (app:GridApp) {
+        app.dvKind = (?? (to_int kind.value) 701)
+        app.dvOp = (?? (to_int test.value) 721)
+        app.dvV1 = v1In.value
+        app.dvV2 = v2In.value
+        app.dvBlank = (blank.checkState == 1)
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        this.store(app)
+        if (target == closeBtn.tid) {
+            this.close()
+            return true
+        }
+        def g:GridRange (app.sel.liveRange())
+        if (target == addBtn.tid) {
+            def v:DataValidation (new DataValidation)
+            v.kind = (GridApp.dvKindName(app.dvKind))
+            v.op = (GridApp.dvOpName(app.dvOp))
+            v.r0 = g.r0
+            v.c0 = g.c0
+            v.r1 = g.r1
+            v.c1 = g.c1
+            v.f1 = app.dvV1
+            v.f2 = app.dvV2
+            v.allowBlank = app.dvBlank
+            app.model.addValidation(v)
+            statusEl.textContent = ("Added. " + (to_string (app.model.validationCount())) + " rule(s) on this sheet")
+        }
+        if (target == clearBtn.tid) {
+            app.model.clearValidationsIn(g.r0 g.c0 g.r1 g.c1)
+            statusEl.textContent = ("Cleared. " + (to_string (app.model.validationCount())) + " rule(s) left")
+        }
+        app.sheetView.markDirty()
+        app.grid.updateVisible(app.model)
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(v1In focusId)
+        this.caretFor(v2In focusId)
+    }
+}

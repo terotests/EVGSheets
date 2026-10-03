@@ -147,6 +147,14 @@ class FindDialog extends SxDialog {
         return findIn.tid
     }
 
+    fn adopt:boolean (app:GridApp) {
+        if app.findDialog.visible {
+            app.findDialog.close()
+            return true
+        }
+        return false
+    }
+
     ; The fields into the core, before every search.
     fn store:void (app:GridApp) {
         app.findQuery = findIn.value

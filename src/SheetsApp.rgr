@@ -47,6 +47,16 @@ Import "RibbonCtl.rgr"
 Import "SheetsEdits.rgr"
 Import "FindDialog.rgr"
 Import "PasteDialog.rgr"
+Import "RenameDialog.rgr"
+Import "LinkDialog.rgr"
+Import "ColorDialog.rgr"
+Import "BorderDialog.rgr"
+Import "CfDialog.rgr"
+Import "ValidationDialog.rgr"
+Import "ListDialog.rgr"
+Import "ChartDialog.rgr"
+Import "SqlDialog.rgr"
+Import "ConnDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -99,6 +109,16 @@ class SheetsApp {
     ; to the core's EVGWindow, moved over one at a time.
     def find:FindDialog (new FindDialog)
     def paste:PasteDialog (new PasteDialog)
+    def rename:RenameDialog (new RenameDialog)
+    def link:LinkDialog (new LinkDialog)
+    def color:ColorDialog (new ColorDialog)
+    def border:BorderDialog (new BorderDialog)
+    def cf:CfDialog (new CfDialog)
+    def dv:ValidationDialog (new ValidationDialog)
+    def pick:ListDialog (new ListDialog)
+    def chart:ChartDialog (new ChartDialog)
+    def sql:SqlDialog (new SqlDialog)
+    def conn:ConnDialog (new ConnDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -954,6 +974,7 @@ class SheetsApp {
         def si:int 0
         while (si < (array_length sd)) {
             def d:SxDialog (itemAt sd si)
+            d.follow(grid.app)
             d.showFocus(ui.focusId)
             si = (si + 1)
         }
@@ -1559,6 +1580,16 @@ class SheetsApp {
         def a:[SxDialog]
         push a find
         push a paste
+        push a rename
+        push a link
+        push a color
+        push a border
+        push a cf
+        push a dv
+        push a pick
+        push a chart
+        push a sql
+        push a conn
         return a
     }
 
@@ -1593,14 +1624,14 @@ class SheetsApp {
     ; replaced: a command run straight on the grid, a shortcut the core reads
     ; itself. Whatever opened it, the app's dialog is shown instead.
     fn adoptCoreDialogs:void () {
-        def app:GridApp grid.app
-        if app.findDialog.visible {
-            app.findDialog.close()
-            def f:boolean (this.openFind())
-        }
-        if app.pasteDialog.visible {
-            app.pasteDialog.close()
-            def p:boolean (this.openPaste())
+        def a:[SxDialog] (this.dialogs())
+        def i:int 0
+        while (i < (array_length a)) {
+            def d:SxDialog (itemAt a i)
+            if (d.adopt(grid.app)) {
+                def ok:boolean (this.openDlg(d))
+            }
+            i = (i + 1)
         }
     }
 
@@ -1612,17 +1643,20 @@ class SheetsApp {
         return true
     }
 
-    fn openFind:boolean () {
+    fn openDlg:boolean (d:SxDialog) {
         this.closeMenus()
-        return (this.shown((find.open(grid.app pageW pageH))))
+        if (readOnly && (d.writes())) {
+            return false
+        }
+        return (this.shown((d.open(grid.app pageW pageH))))
+    }
+
+    fn openFind:boolean () {
+        return (this.openDlg(find))
     }
 
     fn openPaste:boolean () {
-        this.closeMenus()
-        if readOnly {
-            return false
-        }
-        return (this.shown((paste.open(grid.app pageW pageH))))
+        return (this.openDlg(paste))
     }
 
     ; After a dialog took an input: a closed dialog gives the keyboard back
@@ -1641,6 +1675,11 @@ class SheetsApp {
     fn dialogKey:void (name:string shift:boolean ctrl:boolean) {
         def d:SxDialog (this.openDialog())
         def at:string ui.focusId
+        if (d.holdsKeys(at)) {
+            ui.keyWith(name shift ctrl)
+            this.afterDialog()
+            return
+        }
         if (name == "Escape") {
             d.close()
             this.afterDialog()
@@ -1740,6 +1779,29 @@ class SheetsApp {
         }
         if (cmd == "edit.pasteSpecial") {
             return (this.openPaste())
+        }
+        if (((cmd == "format.color") || (cmd == "format.fill")) && ((strlen a.arg) == 0)) {
+            color.op = "color"
+            if (cmd == "format.fill") {
+                color.op = "fill"
+            }
+            return (this.openDlg(color))
+        }
+        if ((cmd == "format.border") && ((strlen a.arg) == 0)) {
+            return (this.openDlg(border))
+        }
+        if (cmd == "format.conditional") {
+            return (this.openDlg(cf))
+        }
+        if (cmd == "data.validation") {
+            return (this.openDlg(dv))
+        }
+        if (cmd == "insert.link") {
+            return (this.openDlg(link))
+        }
+        if ((cmd == "sheet.rename") && ((strlen a.arg) == 0)) {
+            grid.app.renameIndex = grid.app.book.activeIndex
+            return (this.openDlg(rename))
         }
         return (grid.run(cmd a.arg))
     }

@@ -1,0 +1,149 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; LinkDialog — a cell's hyperlink, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Link on B3 ──────────────────────────────────── × ┐
+;   │ Address   [https://…__________________________]    │
+;   │ Text      [what the cell shows________________]    │
+;   │                           [Close] [Remove] [Set]   │
+;   └────────────────────────────────────────────────────┘
+;
+; The link lives in the core's model (setHyperlink / clearHyperlink), off the
+; undo stack as before; a new text is an ordinary edit, which is on it.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class LinkDialog extends SxDialog {
+    def addrIn:InputCtl (new InputCtl)
+    def textIn:InputCtl (new InputCtl)
+    def closeBtn:ButtonCtl (new ButtonCtl)
+    def removeBtn:ButtonCtl (new ButtonCtl)
+    def setBtn:ButtonCtl (new ButtonCtl)
+    def atRow:int 0
+    def atCol:int 0
+
+    Constructor () {
+        this.setup("sx-link" "Link")
+        this.field(addrIn "sx-link-address" "Address")
+        this.field(textIn "sx-link-text" "Text")
+        this.button(closeBtn "sx-link-close" "Close" "secondary")
+        this.button(removeBtn "sx-link-remove" "Remove" "secondary")
+        this.button(setBtn "sx-link-set" "Set" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a addrIn
+        push a textIn
+        push a closeBtn
+        push a removeBtn
+        push a setBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a addrIn.tid
+        push a textIn.tid
+        push a closeBtn.tid
+        push a removeBtn.tid
+        push a setBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == closeBtn.tid) || (target == removeBtn.tid) || (target == setBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((addrIn.owns(target)) || (textIn.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return setBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.linkDialog.visible {
+            app.linkDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        def f1:EVGElement (this.row("sx-dlg-field"))
+        f1.addChild((this.label(addrIn.name)))
+        f1.addChild((unwrap addrIn.rootEl))
+        body.addChild(f1)
+        def f2:EVGElement (this.row("sx-dlg-field"))
+        f2.addChild((this.label(textIn.name)))
+        f2.addChild((unwrap textIn.rootEl))
+        body.addChild(f2)
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap closeBtn.rootEl))
+        acts.addChild((unwrap removeBtn.rootEl))
+        acts.addChild((unwrap setBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Opens on the active cell's link and text, focus in the address.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        atRow = app.sel.active.row
+        atCol = app.sel.active.col
+        win.title = ("Link on " + (SpreadsheetModel.cellLabel(atRow atCol)))
+        addrIn.setValue((app.model.hyperlinkAt(atRow atCol)))
+        addrIn.selectAll()
+        textIn.setValue((app.model.getCell(atRow atCol)))
+        this.openOn(pageW pageH)
+        return addrIn.tid
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == closeBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == removeBtn.tid) {
+            app.model.clearHyperlink(atRow atCol)
+            this.close()
+            return true
+        }
+        if (target == setBtn.tid) {
+            this.close()
+            app.model.setHyperlink(atRow atCol addrIn.value)
+            def text:string textIn.value
+            if (((strlen text) > 0) && (text != (app.model.getCell(atRow atCol)))) {
+                app.model.beginTx()
+                app.model.applyEdit(atRow atCol text "")
+                app.model.endTx()
+                app.syncTouched()
+            }
+            return true
+        }
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(addrIn focusId)
+        this.caretFor(textIn focusId)
+    }
+}

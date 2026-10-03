@@ -20,15 +20,14 @@ embeds: <https://terotests.github.io/EVGSheets/embed.html>
 | Context menu on cells, and on column and row headers (insert, delete, clear, move, fit, sort, conditional formatting, validation) | `MenuCtl` in context mode |
 | Sheet tabs and adding a sheet | `TabsCtl`, `RibbonCtl` |
 | Status line: Ready / editing / what happened, and Sum, Average and Count of the selection | the app |
-| Dialogs: find and replace, paste special | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
-| Formula bar, grid, the other dialogs (colours, borders, chart picker, conditional formats, validation) | the datagrid core (`GridApp`) |
+| Dialogs: find and replace, paste special, rename sheet, link, text and fill colour, borders, conditional formatting, data validation and its list, chart picker, SQL query, database connection | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
+| Formula bar, grid | the datagrid core (`GridApp`) |
 | Light and dark | `@vars` palettes in `src/sheets.css`; the core's `modern` and `dark` grid themes |
 
 The two halves meet at the display list. The page is laid out by EVG, and
 the element `sx-grid` is a placeholder whose rectangle becomes `GridApp`'s
 window. `GridApp`'s own frame is painted into that element with
-`EVGDisplayList.paintAt`, so menus drop over the grid and the grid's dialogs
-stay inside it.
+`EVGDisplayList.paintAt`, so menus and dialogs drop over the grid.
 
 State is not duplicated. The Bold button is pressed because the core says
 the active cell is bold, and that is read again after every input.
