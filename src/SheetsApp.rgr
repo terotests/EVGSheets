@@ -44,6 +44,7 @@
 Import "../../datagrid/web/datagrid_web.rgr"
 Import "../../evgui/src/UiHost.rgr"
 Import "RibbonCtl.rgr"
+Import "SheetsEdits.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -391,8 +392,8 @@ class SheetsApp {
         e.addSeparator()
         this.item(e "cut" "Cut" "edit.cut" "" "Ctrl+X")
         this.item(e "copy" "Copy" "edit.copy" "" "Ctrl+C")
-        this.item(e "paste" "Paste" "edit.paste" "" "Ctrl+V")
-        this.item(e "pastevalues" "Paste values only" "edit.pasteValues" "" "Ctrl+⇧V")
+        this.item(e "paste" "Paste" "sx:paste" "" "Ctrl+V")
+        this.item(e "pastevalues" "Paste values only" "sx:pasteValues" "" "Ctrl+⇧V")
         this.item(e "pastespecial" "Paste special…" "edit.pasteSpecial" "" "")
         e.addSeparator()
         this.item(e "find" "Find and replace…" "edit.find" "" "Ctrl+F")
@@ -527,8 +528,8 @@ class SheetsApp {
         ctxMenu.contextMode = true
         this.item(ctxMenu "c-cut" "Cut" "edit.cut" "" "Ctrl+X")
         this.item(ctxMenu "c-copy" "Copy" "edit.copy" "" "Ctrl+C")
-        this.item(ctxMenu "c-paste" "Paste" "edit.paste" "" "Ctrl+V")
-        this.item(ctxMenu "c-pastevalues" "Paste values only" "edit.pasteValues" "" "")
+        this.item(ctxMenu "c-paste" "Paste" "sx:paste" "" "Ctrl+V")
+        this.item(ctxMenu "c-pastevalues" "Paste values only" "sx:pasteValues" "" "Ctrl+⇧V")
         ctxMenu.addSeparator()
         this.item(ctxMenu "c-rowabove" "Insert row above" "insert.row.above" "" "")
         this.item(ctxMenu "c-rowbelow" "Insert row below" "insert.row.below" "" "")
@@ -1536,6 +1537,15 @@ class SheetsApp {
             if (cmd == "sx:theme") {
                 return (this.setTheme(a.arg))
             }
+            ; The sheet's own clipboard, through the same paste as Ctrl+V.
+            if (cmd == "sx:paste") {
+                SheetsEdits.paste(grid.app grid.app.clipboardTsv (SheetsEdits.modeAll()))
+                return true
+            }
+            if (cmd == "sx:pasteValues") {
+                SheetsEdits.paste(grid.app grid.app.clipboardTsv (SheetsEdits.modeValues()))
+                return true
+            }
             if (cmd == "sx:formulaBar") {
                 showFormulaBar = (showFormulaBar == false)
             }
@@ -1675,6 +1685,11 @@ class SheetsApp {
             }
             return
         }
+        if ((name == "Backspace") && (SheetsEdits.backspaceClears(grid.app))) {
+            grid.key("delete" shift ctrl)
+            this.sync()
+            return
+        }
         def gk:string (SheetsApp.gridKeyName(name))
         if ((strlen gk) > 0) {
             grid.key(gk shift ctrl)
@@ -1718,14 +1733,13 @@ class SheetsApp {
     }
 
     fn pasteText:void (s:string) {
-        grid.pasteText(s)
+        SheetsEdits.paste(grid.app s (SheetsEdits.modeAll()))
         this.sync()
     }
 
-    ; Ctrl+Shift+V: the text the page was given, values only, into the cells'
-    ; own formats.
+    ; Ctrl+Shift+V: values only, into the cells' own formats.
     fn pasteTextValues:void (s:string) {
-        grid.pasteTextValues(s)
+        SheetsEdits.paste(grid.app s (SheetsEdits.modeValues()))
         this.sync()
     }
 

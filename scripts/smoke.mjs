@@ -176,6 +176,34 @@ try {
     return { v: m.getCell(11, 5), bold: !!m.getCellStyle(11, 5).bold, dialog: !!a.windows.anyModalVisible() };
   });
   ok("Ctrl+Shift+V pastes the value without its format", values.v === "1234" && !values.bold && !values.dialog, JSON.stringify(values));
+  const more = await page.evaluate(() => {
+    const sx = window.sheet.app, a = sx.grid.app, m = a.model;
+    const pick = (r0, c0, r1, c1) => {
+      a.sel.anchor.row = r0; a.sel.anchor.col = c0;
+      a.sel.active.row = r1; a.sel.active.col = c1;
+    };
+    const out = {};
+    // Outside text with a CRLF line end: no \r, and the row under it stays.
+    m.applyEdit(30, 0, "keep", "");
+    pick(29, 0, 29, 0);
+    sx.pasteText("x\r\n");
+    out.text = m.getCell(29, 0) + "|" + m.getCell(30, 0);
+    // A copied 1x2 block with a formula, into a 2x4 selection: tiled and re-based, one undo.
+    m.applyEdit(32, 0, "5", "");
+    pick(32, 0, 32, 0);
+    a.sel.anchor.row = 32; a.sel.active.col = 1;
+    a.model.applyEdit(32, 1, "", "A33*2");
+    a.copySelection();
+    pick(34, 0, 35, 3);
+    sx.pasteText(a.clipboardTsv);
+    out.tiled = m.getFormula(35, 3) + "|" + m.getCell(35, 2);
+    a.undoEdit();
+    out.undo = m.getCell(35, 2) + "|" + m.getCell(34, 0);
+    return out;
+  });
+  ok("outside text loses its \\r and keeps the row below", more.text === "x|keep", more.text);
+  ok("a block fills a range it divides, formulas re-based", more.tiled === "C36*2|5", more.tiled);
+  ok("and one undo takes the whole fill away", more.undo === "|", more.undo);
 
   // Bold through the ribbon.
   await page.evaluate(() => window.sheet.run("nav.goto", "D8"));

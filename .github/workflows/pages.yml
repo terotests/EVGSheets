@@ -28,10 +28,7 @@ on:
 # modern/dark themes) and EVGUI's pressed-state fix are on these branches
 # until they are merged; then both go back to master / main.
 env:
-  # claude/fix-range-delete-ewenum carries the paste and Backspace fixes
-  # (terotests/Ranger#1119); it is master-based, without f601012 from
-  # claude/bold-ride-6h3zlv.
-  RANGER_REF: ${{ inputs.ranger_ref || 'claude/fix-range-delete-ewenum' }}
+  RANGER_REF: ${{ inputs.ranger_ref || 'claude/bold-ride-6h3zlv' }}
   EVGUI_REF: ${{ inputs.evgui_ref || 'claude/bold-ride-6h3zlv' }}
 
 permissions:
