@@ -1601,6 +1601,12 @@ class FormulaEngine {
     ; date — a spreadsheet that quietly disagrees with the calendar is worse
     ; than one that admits it does not know.
     def todaySerial:double 0.0
+    ; Formulas that call RAND, RANDBETWEEN, NOW or TODAY. Their answer does
+    ; not follow from their inputs, so every recalculation runs them again —
+    ; which is what Excel means by volatile. `volatileCount` lets a workbook
+    ; with none of them skip the extra pass.
+    def volatileKeys:[string:boolean]
+    def volatileCount:int 0
     ; Instrumentation for workbook-scale recalc demos / benches.
     def dirtyMarked:int 0
     def recalculated:int 0
@@ -1661,6 +1667,9 @@ class FormulaEngine {
         usedBy = empty2
         calcValues = empty3
         calcStatus = empty4
+        def empty5:[string:boolean]
+        volatileKeys = empty5
+        volatileCount = 0
         def si:int 0
         def sn:int (book.sheetCount())
         while (si < sn) {
@@ -1704,6 +1713,7 @@ class FormulaEngine {
             i = (i + 1)
         }
         set depsOf key joined
+        this.setVolatile(key (FormulaEngine.callsVolatile(ast)))
         i = 0
         while (i < n) {
             def d:string (itemAt depList i)
@@ -1723,6 +1733,40 @@ class FormulaEngine {
         } {
             set calcStatus key "unsupported"
         }
+    }
+
+    fn setVolatile:void (key:string on:boolean) {
+        def was:boolean false
+        if (has volatileKeys key) {
+            was = (unwrap (get volatileKeys key))
+        }
+        if (was == on) {
+            return
+        }
+        set volatileKeys key on
+        if on {
+            volatileCount = (volatileCount + 1)
+        } {
+            volatileCount = (volatileCount - 1)
+        }
+    }
+
+    sfn callsVolatile:boolean (n:FormulaNode) {
+        if (n.kind == 7) {
+            def u:string (FormulaFunctions.upper(n.fnName))
+            if ((u == "RAND") || (u == "RANDBETWEEN") || (u == "NOW") || (u == "TODAY")) {
+                return true
+            }
+        }
+        def i:int 0
+        def kn:int (array_length n.kids)
+        while (i < kn) {
+            if (FormulaEngine.callsVolatile((itemAt n.kids i))) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
     }
 
     ; Remove key from previous reverse edges before re-registering.
@@ -1770,6 +1814,7 @@ class FormulaEngine {
         if (has depsOf key) {
             set depsOf key ""
         }
+        this.setVolatile(key false)
         set calcStatus key "cached"
     }
 
@@ -1998,6 +2043,27 @@ class FormulaEngine {
     fn recalcDirty:void () {
         def si:int 0
         def sn:int (book.sheetCount())
+        if (volatileCount > 0) {
+            def seen:[string:boolean]
+            while (si < sn) {
+                def vs:SpreadsheetModel (book.sheetAt(si))
+                def vkeys:[string]
+                vs.collectFormulaKeys(si vkeys)
+                def vi:int 0
+                def vn:int (array_length vkeys)
+                while (vi < vn) {
+                    def vk:string (itemAt vkeys vi)
+                    if (has volatileKeys vk) {
+                        if (unwrap (get volatileKeys vk)) {
+                            this.markDirty(vk seen)
+                        }
+                    }
+                    vi = (vi + 1)
+                }
+                si = (si + 1)
+            }
+            si = 0
+        }
         while (si < sn) {
             def sheet:SpreadsheetModel (book.sheetAt(si))
             def keys:[string]

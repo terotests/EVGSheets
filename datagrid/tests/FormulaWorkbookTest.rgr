@@ -54,6 +54,12 @@ class FormulaWorkbookTest {
         return (s.getCell(0 0))
     }
 
+    sfn num:double (text:string) {
+        def v:FormulaValue (FormulaValue.fromString(text))
+        def cv:FormulaValue (v.coerceNumber())
+        return cv.num
+    }
+
     sfn main:void () {
         def c:Checker (new Checker)
 
@@ -99,6 +105,31 @@ class FormulaWorkbookTest {
         engE.rebuildAll()
         c.eqStr("A1 DIV" (se.getCell(0 0)) "#DIV/0!")
         c.eqStr("B1 prop" (se.getCell(0 1)) "#DIV/0!")
+
+        print "== volatile functions recalc every time =="
+        def bookV:WorkbookModel (new WorkbookModel)
+        def sv:SpreadsheetModel (new SpreadsheetModel)
+        sv.name = "V"
+        sv.resize(5 5)
+        sv.setFormula(0 0 "RANDBETWEEN(25,30)")
+        sv.setFormula(0 1 "A1*2")
+        sv.setFormula(0 2 "1+1")
+        bookV.addSheet(sv)
+        def engV:FormulaEngine (new FormulaEngine)
+        engV.attach(bookV)
+        engV.rebuildAll()
+        def rv:double (FormulaWorkbookTest.num((sv.getCell(0 0))))
+        c.ok("RANDBETWEEN(25,30) in range" ((rv >= 25.0) && (rv <= 30.0)))
+        c.eqInt("one volatile formula" engV.volatileCount 1)
+        def before:int engV.recalculated
+        engV.recalcDirty()
+        c.eqInt("recalc reruns the volatile cell and its dependent only" (engV.recalculated - before) 2)
+        def rv2:double (FormulaWorkbookTest.num((sv.getCell(0 0))))
+        def dbl:double (FormulaWorkbookTest.num((sv.getCell(0 1))))
+        c.ok("dependent follows the new draw" (dbl == (rv2 * 2.0)))
+        sv.setFormula(0 0 "5")
+        engV.registerFormula(0 0 0 "5")
+        c.eqInt("re-registered as plain formula is not volatile" engV.volatileCount 0)
 
         print "== absolute / relative parse + translate =="
         def p:FormulaParser (new FormulaParser)
