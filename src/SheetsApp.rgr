@@ -392,8 +392,8 @@ class SheetsApp {
         this.item(e "cut" "Cut" "edit.cut" "" "Ctrl+X")
         this.item(e "copy" "Copy" "edit.copy" "" "Ctrl+C")
         this.item(e "paste" "Paste" "edit.paste" "" "Ctrl+V")
-        this.item(e "pastevalues" "Paste values only" "edit.pasteValues" "" "")
-        this.item(e "pastespecial" "Paste special…" "edit.pasteSpecial" "" "Ctrl+⇧V")
+        this.item(e "pastevalues" "Paste values only" "edit.pasteValues" "" "Ctrl+⇧V")
+        this.item(e "pastespecial" "Paste special…" "edit.pasteSpecial" "" "")
         e.addSeparator()
         this.item(e "find" "Find and replace…" "edit.find" "" "Ctrl+F")
         this.item(e "clear" "Clear contents" "edit.clear" "" "Del")
@@ -1722,9 +1722,10 @@ class SheetsApp {
         this.sync()
     }
 
-    ; Ctrl+Shift+V: the Paste special dialog, over the text the page was given.
-    fn pasteTextSpecial:void (s:string) {
-        grid.pasteTextSpecial(s)
+    ; Ctrl+Shift+V: the text the page was given, values only, into the cells'
+    ; own formats.
+    fn pasteTextValues:void (s:string) {
+        grid.pasteTextValues(s)
         this.sync()
     }
 

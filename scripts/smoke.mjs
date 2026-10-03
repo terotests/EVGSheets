@@ -163,6 +163,19 @@ try {
     return [m.getCell(8, 3), m.getCell(9, 4), String(window.sheet.app.grid.app.editing)].join("|");
   });
   ok("Backspace clears the selected range", cleared === "||false", cleared);
+  const values = await page.evaluate(async () => {
+    const a = window.sheet.app.grid.app;
+    a.sel.anchor.row = 11; a.sel.anchor.col = 5;
+    a.sel.active.row = 11; a.sel.active.col = 5;
+    window.sheet.element.dispatchEvent(new KeyboardEvent("keydown", { key: "V", ctrlKey: true, shiftKey: true, bubbles: true }));
+    const dt = new DataTransfer();
+    dt.setData("text/plain", a.clipboardTsv);
+    window.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    const m = a.model;
+    return { v: m.getCell(11, 5), bold: !!m.getCellStyle(11, 5).bold, dialog: !!a.windows.anyModalVisible() };
+  });
+  ok("Ctrl+Shift+V pastes the value without its format", values.v === "1234" && !values.bold && !values.dialog, JSON.stringify(values));
 
   // Bold through the ribbon.
   await page.evaluate(() => window.sheet.run("nav.goto", "D8"));
