@@ -220,6 +220,25 @@ class SxDialog {
         }
     }
 
+    ; A radio group drawn as something other than a column of rows (chips,
+    ; swatches): classes added after the group's own, so the sheet's rules
+    ; for them win, and `onCls` on the chosen item. Run after every build.
+    sfn restyle:void (g:RadioGroupCtl groupCls:string itemCls:string onCls:string) {
+        UiTree.addClass((unwrap g.rootEl) groupCls)
+        def i:int 0
+        while (i < (array_length g.items)) {
+            def it:UiItem (itemAt g.items i)
+            def el:EVGElement (unwrap it.el)
+            UiTree.addClass(el itemCls)
+            if (it.value == g.value) {
+                UiTree.addClass(el onCls)
+            } {
+                UiTree.removeClass(el onCls)
+            }
+            i = (i + 1)
+        }
+    }
+
     sfn tri:int (on:boolean) {
         if on {
             return 1

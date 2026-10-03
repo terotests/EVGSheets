@@ -299,6 +299,22 @@ try {
   await page.evaluate(() => window.sheet.run("edit.undo", ""));
   ok("…as one undo", await page.evaluate(() => window.sheet.app.grid.app.model.getCellStyle(13, 9).textRgb.toUpperCase() !== "#123456"));
 
+  // Borders: an EVGUI dialog with a preview; one spec applied on Apply.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.evaluate(() => window.sheet.run("format.border", ""));
+  await page.waitForTimeout(120);
+  ok("Borders opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.border.win.open && !window.sheet.app.grid.app.borderDialog.visible && window.sheet.app.border.multi));
+  await click(page, "sx-border-box");
+  await click(page, "sx-border-line-medium");
+  await click(page, "sx-border-ink-c4");
+  ok("Box, Medium and red make the spec", (await page.evaluate(() => window.sheet.app.border.spec())) === "spec:TBLR:medium:#C00000", await page.evaluate(() => window.sheet.app.border.spec()));
+  await shot(page, "10_borders");
+  await click(page, "sx-border-apply");
+  ok("Apply draws them", await page.evaluate(() => { const st = window.sheet.app.grid.app.model.getCellStyle(13, 9); return !window.sheet.app.border.win.open && st.borderTop.has() && st.borderTop.style === "medium"; }));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);

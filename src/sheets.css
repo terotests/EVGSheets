@@ -642,6 +642,16 @@
 .sx-swatch { width: 20px; height: 20px; padding: 0px; border: 1px solid var(--field-border); border-radius: 4px; color: transparent; font-size: 1px; line-height: 1px; }
 .sx-swatch:focus { border: 2px solid var(--accent); }
 .sx-swatch-on { border: 2px solid var(--text); }
+/* Choices drawn as a row of chips (a radio group): the border's line. */
+.sx-chip-group { flex-direction: row; flex-wrap: wrap; gap: 6px; width: 404px; }
+.sx-chip { width: auto; padding: 4px 10px; border-radius: 14px; }
+.sx-chip-on { background-color: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.sx-dlg-presets { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; }
+/* The border preview: bars around two rows of two cells. */
+.sx-border-preview { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; padding: 6px; background-color: #FFFFFF; border: 1px solid var(--field-border); border-radius: 6px; }
+.sx-bp-row { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: stretch; }
+.sx-bp-v { height: 24px; }
+.sx-bp-cell { width: 74px; height: 24px; color: #334155; font-size: 12px; line-height: 24px; text-align: center; }
 .sx-color-sample { padding: 6px 12px; border: 1px solid var(--field-border); border-radius: 6px; font-size: 13px; line-height: 18px; }
 
 /* --- a phone ------------------------------------------------------------------------- */

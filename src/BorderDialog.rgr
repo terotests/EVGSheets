@@ -1,0 +1,351 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; BorderDialog — the border gallery, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Borders ─────────────────────────────────────── × ┐
+;   │ Edges                         Preview              │
+;   │ ☑ Top        ☑ Bottom         ┏━━━━┳━━━━┓          │
+;   │ ☑ Left       ☑ Right          ┃Text┃Text┃          │
+;   │ ☐ Inside —   ☐ Inside |       ┗━━━━┻━━━━┛          │
+;   │ [None] [Box] [All]                                 │
+;   │ Line    (Thin) (Medium) (Thick) (Double) …         │
+;   │ Colour  ■■■■■■■■■■                                 │
+;   │                                 [Cancel] [Apply]   │
+;   └────────────────────────────────────────────────────┘
+;
+; It opens on what the active cell already has, so unticking an edge is how
+; one is removed, and everything in it is one `format.border spec:…` string
+; that the core applies (GridFormat.apply), as its own window did. The
+; preview is drawn here: bars around two cells, as wide as the line.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class BorderDialog extends SxDialog {
+    def top:CheckboxCtl (new CheckboxCtl)
+    def bottom:CheckboxCtl (new CheckboxCtl)
+    def left:CheckboxCtl (new CheckboxCtl)
+    def right:CheckboxCtl (new CheckboxCtl)
+    def inH:CheckboxCtl (new CheckboxCtl)
+    def inV:CheckboxCtl (new CheckboxCtl)
+    def noneBtn:ButtonCtl (new ButtonCtl)
+    def boxBtn:ButtonCtl (new ButtonCtl)
+    def allBtn:ButtonCtl (new ButtonCtl)
+    def line:RadioGroupCtl (new RadioGroupCtl)
+    def ink:RadioGroupCtl (new RadioGroupCtl)
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def applyBtn:ButtonCtl (new ButtonCtl)
+    def preview:EVGElement (EVGElement.createDiv())
+    def inks:[string]
+    ; The selection has an inside, so the inside lines mean something.
+    def multi:boolean false
+
+    Constructor () {
+        this.setup("sx-border" "Borders")
+        this.check(top "sx-border-top" "Top")
+        this.check(bottom "sx-border-bottom" "Bottom")
+        this.check(left "sx-border-left" "Left")
+        this.check(right "sx-border-right" "Right")
+        this.check(inH "sx-border-inh" "Inside horizontal")
+        this.check(inV "sx-border-inv" "Inside vertical")
+        this.button(noneBtn "sx-border-none" "None" "secondary")
+        this.button(boxBtn "sx-border-box" "Box" "secondary")
+        this.button(allBtn "sx-border-all" "All" "secondary")
+        line.tid = "sx-border-line"
+        line.name = "Line"
+        def i:int 0
+        while (i < (GridApp.borderLineCount())) {
+            line.addItem((GridApp.borderLineStyle(i)) (GridApp.borderLineLabel(i)) false)
+            i = (i + 1)
+        }
+        ink.tid = "sx-border-ink"
+        ink.name = "Colour"
+        this.button(cancelBtn "sx-border-cancel" "Cancel" "secondary")
+        this.button(applyBtn "sx-border-apply" "Apply" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a top
+        push a bottom
+        push a left
+        push a right
+        push a inH
+        push a inV
+        push a noneBtn
+        push a boxBtn
+        push a allBtn
+        push a line
+        push a ink
+        push a cancelBtn
+        push a applyBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a top.tid
+        push a bottom.tid
+        push a left.tid
+        push a right.tid
+        if multi {
+            push a inH.tid
+            push a inV.tid
+        }
+        push a noneBtn.tid
+        push a boxBtn.tid
+        push a allBtn.tid
+        push a (line.itemTid(line.rovingValue))
+        push a (ink.itemTid(ink.rovingValue))
+        push a cancelBtn.tid
+        push a applyBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == noneBtn.tid) || (target == boxBtn.tid) || (target == allBtn.tid) || (target == cancelBtn.tid) || (target == applyBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((line.owns(target)) || (ink.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return applyBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.borderDialog.visible {
+            app.cancelBorderDialog()
+            return true
+        }
+        return false
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        def upper:EVGElement (this.row("sx-dlg-options"))
+        def edges:EVGElement (this.row("sx-dlg-col"))
+        edges.addChild((this.heading("Edges")))
+        edges.addChild((unwrap top.rootEl))
+        edges.addChild((unwrap left.rootEl))
+        if multi {
+            edges.addChild((unwrap inH.rootEl))
+        }
+        def edges2:EVGElement (this.row("sx-dlg-col"))
+        edges2.addChild((this.heading(" ")))
+        edges2.addChild((unwrap bottom.rootEl))
+        edges2.addChild((unwrap right.rootEl))
+        if multi {
+            edges2.addChild((unwrap inV.rootEl))
+        }
+        upper.addChild(edges)
+        upper.addChild(edges2)
+        body.addChild(upper)
+        def presets:EVGElement (this.row("sx-dlg-presets"))
+        presets.addChild((unwrap noneBtn.rootEl))
+        presets.addChild((unwrap boxBtn.rootEl))
+        presets.addChild((unwrap allBtn.rootEl))
+        body.addChild(presets)
+        body.addChild((this.heading(line.name)))
+        body.addChild((unwrap line.rootEl))
+        body.addChild((this.heading(ink.name)))
+        def sw:EVGElement (this.row("sx-swatches"))
+        sw.addChild((unwrap ink.rootEl))
+        body.addChild(sw)
+        def pv:EVGElement (this.row("sx-dlg-field"))
+        pv.addChild((this.label("Preview")))
+        preview.className = "sx-border-preview"
+        preview.a11yHidden = true
+        pv.addChild(preview)
+        body.addChild(pv)
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap cancelBtn.rootEl))
+        acts.addChild((unwrap applyBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    fn inkOf:string (value:string) {
+        def i:int (ink.indexOfValue(value))
+        if (i < 0) {
+            return "#000000"
+        }
+        return (itemAt inks i)
+    }
+
+    ; Opens on the active cell's edges, line and colour; focus on Top.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        def edges:string (app.borderEdgesOfActive())
+        top.checkState = (SxDialog.tri((GridApp.hasLetter(edges 84))))
+        bottom.checkState = (SxDialog.tri((GridApp.hasLetter(edges 66))))
+        left.checkState = (SxDialog.tri((GridApp.hasLetter(edges 76))))
+        right.checkState = (SxDialog.tri((GridApp.hasLetter(edges 82))))
+        inH.checkState = 0
+        inV.checkState = 0
+        def a:CellPos (new CellPos)
+        def b:CellPos (new CellPos)
+        app.sel.normalized(a b)
+        multi = ((a.row != b.row) || (a.col != b.col))
+        line.value = (app.borderLineOfActive())
+        line.rovingValue = line.value
+        ; The palette, and the cell's own colour when the palette lacks it:
+        ; otherwise the first Apply would silently swap it for black.
+        def have:string (to_uppercase (app.borderInkOfActive()))
+        clear ink.items
+        clear inks
+        ink.value = ""
+        def i:int 0
+        while (i < (GridApp.borderPaletteCount())) {
+            def hex:string (GridApp.borderPalette(i))
+            def v:string ("c" + (to_string i))
+            ink.addItem(v hex false)
+            push inks hex
+            if (((strlen ink.value) == 0) && ((to_uppercase hex) == have)) {
+                ink.value = v
+            }
+            i = (i + 1)
+        }
+        if ((strlen ink.value) == 0) {
+            ink.addItem("cx" have false)
+            push inks have
+            ink.value = "cx"
+        }
+        ink.rovingValue = ink.value
+        this.openOn(pageW pageH)
+        this.paint()
+        return top.tid
+    }
+
+    ; What the controls say, as the spec the command takes.
+    fn spec:string () {
+        def flags:string ""
+        if (top.checkState == 1) { flags = (flags + "T") }
+        if (bottom.checkState == 1) { flags = (flags + "B") }
+        if (left.checkState == 1) { flags = (flags + "L") }
+        if (right.checkState == 1) { flags = (flags + "R") }
+        if (multi && (inH.checkState == 1)) { flags = (flags + "H") }
+        if (multi && (inV.checkState == 1)) { flags = (flags + "V") }
+        return ("spec:" + flags + ":" + line.value + ":" + (this.inkOf(ink.value)))
+    }
+
+    ; One bar of the preview: the line's colour and width when `on`, a faint
+    ; grid line when not.
+    fn bar:EVGElement (on:boolean horizontal:boolean) {
+        def el:EVGElement (EVGElement.createDiv())
+        def w:string "1px"
+        def colour:string "#E2E8F0"
+        if on {
+            colour = (this.inkOf(ink.value))
+            w = "1px"
+            if (line.value == "medium") { w = "2px" }
+            if ((line.value == "thick") || (line.value == "double")) { w = "3px" }
+        }
+        if horizontal {
+            el.className = "sx-bp-h"
+            UiTree.inline(el "height" w)
+        } {
+            el.className = "sx-bp-v"
+            UiTree.inline(el "width" w)
+        }
+        UiTree.inline(el "background-color" colour)
+        return el
+    }
+
+    fn cellRow:EVGElement () {
+        def r:EVGElement (this.row("sx-bp-row"))
+        r.addChild((this.bar((left.checkState == 1) false)))
+        def c1:EVGElement (EVGElement.createSpan())
+        c1.className = "sx-bp-cell"
+        c1.elementType = 1
+        c1.textContent = "Text"
+        r.addChild(c1)
+        r.addChild((this.bar((multi && (inV.checkState == 1)) false)))
+        def c2:EVGElement (EVGElement.createSpan())
+        c2.className = "sx-bp-cell"
+        c2.elementType = 1
+        c2.textContent = "Text"
+        r.addChild(c2)
+        r.addChild((this.bar((right.checkState == 1) false)))
+        return r
+    }
+
+    fn paint:void () {
+        SxDialog.restyle(line "sx-chip-group" "sx-chip" "sx-chip-on")
+        SxDialog.restyle(ink "sx-swatch-group" "sx-swatch" "sx-swatch-on")
+        def i:int 0
+        while (i < (array_length ink.items)) {
+            def it:UiItem (itemAt ink.items i)
+            UiTree.inline((unwrap it.el) "background-color" (itemAt inks i))
+            i = (i + 1)
+        }
+        UiTree.clearChildren(preview)
+        preview.addChild((this.bar((top.checkState == 1) true)))
+        preview.addChild((this.cellRow()))
+        preview.addChild((this.bar((multi && (inH.checkState == 1)) true)))
+        preview.addChild((this.cellRow()))
+        preview.addChild((this.bar((bottom.checkState == 1) true)))
+    }
+
+    fn follow:void (app:GridApp) {
+        if win.open {
+            this.paint()
+        }
+    }
+
+    fn preset:void (box:boolean all:boolean) {
+        top.checkState = (SxDialog.tri((box || all)))
+        bottom.checkState = (SxDialog.tri((box || all)))
+        left.checkState = (SxDialog.tri((box || all)))
+        right.checkState = (SxDialog.tri((box || all)))
+        inH.checkState = (SxDialog.tri(all))
+        inV.checkState = (SxDialog.tri(all))
+        top.build()
+        bottom.build()
+        left.build()
+        right.build()
+        inH.build()
+        inV.build()
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == noneBtn.tid) {
+            this.preset(false false)
+            return false
+        }
+        if (target == boxBtn.tid) {
+            this.preset(true false)
+            return false
+        }
+        if (target == allBtn.tid) {
+            this.preset(false true)
+            return false
+        }
+        if (target == cancelBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == applyBtn.tid) {
+            def s:string (this.spec())
+            this.close()
+            if (GridFormat.apply(app.model app.sel "border" s)) {
+                app.sheetView.markDirty()
+                app.grid.updateVisible(app.model)
+            }
+            return true
+        }
+        return false
+    }
+}

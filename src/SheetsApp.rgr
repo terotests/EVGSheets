@@ -49,6 +49,7 @@ Import "PasteDialog.rgr"
 Import "RenameDialog.rgr"
 Import "LinkDialog.rgr"
 Import "ColorDialog.rgr"
+Import "BorderDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -104,6 +105,7 @@ class SheetsApp {
     def rename:RenameDialog (new RenameDialog)
     def link:LinkDialog (new LinkDialog)
     def color:ColorDialog (new ColorDialog)
+    def border:BorderDialog (new BorderDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -1559,6 +1561,7 @@ class SheetsApp {
         push a rename
         push a link
         push a color
+        push a border
         return a
     }
 
@@ -1741,6 +1744,9 @@ class SheetsApp {
                 color.op = "fill"
             }
             return (this.openDlg(color))
+        }
+        if ((cmd == "format.border") && ((strlen a.arg) == 0)) {
+            return (this.openDlg(border))
         }
         if (cmd == "insert.link") {
             return (this.openDlg(link))

@@ -201,18 +201,11 @@ class ColorDialog extends SxDialog {
 
     ; Each swatch painted with its colour, after the group built its items.
     fn paint:void () {
-        UiTree.addClass((unwrap what.rootEl) "sx-swatch-group")
+        SxDialog.restyle(what "sx-swatch-group" "sx-swatch" "sx-swatch-on")
         def i:int 0
         while (i < (array_length what.items)) {
             def it:UiItem (itemAt what.items i)
-            def el:EVGElement (unwrap it.el)
-            UiTree.addClass(el "sx-swatch")
-            if (it.value == what.value) {
-                UiTree.addClass(el "sx-swatch-on")
-            } {
-                UiTree.removeClass(el "sx-swatch-on")
-            }
-            UiTree.inline(el "background-color" (itemAt hexes i))
+            UiTree.inline((unwrap it.el) "background-color" (itemAt hexes i))
             i = (i + 1)
         }
         if (op == "fill") {
