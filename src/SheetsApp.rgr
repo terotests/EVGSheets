@@ -1665,6 +1665,11 @@ class SheetsApp {
     fn dialogKey:void (name:string shift:boolean ctrl:boolean) {
         def d:SxDialog (this.openDialog())
         def at:string ui.focusId
+        if (d.holdsKeys(at)) {
+            ui.keyWith(name shift ctrl)
+            this.afterDialog()
+            return
+        }
         if (name == "Escape") {
             d.close()
             this.afterDialog()

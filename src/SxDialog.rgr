@@ -62,6 +62,11 @@ class SxDialog {
         return ""
     }
 
+    ; Does the focused control want every key itself (an open drop-down)?
+    fn holdsKeys:boolean (target:string) {
+        return false
+    }
+
     ; Opens on what the core holds, and returns where focus goes.
     fn open:string (app:GridApp pageW:double pageH:double) {
         this.openOn(pageW pageH)

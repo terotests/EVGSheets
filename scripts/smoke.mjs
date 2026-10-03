@@ -357,21 +357,28 @@ try {
   ok("Choose writes the value", await page.evaluate(() => !window.sheet.app.pick.win.open && window.sheet.app.grid.app.model.getCell(13, 9) === "Maybe"));
   await page.evaluate(() => { window.sheet.run("edit.undo", ""); const a = window.sheet.app.grid.app; a.model.clearValidationsIn(13, 9, 13, 9); });
 
-  // Insert chart: the core reads the selection, the app's EVGUI dialog asks.
+  // Insert chart: a chart at once, and a short editor window beside it.
   await page.evaluate(() => window.sheet.run("nav.goto", "B4"));
   const charts0 = await page.evaluate(() => window.sheet.app.grid.app.view.chartLayer.count());
   await page.evaluate(() => window.sheet.run("insert.chart", ""));
   await page.waitForTimeout(120);
-  ok("Insert chart opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.chart.win.open && !window.sheet.app.grid.app.chartDialog.visible));
-  const kinds = await page.evaluate(() => window.sheet.app.chart.kind.items.filter((it) => !it.disabled).map((it) => it.value));
+  ok("Insert chart makes the chart and opens its editor", await page.evaluate((n) => window.sheet.app.chart.win.open && !window.sheet.app.chart.win.isModal && !window.sheet.app.grid.app.chartDialog.visible && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
+  const kinds = await page.evaluate(() => window.sheet.app.chart.kind.items.map((it) => it.value));
   ok("…offering only the types the data suits", kinds.length > 0 && kinds.length < 20, kinds.join(","));
-  await click(page, "sx-chart-kind-" + kinds[kinds.length - 1]);
-  ok("a type chosen is the pending chart's", await page.evaluate((k) => String(window.sheet.app.grid.app.pendingChart.kind) === k, kinds[kinds.length - 1]));
+  const pickKind = kinds[kinds.length - 1];
+  await click(page, "sx-chart-kind-trigger");
+  ok("the type is a drop-down", await page.evaluate(() => window.sheet.app.chart.kind.open));
+  await shot(page, "14_chart_type");
+  await click(page, "sx-chart-kind-item-" + pickKind);
+  ok("a type chosen redraws the chart on the sheet", await page.evaluate((k) => { const a = window.sheet.app.grid.app; const l = a.view.chartLayer; const p = l.panelAt(l.count() - 1); return !window.sheet.app.chart.kind.open && String(p.chart.kind) === k; }, pickKind));
   await shot(page, "14_chart");
-  await click(page, "sx-chart-ok");
-  ok("Create puts the chart on the sheet", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
-  await page.evaluate(() => { const a = window.sheet.app.grid.app; const p = a.view.chartLayer.panelAt(a.view.chartLayer.count() - 1); a.view.chartLayer.remove(a.windows, p.chart.id); window.sheet.app.sync(); });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape leaves the chart on the sheet", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
+  await page.evaluate(() => { const a = window.sheet.app.grid.app; const p = a.view.chartLayer.panelAt(a.view.chartLayer.count() - 1); a.chartEditId = 0; a.openChartDialog(p.chart.id); window.sheet.app.sync(); });
   await page.evaluate(() => window.sheet.redraw());
+  await click(page, "sx-chart-delete");
+  ok("its editor deletes it", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n, charts0));
 
   // The SQL box and the connection window: EVGUI dialogs too.
   await page.evaluate(() => window.sheet.run("db.sql.dialog", ""));

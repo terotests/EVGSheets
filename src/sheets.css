@@ -482,11 +482,12 @@
   width: 1px;
   height: 1px;
 }
-.ui-dialog { width: 1px; height: 1px; }
-/* A dialog here is opened by a command, never by a button of its own. */
-.ui-dialog-trigger { width: 1px; height: 1px; font-size: 1px; color: rgba(0, 0, 0, 0); }
-.ui-dialog-scrim { background-color: var(--scrim); }
-.ui-dialog-content {
+.ui-dialog, .ui-window { width: 1px; height: 1px; }
+/* A dialog here is opened by a command, never by a button of its own. The
+ * editor windows (not modal: no scrim) share the dialog's look. */
+.ui-dialog-trigger, .ui-window-trigger { width: 1px; height: 1px; font-size: 1px; color: rgba(0, 0, 0, 0); }
+.ui-dialog-scrim, .ui-window-scrim { background-color: var(--scrim); }
+.ui-dialog-content, .ui-window-content {
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
@@ -498,16 +499,16 @@
   shadow-radius: 28px;
   shadow-offset-y: 10px;
 }
-.ui-dialog-titlebar {
+.ui-dialog-titlebar, .ui-window-titlebar {
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: center;
   padding: 12px 12px 4px 18px;
 }
-.ui-dialog-handle { flex-grow: 1; }
-.ui-dialog-title { color: var(--text); font-size: 15px; font-weight: bold; line-height: 22px; }
-.ui-dialog-close {
+.ui-dialog-handle, .ui-window-handle { flex-grow: 1; }
+.ui-dialog-title, .ui-window-title { color: var(--text); font-size: 15px; font-weight: bold; line-height: 22px; }
+.ui-dialog-close, .ui-window-close {
   width: 26px;
   height: 26px;
   border-radius: 6px;
@@ -516,8 +517,8 @@
   line-height: 26px;
   text-align: center;
 }
-.ui-dialog-close:hover { background-color: var(--hover); color: var(--text); }
-.ui-dialog-close:focus { background-color: var(--hover); color: var(--text); }
+.ui-dialog-close:hover, .ui-window-close:hover { background-color: var(--hover); color: var(--text); }
+.ui-dialog-close:focus, .ui-window-close:focus { background-color: var(--hover); color: var(--text); }
 
 .sx-dlg-body {
   display: flex;
@@ -653,6 +654,45 @@
 .sx-chip-row { flex-direction: row; flex-wrap: wrap; gap: 6px; width: 300px; }
 .sx-chip-wide { flex-direction: row; flex-wrap: wrap; gap: 6px; width: 476px; }
 .sx-chip-off { opacity: 0.4; }
+.sx-dlg-label-mid { color: var(--text); font-size: 13px; line-height: 18px; width: 64px; flex-shrink: 0; }
+.sx-dlg-actions-split { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: space-between; gap: 8px; padding-top: 4px; }
+
+/* A drop-down (SelectCtl): a field-like trigger and a menu-like list. */
+.ui-select-trigger {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: 210px;
+  padding: 5px 10px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background-color: var(--field);
+  cursor: pointer;
+}
+.ui-select-trigger:hover { background-color: var(--hover); }
+.ui-select-trigger:focus { border: 1px solid var(--accent); }
+.ui-select-value { color: var(--text); font-size: 13px; line-height: 18px; }
+.ui-select-content {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  width: 232px;
+  padding: 4px;
+  border: 1px solid var(--menu-border);
+  border-radius: 8px;
+  background-color: var(--raised);
+  shadow-color: var(--menu-shadow);
+  shadow-radius: 14px;
+  shadow-offset-y: 6px;
+  overlay-gap: 4;
+  position-try-fallbacks: top start, bottom end, top end;
+}
+.ui-select-item { width: 208px; padding: 5px 8px; border-radius: 5px; color: var(--text); font-size: 13px; line-height: 18px; cursor: pointer; }
+.ui-select-item:hover { background-color: var(--hover); }
+.ui-select-item:focus { background-color: var(--hover); }
+.ui-select-item-state-checked { color: var(--accent-ink); font-weight: 600; }
+.ui-select-item-disabled { opacity: 0.45; }
 .sx-dlg-presets { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; }
 /* The border preview: bars around two rows of two cells. */
 .sx-border-preview { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; padding: 6px; background-color: #FFFFFF; border: 1px solid var(--field-border); border-radius: 6px; }
