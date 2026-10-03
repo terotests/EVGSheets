@@ -91,6 +91,10 @@ class GridApp {
     ; Checked where an edit BEGINS rather than where it lands, so a refused
     ; edit leaves no half-open editor behind.
     def readOnly:boolean false
+    ; A host with its own header menus (EVGSheets) turns this on: the column
+    ; header's arrow and Shift, and a press on a row header, then select as
+    ; every spreadsheet does instead of opening the core's numbered popups.
+    def hostHeaderMenus:boolean false
     def editing:boolean false
     def editBuf:string ""
     def editCaret:int 0
@@ -7257,6 +7261,35 @@ class GridApp {
         this.refreshFormulaHilites()
     }
 
+    ; Shift on a column header: the selection runs from its anchor column to
+    ; this one, over the same rows.
+    fn extendColumnSelection:void (col:int) {
+        sel.active.col = col
+        sel.active.row = 0
+        grid.ensureCellVisible(model 0 col)
+        this.refreshFormulaHilites()
+    }
+
+    ; A press on a row header selects the row; Ctrl (Cmd) adds it to what is
+    ; selected, Shift extends the selected rows to it.
+    fn pressRowHeader:void (row:int shift:boolean ctrl:boolean) {
+        if shift {
+            sel.active.row = row
+            sel.active.col = 0
+            sel.anchor.col = (model.colCount - 1)
+            grid.ensureCellVisible(model row 0)
+            this.refreshFormulaHilites()
+            return
+        }
+        if ctrl {
+            sel.keepCurrent()
+        } {
+            sel.clearExtra()
+        }
+        this.selectRow(row)
+        this.refreshFormulaHilites()
+    }
+
     ; Keyboard Ctrl+Space retains Excel's full-column band semantics.
     ; The far end is the anchor so the active cell stays at the top / left.
     fn selectColumn:void (col:int) {
@@ -8120,18 +8153,26 @@ class GridApp {
                     if editing {
                         this.commitEdit()
                     }
-                    if ((this.hitColumnMenuArrow(hit.col input.pointerX input.pointerY)) || input.shiftDown) {
+                    def coreMenu:boolean ((this.hitColumnMenuArrow(hit.col input.pointerX input.pointerY)) || input.shiftDown)
+                    if hostHeaderMenus {
+                        coreMenu = false
+                    }
+                    if coreMenu {
                         this.openHeaderMenu(hit.col input.pointerX (grid.gridOriginY()))
                     } {
-                        this.selectDataColumn(hit.col input.ctrlDown)
-                        ; …and a header is also a handle. Armed, not carried:
-                        ; the pointer has to travel before a click on a header
-                        ; stops meaning "select this column".
-                        if ((input.ctrlDown == false) && (readOnly == false)) {
-                            colDragArmed = true
-                            colDragFrom = hit.col
-                            colDragTo = hit.col
-                            colDragStartX = input.pointerX
+                        if (hostHeaderMenus && input.shiftDown) {
+                            this.extendColumnSelection(hit.col)
+                        } {
+                            this.selectDataColumn(hit.col input.ctrlDown)
+                            ; …and a header is also a handle. Armed, not carried:
+                            ; the pointer has to travel before a click on a header
+                            ; stops meaning "select this column".
+                            if ((input.ctrlDown == false) && (readOnly == false)) {
+                                colDragArmed = true
+                                colDragFrom = hit.col
+                                colDragTo = hit.col
+                                colDragStartX = input.pointerX
+                            }
                         }
                     }
                 } {
@@ -8141,14 +8182,18 @@ class GridApp {
                     if editing {
                         this.commitEdit()
                     }
-                    def menuTop:int input.pointerY
-                    if ((menuTop + view.menuH) > H) {
-                        menuTop = (H - (view.menuH + 6))
+                    if hostHeaderMenus {
+                        this.pressRowHeader(hit.row input.shiftDown input.ctrlDown)
+                    } {
+                        def menuTop:int input.pointerY
+                        if ((menuTop + view.menuH) > H) {
+                            menuTop = (H - (view.menuH + 6))
+                        }
+                        if (menuTop < grid.y) {
+                            menuTop = grid.y
+                        }
+                        this.openRowMenu(hit.row (grid.x + grid.rowHeaderW) menuTop)
                     }
-                    if (menuTop < grid.y) {
-                        menuTop = grid.y
-                    }
-                    this.openRowMenu(hit.row (grid.x + grid.rowHeaderW) menuTop)
                 } {
                     if view.menuOpen {
                         this.closeHeaderMenu()

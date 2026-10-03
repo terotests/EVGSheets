@@ -194,6 +194,9 @@ class SheetsApp {
         ; the first layout.
         grid.start(w h)
         grid.app.setChrome(false true false false)
+        ; The column and row menus are this app's (fillCtxMenu); the core's
+        ; numbered header popups stay closed.
+        grid.app.hostHeaderMenus = true
         def themed:boolean (grid.setTheme("modern"))
         this.buildModels()
         this.buildChrome()
@@ -1735,6 +1738,11 @@ class SheetsApp {
             return
         }
         if (this.insideGrid(x y)) {
+            if ((shift == false) && (ctrl == false)) {
+                if (this.headerArrowAt(x y)) {
+                    return
+                }
+            }
             gridFocused = true
             ui.blur()
             gridCapture = true
@@ -2042,26 +2050,33 @@ class SheetsApp {
                 grid.pointer(lx ly false false false)
             }
         }
-        ; A header: the band under the pointer becomes the selection, unless
-        ; it is already part of a selection of whole columns (or rows).
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
-        app.sel.normalized(a b)
         if ((hit.row == -2) && (hit.col >= 0)) {
             kind = "column"
-            if ((hit.col < a.col) || (hit.col > b.col) || (a.row > 0) || (b.row < (app.model.rowCount - 1))) {
-                app.selectColumn(hit.col)
-            }
         }
         if ((hit.col == -2) && (hit.row >= 0)) {
             kind = "row"
-            if ((hit.row < a.row) || (hit.row > b.row) || (a.col > 0) || (b.col < (app.model.colCount - 1))) {
-                app.selectRow(hit.row)
-            }
         }
         if readOnly {
             this.sync()
             return
+        }
+        this.openCtxAt(kind hit x y)
+    }
+
+    ; The context menu for `kind` at (x, y). A header press first makes its
+    ; band the selection, unless the band is already in a selection of whole
+    ; columns (or rows) — so a Ctrl/Cmd-picked set of columns is kept.
+    fn openCtxAt:void (kind:string hit:CellPos x:int y:int) {
+        def app:GridApp grid.app
+        if (kind == "column") {
+            if ((this.bandSelected(hit.col true)) == false) {
+                app.selectColumn(hit.col)
+            }
+        }
+        if (kind == "row") {
+            if ((this.bandSelected(hit.row false)) == false) {
+                app.selectRow(hit.row)
+            }
         }
         this.fillCtxMenu(kind)
         ctxX = x
@@ -2073,6 +2088,50 @@ class SheetsApp {
             ui.focusId = next
         }
         this.sync()
+    }
+
+    ; Is column (or row) `at` inside a selected rectangle that starts at the
+    ; first row (column) — that is, one a header press made?
+    fn bandSelected:boolean (at:int isCol:boolean) {
+        def sel:GridSelection grid.app.sel
+        def i:int 0
+        while (i < (sel.rangeCount())) {
+            def g:GridRange (sel.rangeAt(i))
+            if isCol {
+                if ((g.r0 == 0) && (at >= g.c0) && (at <= g.c1)) {
+                    return true
+                }
+            } {
+                if ((g.c0 == 0) && (at >= g.r0) && (at <= g.r1)) {
+                    return true
+                }
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    ; A press on a column header's small arrow opens the column menu under it.
+    fn headerArrowAt:boolean (x:int y:int) {
+        if readOnly {
+            return false
+        }
+        def app:GridApp grid.app
+        def lx:int (x - gx)
+        def ly:int (y - gy)
+        def hit:CellPos (app.grid.hitTest(app.model lx ly))
+        if ((hit.row != -2) || (hit.col < 0)) {
+            return false
+        }
+        if ((app.hitColumnMenuArrow(hit.col lx ly)) == false) {
+            return false
+        }
+        if app.editing {
+            app.commitEdit()
+        }
+        def top:int ((app.grid.headerTop()) + app.grid.colHeaderH)
+        this.openCtxAt("column" hit x (gy + top))
+        return true
     }
 
     ; The secondary button on a tab: that sheet is shown, and its menu opens.

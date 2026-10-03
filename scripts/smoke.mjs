@@ -301,6 +301,67 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
 
+  // The small arrow on a column header opens the same column menu, not the
+  // core's numbered popup.
+  const arrow = await page.evaluate(() => {
+    const v = window.sheet.app.grid.app.grid;
+    const m = window.sheet.app.grid.app.model;
+    return { x: v.x + v.rowHeaderW + m.colToX(4) + m.colWidth(4) - 8, y: v.headerTop() + 8 };
+  });
+  await page.mouse.click(canvasBox.x + g.x + arrow.x, canvasBox.y + g.y + arrow.y);
+  await page.waitForTimeout(100);
+  ok("the header arrow opens the column menu", (await state(page)).menuOpen && (await page.evaluate(() => window.sheet.app.ctxMenu.name)) === "Column actions");
+  ok("…for column E, and not the core's popup", await page.evaluate(() => {
+    const a = window.sheet.app.grid.app;
+    return a.sel.active.col === 4 && !a.view.menuOpen && window.sheet.app.ctxMenu.items.find((i) => i.value === "h-delcols").name === "Delete column E";
+  }));
+  await shot(page, "04d_arrow_menu");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+
+  // Ctrl/Cmd+click on headers picks several columns. On a Mac the same press
+  // also fires a contextmenu event (button 0, ctrlKey), which opens nothing.
+  const colAt = (c) => page.evaluate((c) => {
+    const v = window.sheet.app.grid.app.grid;
+    const m = window.sheet.app.grid.app.model;
+    return { x: v.x + v.rowHeaderW + m.colToX(c) + 10, y: v.headerTop() + 6 };
+  }, c);
+  const pB = await colAt(1);
+  const pD = await colAt(3);
+  await page.mouse.click(canvasBox.x + g.x + pB.x, canvasBox.y + g.y + pB.y);
+  await page.keyboard.down("Control");
+  await page.mouse.click(canvasBox.x + g.x + pD.x, canvasBox.y + g.y + pD.y);
+  await page.keyboard.up("Control");
+  await page.evaluate(({ x, y }) => {
+    const c = window.sheet.canvas;
+    const b = c.getBoundingClientRect();
+    c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 0, ctrlKey: true, clientX: b.left + x, clientY: b.top + y }));
+  }, { x: g.x + pD.x, y: g.y + pD.y });
+  await page.waitForTimeout(100);
+  const picked = () => page.evaluate(() => {
+    const s = window.sheet.app.grid.app.sel;
+    const out = [];
+    for (let i = 0; i < s.rangeCount(); i++) { const r = s.rangeAt(i); out.push(r.c0 + "-" + r.c1); }
+    return out.join(",");
+  });
+  let cols = await picked();
+  ok("Ctrl+click on headers selects B and D", cols === "1-1,3-3", cols);
+  ok("…and a Mac Ctrl+click opens no menu", !(await state(page)).menuOpen);
+  await page.mouse.click(canvasBox.x + g.x + pB.x, canvasBox.y + g.y + pB.y, { button: "right" });
+  await page.waitForTimeout(100);
+  cols = await picked();
+  ok("right click on B keeps both columns selected", (await state(page)).menuOpen && cols === "1-1,3-3", cols);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+
+  // A press on a row header selects the row; it no longer opens a popup.
+  await page.mouse.click(canvasBox.x + g.x + hdr.rowX, canvasBox.y + g.y + hdr.rowY);
+  await page.waitForTimeout(100);
+  ok("a row header press selects the row, with no popup", await page.evaluate(() => {
+    const a = window.sheet.app.grid.app;
+    return a.sel.active.row === 4 && a.sel.anchor.row === 4 && !a.view.menuOpen;
+  }));
+
   // A cell gets the cell menu back.
   await page.mouse.click(cellX, cellY, { button: "right" });
   await page.waitForTimeout(100);
