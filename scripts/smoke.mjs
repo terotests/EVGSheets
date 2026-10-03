@@ -135,6 +135,76 @@ try {
   const d8 = await page.evaluate(() => window.sheet.app.grid.app.model.getCell(7, 3));
   ok("typing goes into the cell", d8 === "1234", d8);
 
+  // Ctrl+V through the browser's paste event: our own copy keeps its format
+  // and fills the selected range; Backspace then clears the range.
+  const pasted = await page.evaluate(async () => {
+    const a = window.sheet.app.grid.app;
+    const pick = (r0, c0, r1, c1) => {
+      a.sel.anchor.row = r0; a.sel.anchor.col = c0;
+      a.sel.active.row = r1; a.sel.active.col = c1;
+    };
+    pick(7, 3, 7, 3);
+    await window.sheet.run("format.bold");
+    await window.sheet.run("edit.copy");
+    pick(8, 3, 9, 4);
+    const dt = new DataTransfer();
+    dt.setData("text/plain", a.clipboardTsv + "\r\n");
+    window.sheet.canvas.focus();
+    window.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    const m = a.model;
+    return { v: m.getCell(9, 4), bold: !!m.getCellStyle(9, 4).bold, below: m.getCell(10, 3) };
+  });
+  ok("a paste fills the selected range, format and all", pasted.v === "1234" && pasted.bold, JSON.stringify(pasted));
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(100);
+  const cleared = await page.evaluate(() => {
+    const m = window.sheet.app.grid.app.model;
+    return [m.getCell(8, 3), m.getCell(9, 4), String(window.sheet.app.grid.app.editing)].join("|");
+  });
+  ok("Backspace clears the selected range", cleared === "||false", cleared);
+  const values = await page.evaluate(async () => {
+    const a = window.sheet.app.grid.app;
+    a.sel.anchor.row = 11; a.sel.anchor.col = 5;
+    a.sel.active.row = 11; a.sel.active.col = 5;
+    window.sheet.element.dispatchEvent(new KeyboardEvent("keydown", { key: "V", ctrlKey: true, shiftKey: true, bubbles: true }));
+    const dt = new DataTransfer();
+    dt.setData("text/plain", a.clipboardTsv);
+    window.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    const m = a.model;
+    return { v: m.getCell(11, 5), bold: !!m.getCellStyle(11, 5).bold, dialog: !!a.windows.anyModalVisible() };
+  });
+  ok("Ctrl+Shift+V pastes the value without its format", values.v === "1234" && !values.bold && !values.dialog, JSON.stringify(values));
+  const more = await page.evaluate(() => {
+    const sx = window.sheet.app, a = sx.grid.app, m = a.model;
+    const pick = (r0, c0, r1, c1) => {
+      a.sel.anchor.row = r0; a.sel.anchor.col = c0;
+      a.sel.active.row = r1; a.sel.active.col = c1;
+    };
+    const out = {};
+    // Outside text with a CRLF line end: no \r, and the row under it stays.
+    m.applyEdit(30, 0, "keep", "");
+    pick(29, 0, 29, 0);
+    sx.pasteText("x\r\n");
+    out.text = m.getCell(29, 0) + "|" + m.getCell(30, 0);
+    // A copied 1x2 block with a formula, into a 2x4 selection: tiled and re-based, one undo.
+    m.applyEdit(32, 0, "5", "");
+    pick(32, 0, 32, 0);
+    a.sel.anchor.row = 32; a.sel.active.col = 1;
+    a.model.applyEdit(32, 1, "", "A33*2");
+    a.copySelection();
+    pick(34, 0, 35, 3);
+    sx.pasteText(a.clipboardTsv);
+    out.tiled = m.getFormula(35, 3) + "|" + m.getCell(35, 2);
+    a.undoEdit();
+    out.undo = m.getCell(35, 2) + "|" + m.getCell(34, 0);
+    return out;
+  });
+  ok("outside text loses its \\r and keeps the row below", more.text === "x|keep", more.text);
+  ok("a block fills a range it divides, formulas re-based", more.tiled === "C36*2|5", more.tiled);
+  ok("and one undo takes the whole fill away", more.undo === "|", more.undo);
+
   // Bold through the ribbon.
   await page.evaluate(() => window.sheet.run("nav.goto", "D8"));
   const wasBold = (await state(page)).bold;
