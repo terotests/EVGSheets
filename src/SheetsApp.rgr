@@ -44,6 +44,7 @@
 Import "../../datagrid/web/datagrid_web.rgr"
 Import "../../evgui/src/UiHost.rgr"
 Import "RibbonCtl.rgr"
+Import "FindDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -92,6 +93,10 @@ class SheetsApp {
     def statsEl:EVGElement (EVGElement.createSpan())
     def badgeEl:EVGElement (EVGElement.createSpan())
     def ctxHolder:EVGElement (EVGElement.createDiv())
+    ; The dialogs the app draws with EVGUI controllers instead of leaving them
+    ; to the core's EVGWindow. One at a time; Find and replace is the first.
+    def find:FindDialog (new FindDialog)
+    def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
 
@@ -793,6 +798,20 @@ class SheetsApp {
         this.mount(ctxHolder ctxMenu)
         root.addChild(ctxHolder)
 
+        ; --- the dialogs: modal overlays, so they take no room in the page --
+        dlgHolder.id = "sx-dlg-holder"
+        dlgHolder.className = "sx-dlg-holder"
+        UiTree.clearChildren(dlgHolder)
+        this.mount(dlgHolder find.win)
+        def fc:[UiCtl] (find.ctls())
+        def fi:int 1
+        while (fi < (array_length fc)) {
+            push ui.ctls (itemAt fc fi)
+            fi = (fi + 1)
+        }
+        find.buildAll()
+        root.addChild(dlgHolder)
+
         grid.app.setChrome(false showFormulaBar false false)
         grid.setReadOnly(readOnly)
         this.sync()
@@ -906,6 +925,7 @@ class SheetsApp {
         def onlyList:[EVGElement]
         push onlyList (unwrap tabs.listEl)
         troot.children = onlyList
+        find.showCarets(ui.focusId)
     }
 
     sfn baseName:string (p:string) {
@@ -1228,7 +1248,7 @@ class SheetsApp {
         def ki:int 0
         while (ki < (array_length root.children)) {
             def kid:EVGElement (itemAt root.children ki)
-            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder")) {
+            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder") && (kid.id != "sx-dlg-holder")) {
                 used = (used + kid.calculatedHeight + 1.0)
             }
             ki = (ki + 1)
@@ -1445,6 +1465,10 @@ class SheetsApp {
             this.pressChrome(target shift ctrl)
             return
         }
+        ; A modal dialog owns the page until it closes.
+        if (this.dialogOpen()) {
+            return
+        }
         ; A press outside an open menu closes it and does nothing else.
         if (this.anyMenuOpen()) {
             this.closeMenus()
@@ -1485,7 +1509,70 @@ class SheetsApp {
         gridFocused = false
         ui.pressTidValue = target
         ui.clickWith(target shift ctrl)
+        if (this.dialogOpen()) {
+            if (find.isButton(target)) {
+                def closed:boolean (find.act(target grid.app))
+            }
+            this.afterDialog()
+            return
+        }
         this.afterChrome(target choice)
+    }
+
+    ; =========================================================================
+    ; Dialogs drawn with EVGUI controllers
+    ; =========================================================================
+
+    fn dialogOpen:boolean () {
+        return find.win.open
+    }
+
+    fn openFind:boolean () {
+        this.closeMenus()
+        def at:string (find.open(grid.app pageW pageH))
+        gridFocused = false
+        ui.focus(at)
+        this.sync()
+        return true
+    }
+
+    ; After a dialog took an input: a closed dialog gives the keyboard back
+    ; to the sheet.
+    fn afterDialog:void () {
+        if ((this.dialogOpen()) == false) {
+            gridFocused = true
+            ui.blur()
+        }
+        this.sync()
+    }
+
+    ; Keys while a dialog is up. Escape closes it, Tab walks its ring, Enter
+    ; in a field is the default button, and Enter or Space on a button
+    ; presses it; the rest goes to the focused controller.
+    fn dialogKey:void (name:string shift:boolean ctrl:boolean) {
+        def at:string ui.focusId
+        if (name == "Escape") {
+            find.close()
+            this.afterDialog()
+            return
+        }
+        if (name == "Tab") {
+            ui.focus((find.nextFocus(at shift)))
+            this.sync()
+            return
+        }
+        if ((name == "Enter") && (find.isField(at))) {
+            def c1:boolean (find.act(find.nextBtn.tid grid.app))
+            this.afterDialog()
+            return
+        }
+        if (((name == "Enter") || (name == " ")) && (find.isButton(at))) {
+            def c2:boolean (find.act(at grid.app))
+            this.afterDialog()
+            return
+        }
+        ui.keyWith(name shift ctrl)
+        this.afterDialog()
     }
 
     ; After the chrome took an input: run what it chose, and hand the keyboard
@@ -1548,6 +1635,9 @@ class SheetsApp {
             }
             this.rebuildChrome()
             return true
+        }
+        if (cmd == "edit.find") {
+            return (this.openFind())
         }
         return (grid.run(cmd a.arg))
     }
@@ -1649,6 +1739,10 @@ class SheetsApp {
             this.sync()
             return
         }
+        if (this.dialogOpen()) {
+            this.dialogKey(name shift ctrl)
+            return
+        }
         if ((this.anyMenuOpen()) || (gridFocused == false)) {
             if ((name == "Escape") && ((this.anyMenuOpen()) == false)) {
                 gridFocused = true
@@ -1701,6 +1795,22 @@ class SheetsApp {
     ; Printable text, and Ctrl chords (`ctrl` true, `s` the letter). A chord
     ; goes to the sheet wherever focus is: Ctrl+Z undoes from the toolbar too.
     fn text:void (s:string shift:boolean ctrl:boolean) {
+        ; While a dialog is up its fields take the text, and a chord is the
+        ; field's (Ctrl+A selects the query), not the sheet's.
+        if (this.dialogOpen()) {
+            if ctrl {
+                ui.keyWith(s shift true)
+            } {
+                ui.type(s)
+            }
+            this.sync()
+            return
+        }
+        ; Ctrl+F and Ctrl+H open Find and replace, as in Excel.
+        if (ctrl && (((to_lowercase s) == "f") || ((to_lowercase s) == "h"))) {
+            def opened:boolean (this.openFind())
+            return
+        }
         if ctrl {
             grid.text(s shift true)
             this.sync()
@@ -1716,6 +1826,11 @@ class SheetsApp {
     }
 
     fn pasteText:void (s:string) {
+        if (this.dialogOpen()) {
+            ui.type(s)
+            this.sync()
+            return
+        }
         grid.pasteText(s)
         this.sync()
     }
