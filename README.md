@@ -100,10 +100,13 @@ once per page.
 
 ## Building
 
-The sources expect to sit at `gallery/evgsheets/` in a Ranger checkout. That
-checkout also needs `gallery/datagrid` (the core) and `gallery/evgui` (EVGUI).
-`scripts/build.mjs` puts everything in place and compiles with Ranger's
-committed compiler:
+The datagrid core lives in this repository under `datagrid/` (moved here from
+Ranger's `gallery/datagrid` with its history). A Ranger checkout is still
+needed for the compiler and the libraries the core imports. The sources import
+each other as if they sat in a Ranger tree (`gallery/evgsheets`,
+`gallery/datagrid`, `gallery/evgui`), so `scripts/build.mjs` assembles that
+tree under `.stage/` out of links, with this repository's `datagrid/` in place
+of Ranger's, and compiles it with Ranger's committed compiler:
 
 ```sh
 git clone https://github.com/terotests/Ranger
@@ -120,8 +123,8 @@ python3 -m http.server -d dist 8000
 
 - **Ranger:** `--ranger`, then `$RANGER_DIR`, then the enclosing checkout, then
   `../Ranger`.
-- **EVGUI:** `--evgui`, then `$EVGUI_DIR`, then `../EVGUI`. If none is found, it
-  clones EVGUI.
+- **EVGUI:** `--evgui`, then `$EVGUI_DIR`, then `<ranger>/gallery/evgui`, then
+  `../EVGUI`. If none is found, it clones EVGUI into `.deps/EVGUI`.
 
 It runs Ranger's `scripts/deps.mjs`, which fetches `lib/evg`.
 
