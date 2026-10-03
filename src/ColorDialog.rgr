@@ -1,0 +1,358 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; ColorDialog — text and fill colour, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Fill colour ───────────────────────────────── × ┐
+;   │ ■■■■■■■■■■   theme                               │
+;   │ ■■■■■■■■■■   standard (four rows)                │
+;   │ ■■■■■■■■■■   recent, when there are any          │
+;   │ Hex   [#FFF2CC____]   [ Aa 123 ]                  │
+;   │                    [Cancel] [No fill] [Apply]     │
+;   └──────────────────────────────────────────────────┘
+;
+; The swatches are one RadioGroupCtl, each item painted with its colour, so
+; the arrows walk them and Space or a click picks one; the Hex field takes
+; any #RRGGBB. The palette, the recent colours, the live preview on the
+; sheet and the one-undo apply are the core's (paletteTheme/Standard,
+; colorRecent, snapshotColorSelection, previewColorOnSheet,
+; restoreColorSnapshot, GridFormat.apply); this only chooses.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class ColorDialog extends SxDialog {
+    def what:RadioGroupCtl (new RadioGroupCtl)
+    def hexIn:InputCtl (new InputCtl)
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def noFillBtn:ButtonCtl (new ButtonCtl)
+    def applyBtn:ButtonCtl (new ButtonCtl)
+    def sample:EVGElement (EVGElement.createSpan())
+    ; "color" or "fill": which format op Apply runs.
+    def op:string "color"
+    def pick:string ""
+    ; The swatch and the hex last seen, to tell what the user changed.
+    def seenValue:string ""
+    def seenHex:string ""
+    ; The sheet is showing a preview that Cancel must take back.
+    def live:boolean false
+    def hexes:[string]
+
+    Constructor () {
+        this.setup("sx-color" "Text colour")
+        what.tid = "sx-color-swatch"
+        what.name = "Colour"
+        this.field(hexIn "sx-color-hex" "Hex")
+        hexIn.boxWidth = 110.0
+        this.button(cancelBtn "sx-color-cancel" "Cancel" "secondary")
+        this.button(noFillBtn "sx-color-nofill" "No fill" "secondary")
+        this.button(applyBtn "sx-color-apply" "Apply" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a what
+        push a hexIn
+        push a cancelBtn
+        push a noFillBtn
+        push a applyBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        def at:string what.rovingValue
+        if ((strlen at) == 0) {
+            at = "t0"
+        }
+        push a (what.itemTid(at))
+        push a hexIn.tid
+        push a cancelBtn.tid
+        if (op == "fill") {
+            push a noFillBtn.tid
+        }
+        push a applyBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == cancelBtn.tid) || (target == noFillBtn.tid) || (target == applyBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((what.owns(target)) || (hexIn.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return applyBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.colorDialog.visible {
+            def asked:string app.colorDialogOp
+            app.cancelColorDialog()
+            op = asked
+            return true
+        }
+        return false
+    }
+
+    ; The swatches: theme, standard, then recent, ten to a row.
+    fn fillSwatches:void (app:GridApp) {
+        clear what.items
+        clear hexes
+        def i:int 0
+        while (i < (GridApp.paletteThemeCount())) {
+            this.swatch(("t" + (to_string i)) (GridApp.paletteTheme(i)))
+            i = (i + 1)
+        }
+        i = 0
+        while (i < (GridApp.paletteStandardCount())) {
+            this.swatch(("s" + (to_string i)) (GridApp.paletteStandard(i)))
+            i = (i + 1)
+        }
+        i = 0
+        while (i < (array_length app.colorRecent)) {
+            this.swatch(("r" + (to_string i)) (itemAt app.colorRecent i))
+            i = (i + 1)
+        }
+    }
+
+    fn swatch:void (value:string hex:string) {
+        what.addItem(value hex false)
+        push hexes hex
+    }
+
+    fn hexOf:string (value:string) {
+        def i:int (what.indexOfValue(value))
+        if (i < 0) {
+            return ""
+        }
+        return (itemAt hexes i)
+    }
+
+    ; The first swatch with this colour, or "".
+    fn valueOf:string (hex:string) {
+        def want:string (to_uppercase hex)
+        def i:int 0
+        while (i < (array_length hexes)) {
+            if ((to_uppercase (itemAt hexes i)) == want) {
+                return (what.valueAtIndex(i))
+            }
+            i = (i + 1)
+        }
+        return ""
+    }
+
+    ; #RRGGBB (the # optional), upper-cased, or "" when it is not one.
+    sfn normalHex:string (s:string) {
+        def t:string (trim s)
+        if (((strlen t) == 7) && ((charAt t 0) == 35)) {
+            t = (substring t 1 7)
+        }
+        if ((strlen t) != 6) {
+            return ""
+        }
+        def i:int 0
+        while (i < 6) {
+            def ch:int (charAt t i)
+            def digit:boolean ((ch >= 48) && (ch <= 57))
+            def lower:boolean ((ch >= 97) && (ch <= 102))
+            def upper:boolean ((ch >= 65) && (ch <= 70))
+            if ((digit || lower || upper) == false) {
+                return ""
+            }
+            i = (i + 1)
+        }
+        return ("#" + (to_uppercase t))
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        def box:EVGElement (this.row("sx-swatches"))
+        box.addChild((unwrap what.rootEl))
+        body.addChild(box)
+        def f1:EVGElement (this.row("sx-dlg-field"))
+        f1.addChild((this.label(hexIn.name)))
+        f1.addChild((unwrap hexIn.rootEl))
+        sample.className = "sx-color-sample"
+        sample.elementType = 1
+        sample.textContent = "Aa 123"
+        sample.a11yHidden = true
+        f1.addChild(sample)
+        body.addChild(f1)
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap cancelBtn.rootEl))
+        if (op == "fill") {
+            acts.addChild((unwrap noFillBtn.rootEl))
+        }
+        acts.addChild((unwrap applyBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Each swatch painted with its colour, after the group built its items.
+    fn paint:void () {
+        UiTree.addClass((unwrap what.rootEl) "sx-swatch-group")
+        def i:int 0
+        while (i < (array_length what.items)) {
+            def it:UiItem (itemAt what.items i)
+            def el:EVGElement (unwrap it.el)
+            UiTree.addClass(el "sx-swatch")
+            if (it.value == what.value) {
+                UiTree.addClass(el "sx-swatch-on")
+            } {
+                UiTree.removeClass(el "sx-swatch-on")
+            }
+            UiTree.inline(el "background-color" (itemAt hexes i))
+            i = (i + 1)
+        }
+        if (op == "fill") {
+            UiTree.inline(sample "background-color" pick)
+            UiTree.inline(sample "color" "#000000")
+        } {
+            UiTree.inline(sample "background-color" "#FFFFFF")
+            UiTree.inline(sample "color" pick)
+        }
+    }
+
+    ; Opens for `op` on the active cell's colour, and returns where focus
+    ; goes: the chosen swatch, or the first.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        def st:CellStyle (app.model.getCellStyle(app.sel.active.row app.sel.active.col))
+        def initial:string st.textRgb
+        if (op == "fill") {
+            win.title = "Fill colour"
+            initial = st.fillRgb
+            if (st.hasFill == false) {
+                initial = ""
+            }
+        } {
+            win.title = "Text colour"
+        }
+        win.name = win.title
+        pick = (ColorDialog.normalHex(initial))
+        if ((strlen pick) == 0) {
+            if (op == "fill") {
+                pick = "#FFF2CC"
+            } {
+                pick = "#C00000"
+            }
+        }
+        this.fillSwatches(app)
+        what.value = (this.valueOf(pick))
+        what.rovingValue = what.value
+        if ((strlen what.value) == 0) {
+            what.rovingValue = "t0"
+        }
+        seenValue = what.value
+        hexIn.setValue(pick)
+        seenHex = pick
+        app.colorDialogOp = op
+        app.snapshotColorSelection()
+        live = true
+        ; Opening on a cell with no colour of its own must not paint one.
+        if ((strlen initial) > 0) {
+            app.previewColorOnSheet(pick)
+        }
+        this.openOn(pageW pageH)
+        this.paint()
+        return (what.itemTid(what.rovingValue))
+    }
+
+    ; After every input: a new swatch or a new hex is the pick, shown on the
+    ; sheet; the window closed any other way than Apply takes it back.
+    fn follow:void (app:GridApp) {
+        if (win.open == false) {
+            if live {
+                app.restoreColorSnapshot()
+                app.colorPreviewOn = false
+                live = false
+            }
+            return
+        }
+        def changed:boolean false
+        if (what.value != seenValue) {
+            seenValue = what.value
+            def h:string (this.hexOf(what.value))
+            if ((strlen h) > 0) {
+                pick = (ColorDialog.normalHex(h))
+                hexIn.setValue(pick)
+                hexIn.build()
+                seenHex = pick
+                changed = true
+            }
+        }
+        if (hexIn.value != seenHex) {
+            seenHex = hexIn.value
+            def typed:string (ColorDialog.normalHex(hexIn.value))
+            if ((strlen typed) > 0) {
+                pick = typed
+                what.value = (this.valueOf(pick))
+                seenValue = what.value
+                what.build()
+                changed = true
+            }
+        }
+        if changed {
+            app.previewColorOnSheet(pick)
+        }
+        this.paint()
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == cancelBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == noFillBtn.tid) {
+            live = false
+            this.close()
+            app.restoreColorSnapshot()
+            app.colorPreviewOn = false
+            if (GridFormat.apply(app.model app.sel "fill" "")) {
+                app.sheetView.markDirty()
+                app.grid.updateVisible(app.model)
+            }
+            return true
+        }
+        if (target == applyBtn.tid) {
+            def typed:string (ColorDialog.normalHex(hexIn.value))
+            if ((strlen typed) > 0) {
+                pick = typed
+            }
+            live = false
+            this.close()
+            ; Back to the baseline, then one apply through the format path,
+            ; so Ctrl+Z takes the whole pick back as one action.
+            app.restoreColorSnapshot()
+            app.colorPreviewOn = false
+            app.rememberColor(pick)
+            if (GridFormat.apply(app.model app.sel op pick)) {
+                app.growSelectedRowsToFit()
+                app.sheetView.markDirty()
+                app.grid.updateVisible(app.model)
+            }
+            return true
+        }
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(hexIn focusId)
+    }
+}

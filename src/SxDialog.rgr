@@ -91,6 +91,11 @@ class SxDialog {
         return false
     }
 
+    ; After every input, open or not: whatever the dialog keeps in step with
+    ; the core (a live preview, say).
+    fn follow:void (app:GridApp) {
+    }
+
     ; After every input, with the id that has focus.
     fn showFocus:void (focusId:string) {
     }

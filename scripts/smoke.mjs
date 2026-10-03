@@ -277,6 +277,28 @@ try {
   ok("Remove takes the link off", await page.evaluate(() => !window.sheet.app.link.win.open && window.sheet.app.grid.app.model.hyperlinkAt(11, 7) === ""));
   await page.evaluate(() => window.sheet.run("edit.undo", ""));
 
+  // Fill colour: swatches in an EVGUI dialog, previewed on the sheet.
+  await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
+  await page.evaluate(() => window.sheet.run("format.fill", ""));
+  await page.waitForTimeout(120);
+  ok("Fill colour opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.color.win.open && !window.sheet.app.grid.app.colorDialog.visible));
+  await click(page, "sx-color-swatch-s22");
+  ok("a swatch previews on the sheet", await page.evaluate(() => { const st = window.sheet.app.grid.app.model.getCellStyle(13, 9); return st.hasFill && st.fillRgb.toUpperCase() === "#C6EFCE"; }));
+  await shot(page, "09_fill");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape takes the preview back", await page.evaluate(() => !window.sheet.app.color.win.open && !window.sheet.app.grid.app.model.getCellStyle(13, 9).hasFill));
+  await page.evaluate(() => window.sheet.run("format.color", ""));
+  await page.waitForTimeout(80);
+  await click(page, "sx-color-hex");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("#123456");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("a typed hex and Enter apply the text colour", await page.evaluate(() => !window.sheet.app.color.win.open && window.sheet.app.grid.app.model.getCellStyle(13, 9).textRgb.toUpperCase() === "#123456"));
+  await page.evaluate(() => window.sheet.run("edit.undo", ""));
+  ok("…as one undo", await page.evaluate(() => window.sheet.app.grid.app.model.getCellStyle(13, 9).textRgb.toUpperCase() !== "#123456"));
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);

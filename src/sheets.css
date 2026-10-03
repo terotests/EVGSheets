@@ -635,6 +635,15 @@
 .ui-radio-state-checked { background-color: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
 .ui-radio-disabled { opacity: 0.45; }
 
+/* The colour swatches: the same radio group, ten to a row, each item painted
+ * with its colour (inline) and its name (the hex) kept for a reader only.
+ * The classes are added by the dialog after the group's own, so these win. */
+.sx-swatch-group { flex-direction: row; flex-wrap: wrap; gap: 4px; width: 256px; }
+.sx-swatch { width: 20px; height: 20px; padding: 0px; border: 1px solid var(--field-border); border-radius: 4px; color: transparent; font-size: 1px; line-height: 1px; }
+.sx-swatch:focus { border: 2px solid var(--accent); }
+.sx-swatch-on { border: 2px solid var(--text); }
+.sx-color-sample { padding: 6px 12px; border: 1px solid var(--field-border); border-radius: 6px; font-size: 13px; line-height: 18px; }
+
 /* --- a phone ------------------------------------------------------------------------- */
 
 @media (max-width: 640px) {

@@ -48,6 +48,7 @@ Import "FindDialog.rgr"
 Import "PasteDialog.rgr"
 Import "RenameDialog.rgr"
 Import "LinkDialog.rgr"
+Import "ColorDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -102,6 +103,7 @@ class SheetsApp {
     def paste:PasteDialog (new PasteDialog)
     def rename:RenameDialog (new RenameDialog)
     def link:LinkDialog (new LinkDialog)
+    def color:ColorDialog (new ColorDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -948,6 +950,7 @@ class SheetsApp {
         def si:int 0
         while (si < (array_length sd)) {
             def d:SxDialog (itemAt sd si)
+            d.follow(grid.app)
             d.showFocus(ui.focusId)
             si = (si + 1)
         }
@@ -1555,6 +1558,7 @@ class SheetsApp {
         push a paste
         push a rename
         push a link
+        push a color
         return a
     }
 
@@ -1730,6 +1734,13 @@ class SheetsApp {
         }
         if (cmd == "edit.pasteSpecial") {
             return (this.openPaste())
+        }
+        if (((cmd == "format.color") || (cmd == "format.fill")) && ((strlen a.arg) == 0)) {
+            color.op = "color"
+            if (cmd == "format.fill") {
+                color.op = "fill"
+            }
+            return (this.openDlg(color))
         }
         if (cmd == "insert.link") {
             return (this.openDlg(link))
