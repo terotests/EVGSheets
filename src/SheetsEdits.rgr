@@ -1,0 +1,179 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; SheetsEdits — editing behaviour EVGSheets puts over the core's
+; =============================================================================
+;
+; The core (gallery/datagrid's GridApp) stays as Ranger ships it. Where this
+; editor wants a key or a paste to do something else, the decision is made
+; here, from GridApp's own state and verbs, before the input reaches it:
+;
+;   Backspace over a range    clears the range, as Delete does (Google Sheets,
+;                             Excel for Mac: the Mac "delete" key IS Backspace)
+;   Ctrl+V of our own copy    keeps the copied block: formulas and formats
+;   paste over a selection    fills it when it holds the block a whole number
+;                             of times, as Excel does
+;   Ctrl+Shift+V              values only, into the cells' own formats
+;   text from outside         loses Windows \r and the trailing line end, which
+;                             would otherwise paste as an empty row
+; =============================================================================
+
+Import "../../datagrid/web/datagrid_web.rgr"
+
+class SheetsEdits {
+
+    ; GridApp's pasteMode: 0 everything, 1 values only.
+    sfn modeAll:int () {
+        return 0
+    }
+
+    sfn modeValues:int () {
+        return 1
+    }
+
+    ; True when Backspace should clear the selection rather than open the
+    ; active cell: nothing is being edited, no dialog has the keyboard, and
+    ; more than one cell is selected.
+    sfn backspaceClears:boolean (app:GridApp) {
+        if app.editing {
+            return false
+        }
+        if (app.windows.anyModalVisible()) {
+            return false
+        }
+        if ((app.sel.rangeCount()) > 1) {
+            return true
+        }
+        return ((app.sel.isSingle()) == false)
+    }
+
+    ; Clipboard text as rows: no \r, and no empty row for the line end Excel
+    ; and Sheets put after the last one.
+    sfn clipLines:[string] (text:string) {
+        def lines:[string] (strsplit text "\n")
+        def out:[string]
+        def i:int 0
+        def n:int (array_length lines)
+        while (i < n) {
+            def ln:string (itemAt lines i)
+            def len:int (strlen ln)
+            if ((len > 0) && ((charAt ln (len - 1)) == 13)) {
+                ln = (substring ln 0 (len - 1))
+            }
+            push out ln
+            i = (i + 1)
+        }
+        def last:int ((array_length out) - 1)
+        if ((last > 0) && ((strlen (itemAt out last)) == 0)) {
+            removeLast out
+        }
+        return out
+    }
+
+    sfn clipText:string (text:string) {
+        def lines:[string] (SheetsEdits.clipLines(text))
+        def out:string ""
+        def i:int 0
+        while (i < (array_length lines)) {
+            if (i > 0) {
+                str_append out "\n"
+            }
+            str_append out (itemAt lines i)
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; The widest row of clipboard text, in cells.
+    sfn textWidth:int (text:string) {
+        def lines:[string] (SheetsEdits.clipLines(text))
+        def w:int 0
+        def i:int 0
+        while (i < (array_length lines)) {
+            def n:int (array_length (strsplit (itemAt lines i) "\t"))
+            if (n > w) {
+                w = n
+            }
+            i = (i + 1)
+        }
+        return w
+    }
+
+    ; A paste from the page: `text` is what the system clipboard holds, `mode`
+    ; is modeAll (Ctrl+V) or modeValues (Ctrl+Shift+V).
+    sfn paste:void (app:GridApp text:string mode:int) {
+        if app.readOnly {
+            return
+        }
+        def clean:string (SheetsEdits.clipText(text))
+        ; The browser hands our own copy back as text. Keep the block it came
+        ; from, or the formulas and formats are lost on the way.
+        def own:boolean (((array_length app.clipValues) > 0) && (clean == (SheetsEdits.clipText(app.clipboardTsv))))
+        if (own == false) {
+            app.setClipboardText(clean)
+        }
+        if app.editing {
+            app.pasteIntoField()
+            return
+        }
+        def h:int (array_length (SheetsEdits.clipLines(app.clipboardTsv)))
+        def w:int (SheetsEdits.textWidth(app.clipboardTsv))
+        if own {
+            h = app.clipRows
+            w = app.clipCols
+        }
+        def prev:int app.pasteMode
+        app.pasteMode = mode
+        SheetsEdits.pasteBlocks(app h w)
+        app.pasteMode = prev
+    }
+
+    ; Paste the clipboard (h rows, w columns) once from the selection's
+    ; top-left, or once per copy when the selection holds it whole.
+    sfn pasteBlocks:void (app:GridApp h:int w:int) {
+        def a:CellPos (new CellPos)
+        def b:CellPos (new CellPos)
+        app.sel.normalized(a b)
+        def selH:int ((b.row - a.row) + 1)
+        def selW:int ((b.col - a.col) + 1)
+        def repY:int 1
+        def repX:int 1
+        def fits:boolean (((app.sel.rangeCount()) == 1) && (h > 0) && (w > 0))
+        if (fits && ((selH % h) == 0) && ((selW % w) == 0) && (app.clipCut == false)) {
+            repY = (idiv selH h)
+            repX = (idiv selW w)
+        }
+        if ((repY * repX) == 1) {
+            SheetsEdits.selectCell(app a.row a.col)
+            app.pasteClipboard()
+            return
+        }
+        ; Each copy goes through the core's own paste, so a formula is re-based
+        ; to where that copy lands; the transaction makes it one Ctrl+Z.
+        app.model.beginTx()
+        def ty:int 0
+        while (ty < repY) {
+            def tx:int 0
+            while (tx < repX) {
+                SheetsEdits.selectCell(app (a.row + (ty * h)) (a.col + (tx * w)))
+                app.pasteClipboard()
+                tx = (tx + 1)
+            }
+            ty = (ty + 1)
+        }
+        app.model.endTx()
+        app.sel.anchor.row = a.row
+        app.sel.anchor.col = a.col
+        app.sel.active.row = b.row
+        app.sel.active.col = b.col
+        app.afterCellMutation()
+    }
+
+    sfn selectCell:void (app:GridApp row:int col:int) {
+        app.sel.clearExtra()
+        app.sel.anchor.row = row
+        app.sel.anchor.col = col
+        app.sel.active.row = row
+        app.sel.active.col = col
+    }
+}

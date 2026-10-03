@@ -464,7 +464,11 @@ export async function mountSheets(container, options = {}) {
       return;
     }
     if (ev.ctrlKey || ev.metaKey) {
-      if (ev.key === "v" || ev.key === "V") return; // served by the paste event
+      if (ev.key === "v" || ev.key === "V") {
+        // Served by the paste event, which does not say whether Shift was down.
+        pasteValues = ev.shiftKey;
+        return;
+      }
       if (CTRL_CHORD.test(ev.key)) {
         ev.preventDefault();
         app.text(ev.key, ev.shiftKey, true);
@@ -479,10 +483,14 @@ export async function mountSheets(container, options = {}) {
       await after();
     }
   });
+  let pasteValues = false;
   const onPaste = async (ev) => {
     if (!wrap.contains(document.activeElement)) return;
     ev.preventDefault();
-    app.pasteText(ev.clipboardData ? ev.clipboardData.getData("text/plain") : "");
+    const text = ev.clipboardData ? ev.clipboardData.getData("text/plain") : "";
+    if (pasteValues) app.pasteTextValues(text);
+    else app.pasteText(text);
+    pasteValues = false;
     await after();
   };
   window.addEventListener("paste", onPaste);

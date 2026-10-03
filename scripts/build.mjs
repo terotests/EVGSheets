@@ -6,15 +6,21 @@
  *
  *   node scripts/build.mjs [--ranger DIR] [--evgui DIR] [--out DIR] [--no-minify]
  *
- * The app is Ranger source that expects to sit at gallery/evgsheets/ in a
- * Ranger checkout, beside gallery/datagrid (the core) and gallery/evgui (the
- * EVGUI controllers), and is compiled by Ranger's committed compiler
- * (dist/rgrc.js). This script puts it there:
+ * The app is Ranger source compiled by Ranger's committed compiler
+ * (dist/rgrc.js). The datagrid core it is built on lives in this repository
+ * (datagrid/). The sources import each other as if they sat side by side in
+ * a Ranger checkout (gallery/evgsheets, gallery/datagrid, gallery/evgui), so
+ * the build assembles that tree under .stage/: links to the Ranger checkout
+ * (compiler, lib/, the gallery libraries the core imports) with this
+ * repository's datagrid, the app and EVGUI in their places. The Ranger
+ * checkout itself is not written to, apart from lib/evg.
  *
  *   Ranger    --ranger, $RANGER_DIR, the enclosing checkout when this
- *             repository sits at gallery/evgsheets, or ../Ranger.
+ *             repository sits at gallery/evgsheets, or ../Ranger. Its own
+ *             gallery/datagrid is not used.
  *   EVGUI     --evgui, $EVGUI_DIR, <ranger>/gallery/evgui when present, or
- *             ../EVGUI; cloned from GitHub when none of those exist.
+ *             ../EVGUI; cloned from GitHub into .deps/EVGUI when none of
+ *             those exist.
  *   lib/evg   fetched by Ranger's own `scripts/deps.mjs` at the commit its
  *             ranger.json pins.
  *
@@ -53,17 +59,6 @@ function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { stdio: "inherit", ...opts });
   if (r.status !== 0) die(`${cmd} ${args.join(" ")} failed`);
 }
-function copyTree(src, dst) {
-  fs.mkdirSync(dst, { recursive: true });
-  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
-    if (e.name === "node_modules" || e.name === ".git" || e.name === "bin" || e.name === "dist") continue;
-    const s = path.join(src, e.name);
-    const d = path.join(dst, e.name);
-    if (e.isDirectory()) copyTree(s, d);
-    else fs.copyFileSync(s, d);
-  }
-}
-const same = (a, b) => fs.existsSync(a) && fs.existsSync(b) && fs.realpathSync(a) === fs.realpathSync(b);
 
 if (!fs.existsSync(path.join(RANGER, "dist", "rgrc.js"))) {
   die(`not a Ranger checkout: ${RANGER} (pass --ranger <dir> or set RANGER_DIR)`);
@@ -75,29 +70,35 @@ if (fs.existsSync(path.join(RANGER, "scripts", "deps.mjs"))) {
 }
 
 // --- EVGUI --------------------------------------------------------------------
-const EVGUI_TARGET = path.join(RANGER, "gallery", "evgui");
 let evgui = flag("--evgui") || process.env.EVGUI_DIR;
-if (!evgui && !fs.existsSync(path.join(EVGUI_TARGET, "src", "UiHost.rgr"))) {
-  const sibling = path.join(REPO, "..", "EVGUI");
-  if (fs.existsSync(path.join(sibling, "src", "UiHost.rgr"))) evgui = sibling;
+if (!evgui) {
+  const candidates = [path.join(RANGER, "gallery", "evgui"), path.join(REPO, "..", "EVGUI"), path.join(REPO, ".deps", "EVGUI")];
+  evgui = candidates.find((d) => fs.existsSync(path.join(d, "src", "UiHost.rgr")));
 }
-if (evgui) {
-  evgui = path.resolve(evgui);
-  if (!same(evgui, EVGUI_TARGET)) {
-    copyTree(path.join(evgui, "src"), path.join(EVGUI_TARGET, "src"));
-    fs.copyFileSync(path.join(evgui, "ranger.json"), path.join(EVGUI_TARGET, "ranger.json"));
-  }
-} else if (!fs.existsSync(path.join(EVGUI_TARGET, "src", "UiHost.rgr"))) {
+if (!evgui) {
+  evgui = path.join(REPO, ".deps", "EVGUI");
   const ref = process.env.EVGUI_REF || "main";
-  run("git", ["clone", "--depth", "1", "--branch", ref, "https://github.com/terotests/EVGUI", EVGUI_TARGET]);
+  run("git", ["clone", "--depth", "1", "--branch", ref, "https://github.com/terotests/EVGUI", evgui]);
 }
+evgui = path.resolve(evgui);
 
-// --- this repository, at gallery/evgsheets -----------------------------------
-const TARGET = path.join(RANGER, "gallery", "evgsheets");
-if (!same(REPO, TARGET)) {
-  copyTree(path.join(REPO, "src"), path.join(TARGET, "src"));
-  fs.copyFileSync(path.join(REPO, "ranger.json"), path.join(TARGET, "ranger.json"));
+// --- the build tree -------------------------------------------------------------
+// .stage/ is a Ranger tree made of links: everything from the Ranger checkout
+// except the three directories this build supplies itself.
+const STAGE = path.join(REPO, ".stage");
+const OWN = { datagrid: path.join(REPO, "datagrid"), evgsheets: REPO, evgui };
+fs.rmSync(STAGE, { recursive: true, force: true });
+fs.mkdirSync(path.join(STAGE, "gallery"), { recursive: true });
+const link = (to, at) => fs.symlinkSync(to, at, fs.statSync(to).isDirectory() ? "dir" : "file");
+for (const e of fs.readdirSync(RANGER)) {
+  if (e === "gallery" || e === ".git" || e === "node_modules") continue;
+  link(path.join(RANGER, e), path.join(STAGE, e));
 }
+for (const e of fs.readdirSync(path.join(RANGER, "gallery"))) {
+  if (e in OWN) continue;
+  link(path.join(RANGER, "gallery", e), path.join(STAGE, "gallery", e));
+}
+for (const [name, dir] of Object.entries(OWN)) link(dir, path.join(STAGE, "gallery", name));
 
 // --- compile ------------------------------------------------------------------
 fs.mkdirSync(OUT, { recursive: true });
@@ -107,7 +108,7 @@ const t0 = Date.now();
 const r = spawnSync(
   process.execPath,
   ["dist/rgrc.js", "-es6", "gallery/evgsheets/src/SheetsApp.rgr", `-d=${OUT}`, "-o=evgsheets.js"],
-  { cwd: RANGER, env: { ...process.env, RANGER_LIB: "./compiler/Lang.rgr:./lib/stdops.rgr" }, encoding: "utf8" },
+  { cwd: STAGE, env: { ...process.env, RANGER_LIB: "./compiler/Lang.rgr:./lib/stdops.rgr" }, encoding: "utf8" },
 );
 const log = (r.stdout || "") + (r.stderr || "");
 if (/Compilation FAILED/.test(log) || !fs.existsSync(bundle)) {
@@ -173,7 +174,7 @@ fs.mkdirSync(path.join(OUT, "fonts"), { recursive: true });
 for (const f of FONTS) {
   fs.writeFileSync(path.join(OUT, "fonts", path.basename(f)), sanitizeFont(fs.readFileSync(path.join(FONT_SRC, f))));
 }
-fs.copyFileSync(path.join(RANGER, "gallery", "datagrid", "fixtures", "business-workbook.xlsx"), path.join(OUT, "business-workbook.xlsx"));
+fs.copyFileSync(path.join(REPO, "datagrid", "fixtures", "business-workbook.xlsx"), path.join(OUT, "business-workbook.xlsx"));
 fs.writeFileSync(path.join(OUT, ".nojekyll"), "");
 
 // --- the build stamp --------------------------------------------------------
