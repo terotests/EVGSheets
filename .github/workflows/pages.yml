@@ -28,11 +28,10 @@ on:
 # modern/dark themes) and EVGUI's pressed-state fix are on these branches
 # until they are merged; then both go back to master / main.
 env:
-  # claude/evgui-dialogs-ixyzxy draws the dialogs in the EVGUI card look
-  # (terotests/Ranger: EVGWindowTheme.card); it is master-based, without
-  # f601012 from claude/bold-ride-6h3zlv.
-  RANGER_REF: ${{ inputs.ranger_ref || 'claude/evgui-dialogs-ixyzxy' }}
-  EVGUI_REF: ${{ inputs.evgui_ref || 'claude/bold-ride-6h3zlv' }}
+  RANGER_REF: ${{ inputs.ranger_ref || 'claude/bold-ride-6h3zlv' }}
+  # claude/evgui-dialogs-ixyzxy is claude/bold-ride-6h3zlv plus the
+  # WindowCtl.tickCtl fix the EVGUI dialogs need.
+  EVGUI_REF: ${{ inputs.evgui_ref || 'claude/evgui-dialogs-ixyzxy' }}
 
 permissions:
   contents: read

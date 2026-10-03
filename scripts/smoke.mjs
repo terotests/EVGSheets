@@ -189,6 +189,32 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
 
+  // Find and replace: an EVGUI dialog (WindowCtl), not the core's window.
+  await page.evaluate(() => window.sheet.run("nav.goto", "A1"));
+  await page.keyboard.press("Control+f");
+  await page.waitForTimeout(150);
+  ok("Ctrl+F opens Find and replace", await page.evaluate(() => window.sheet.app.find.win.open));
+  ok("…as an EVGUI dialog, not the core's window", await page.evaluate(() => !window.sheet.app.grid.app.findDialog.visible && window.sheet.app.rectOf("sx-find-content") !== ""));
+  ok("…with focus in the Find field", await page.evaluate(() => window.sheet.app.ui.focusId === "sx-find-query"));
+  await page.keyboard.type("Revenue");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  const found = await page.evaluate(() => window.sheet.app.grid.app.findStatus);
+  ok("Enter finds the next match", /^found /.test(found), found);
+  await shot(page, "05_find");
+  await click(page, "sx-find-case");
+  ok("a click ticks Match case", await page.evaluate(() => window.sheet.app.find.matchCase.checkState === 1));
+  await click(page, "sx-find-next");
+  ok("Find next by pointer", /^found /.test(await page.evaluate(() => window.sheet.app.grid.app.findStatus)));
+  await click(page, "sx-find-close");
+  ok("Close closes it", !(await page.evaluate(() => window.sheet.app.find.win.open)));
+  ok("…and the query is kept", (await page.evaluate(() => window.sheet.app.grid.app.findQuery)) === "Revenue");
+  await page.keyboard.press("Control+h");
+  await page.waitForTimeout(100);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape closes it and the sheet has the keyboard", await page.evaluate(() => !window.sheet.app.find.win.open && window.sheet.app.gridFocused));
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);

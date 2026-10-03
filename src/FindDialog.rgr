@@ -1,0 +1,301 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; FindDialog — Find and replace, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Find and replace ─────────────────────────────── × ┐
+;   │ Find           [________________________________]   │
+;   │ Replace with   [________________________________]   │
+;   │ ☐ Match case             ☐ Entire cell              │
+;   │ ☑ Search formulas        ☐ All sheets               │
+;   │ replaced 3 of 'x'                                   │
+;   │            [Close] [Replace all] [Replace] [Find next]│
+;   └─────────────────────────────────────────────────────┘
+;
+; The core (GridApp) has its own find dialog, an EVGWindow. This is the same
+; dialog as EVGUI controllers — a modal WindowCtl holding two InputCtls, four
+; CheckboxCtls and four ButtonCtls — so it is styled by sheets.css like the
+; rest of the chrome and reads to a screen reader as a real dialog.
+;
+; The search itself stays the core's. GridApp keeps the query and the options
+; in fields (findQuery, findMatchCase…) and searches with findNext,
+; replaceCurrent and replaceAll, none of which needs its dialog; this writes
+; the fields and calls those. The query survives closing the dialog because
+; it lives in the core, as it did before.
+; =============================================================================
+
+Import "../../evgui/src/UiHost.rgr"
+Import "../../datagrid/web/datagrid_web.rgr"
+Import "pkg:evg/EVGElement.rgr"
+
+class FindDialog {
+    def win:WindowCtl (new WindowCtl)
+    def findIn:InputCtl (new InputCtl)
+    def replIn:InputCtl (new InputCtl)
+    def matchCase:CheckboxCtl (new CheckboxCtl)
+    def wholeCell:CheckboxCtl (new CheckboxCtl)
+    def inFormulas:CheckboxCtl (new CheckboxCtl)
+    def allSheets:CheckboxCtl (new CheckboxCtl)
+    def closeBtn:ButtonCtl (new ButtonCtl)
+    def allBtn:ButtonCtl (new ButtonCtl)
+    def oneBtn:ButtonCtl (new ButtonCtl)
+    def nextBtn:ButtonCtl (new ButtonCtl)
+    def statusEl:EVGElement (EVGElement.createSpan())
+
+    Constructor () {
+        win.tid = "sx-find"
+        win.name = "Find and replace"
+        win.title = "Find and replace"
+        win.isModal = true
+        this.field(findIn "sx-find-query" "Find")
+        this.field(replIn "sx-find-replace" "Replace with")
+        this.check(matchCase "sx-find-case" "Match case")
+        this.check(wholeCell "sx-find-cell" "Entire cell")
+        this.check(inFormulas "sx-find-formulas" "Search formulas")
+        this.check(allSheets "sx-find-sheets" "All sheets")
+        this.button(closeBtn "sx-find-close" "Close" "secondary")
+        this.button(allBtn "sx-find-all" "Replace all" "secondary")
+        this.button(oneBtn "sx-find-one" "Replace" "secondary")
+        this.button(nextBtn "sx-find-next" "Find next" "primary")
+    }
+
+    fn field:void (c:InputCtl tid:string name:string) {
+        c.tid = tid
+        c.name = name
+        c.fontFamily = "Open Sans"
+        c.fontSize = 13.0
+        c.boxWidth = 220.0
+    }
+
+    fn check:void (c:CheckboxCtl tid:string name:string) {
+        c.tid = tid
+        c.name = name
+    }
+
+    fn button:void (c:ButtonCtl tid:string name:string variant:string) {
+        c.tid = tid
+        c.name = name
+        c.variant = variant
+    }
+
+    ; Every controller in the dialog, the window first: the host routes input
+    ; to whichever one owns the target.
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a findIn
+        push a replIn
+        push a matchCase
+        push a wholeCell
+        push a inFormulas
+        push a allSheets
+        push a closeBtn
+        push a allBtn
+        push a oneBtn
+        push a nextBtn
+        return a
+    }
+
+    ; The Tab ring, in reading order. A modal keeps focus inside it.
+    fn ring:[string] () {
+        def a:[string]
+        push a findIn.tid
+        push a replIn.tid
+        push a matchCase.tid
+        push a wholeCell.tid
+        push a inFormulas.tid
+        push a allSheets.tid
+        push a closeBtn.tid
+        push a allBtn.tid
+        push a oneBtn.tid
+        push a nextBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn owns:boolean (target:string) {
+        def all:[UiCtl] (this.ctls())
+        def i:int 0
+        while (i < (array_length all)) {
+            def c:UiCtl (itemAt all i)
+            if (c.owns(target)) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    fn row:EVGElement (cls:string) {
+        def r:EVGElement (EVGElement.createDiv())
+        r.className = cls
+        return r
+    }
+
+    fn label:EVGElement (text:string) {
+        def l:EVGElement (EVGElement.createSpan())
+        l.className = "sx-dlg-label"
+        l.elementType = 1
+        l.textContent = text
+        l.a11yHidden = true
+        return l
+    }
+
+    ; The body's tree, built once; the controllers rebuild their own roots in
+    ; place, so this never has to be made again.
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        def f1:EVGElement (this.row("sx-dlg-field"))
+        f1.addChild((this.label(findIn.name)))
+        f1.addChild((unwrap findIn.rootEl))
+        body.addChild(f1)
+        def f2:EVGElement (this.row("sx-dlg-field"))
+        f2.addChild((this.label(replIn.name)))
+        f2.addChild((unwrap replIn.rootEl))
+        body.addChild(f2)
+        def opts:EVGElement (this.row("sx-dlg-options"))
+        def c1:EVGElement (this.row("sx-dlg-col"))
+        c1.addChild((unwrap matchCase.rootEl))
+        c1.addChild((unwrap inFormulas.rootEl))
+        def c2:EVGElement (this.row("sx-dlg-col"))
+        c2.addChild((unwrap wholeCell.rootEl))
+        c2.addChild((unwrap allSheets.rootEl))
+        opts.addChild(c1)
+        opts.addChild(c2)
+        body.addChild(opts)
+        statusEl.className = "sx-dlg-status"
+        statusEl.elementType = 1
+        statusEl.role = "status"
+        body.addChild(statusEl)
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap closeBtn.rootEl))
+        acts.addChild((unwrap allBtn.rootEl))
+        acts.addChild((unwrap oneBtn.rootEl))
+        acts.addChild((unwrap nextBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    fn buildAll:void () {
+        this.buildBody()
+        def all:[UiCtl] (this.ctls())
+        def i:int 0
+        while (i < (array_length all)) {
+            def c:UiCtl (itemAt all i)
+            c.build()
+            i = (i + 1)
+        }
+    }
+
+    sfn tri:int (on:boolean) {
+        if on {
+            return 1
+        }
+        return 0
+    }
+
+    ; Open on what the core remembers, and return where focus goes: the query.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        findIn.setValue(app.findQuery)
+        findIn.selectAll()
+        replIn.setValue(app.replaceWith)
+        matchCase.checkState = (FindDialog.tri(app.findMatchCase))
+        wholeCell.checkState = (FindDialog.tri(app.findWholeCell))
+        inFormulas.checkState = (FindDialog.tri(app.findInFormulas))
+        allSheets.checkState = (FindDialog.tri(app.findAllSheets))
+        app.findStatus = ""
+        statusEl.textContent = ""
+        win.pageW = pageW
+        win.pageH = pageH
+        def ignored:string (win.openWindow())
+        this.buildAll()
+        return findIn.tid
+    }
+
+    fn close:void () {
+        def ignored:string (win.closeWindow())
+    }
+
+    ; The fields into the core, before every search.
+    fn store:void (app:GridApp) {
+        app.findQuery = findIn.value
+        app.replaceWith = replIn.value
+        app.findMatchCase = (matchCase.checkState == 1)
+        app.findWholeCell = (wholeCell.checkState == 1)
+        app.findInFormulas = (inFormulas.checkState == 1)
+        app.findAllSheets = (allSheets.checkState == 1)
+    }
+
+    ; A button pressed (by pointer, Enter or Space). Returns true when the
+    ; dialog closed, so the host can give the keyboard back to the sheet.
+    fn act:boolean (target:string app:GridApp) {
+        this.store(app)
+        if (target == closeBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == nextBtn.tid) {
+            def found:boolean (app.findNext())
+        }
+        if (target == oneBtn.tid) {
+            def replaced:boolean (app.replaceCurrent())
+        }
+        if (target == allBtn.tid) {
+            def n:int (app.replaceAll())
+        }
+        statusEl.textContent = app.findStatus
+        return false
+    }
+
+    ; A field draws its caret whether or not it has focus; the host says
+    ; which one has it. Only the focused field's caret is shown.
+    fn showCarets:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(findIn focusId)
+        this.caretFor(replIn focusId)
+    }
+
+    fn caretFor:void (c:InputCtl focusId:string) {
+        def car:EVGElement (unwrap c.caretEl)
+        car.className = "ui-input-caret"
+        if (focusId != c.tid) {
+            UiTree.addClass(car "sx-caret-off")
+        }
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == closeBtn.tid) || (target == allBtn.tid) || (target == oneBtn.tid) || (target == nextBtn.tid))
+    }
+
+    fn isField:boolean (target:string) {
+        return ((target == findIn.tid) || (target == replIn.tid) || (findIn.owns(target)) || (replIn.owns(target)))
+    }
+
+    ; Tab and Shift+Tab inside the ring.
+    fn nextFocus:string (from:string back:boolean) {
+        def r:[string] (this.ring())
+        def n:int (array_length r)
+        def at:int -1
+        def i:int 0
+        while (i < n) {
+            if ((itemAt r i) == from) {
+                at = i
+            }
+            i = (i + 1)
+        }
+        if (at < 0) {
+            return (itemAt r 0)
+        }
+        if back {
+            return (itemAt r (((at + n) - 1) % n))
+        }
+        return (itemAt r ((at + 1) % n))
+    }
+}
