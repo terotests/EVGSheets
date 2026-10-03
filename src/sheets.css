@@ -533,6 +533,7 @@
 .sx-dlg-col { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 10px; width: 180px; }
 .sx-dlg-label-short { color: var(--text); font-size: 13px; line-height: 18px; width: 28px; flex-shrink: 0; }
 .sx-dlg-note { color: var(--muted); font-size: 12px; line-height: 16px; }
+.sx-dlg-text { color: var(--text); font-size: 13px; line-height: 18px; width: 300px; }
 .sx-dlg-col-wide { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 4px; }
 .sx-dlg-heading { color: var(--text); font-size: 13px; font-weight: 600; line-height: 18px; }
 .sx-dlg-status { color: var(--muted); font-size: 12px; line-height: 16px; height: 16px; }
@@ -618,6 +619,9 @@
 .ui-button-primary { background-color: var(--accent); border-color: var(--accent); }
 .ui-button-primary:hover { background-color: var(--accent-ink); }
 .ui-button-primary .ui-button-label { color: var(--on-accent); font-weight: 600; }
+.ui-button-danger { background-color: #c5221f; border-color: #c5221f; }
+.ui-button-danger:hover { background-color: #a50e0e; }
+.ui-button-danger .ui-button-label { color: #ffffff; font-weight: 600; }
 .ui-button-state-pressed { transform: scale(0.97); }
 
 /* A radio group in a dialog: one row per choice, the chosen one marked. */

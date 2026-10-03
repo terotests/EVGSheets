@@ -518,6 +518,57 @@ try {
   await click(page, "sx-tabs-tab-0");
   s = await state(page);
   ok("a tab shows its sheet", s.activeSheet === 0, String(s.activeSheet));
+  // A tab's own menu: right click on a tab shows that sheet and opens it,
+  // upward, off the strip.
+  const names0 = s.sheets.slice();
+  let t1 = await centre(page, "sx-tabs-tab-1");
+  await page.mouse.click(t1.x, t1.y, { button: "right" });
+  await page.waitForTimeout(100);
+  s = await state(page);
+  ok("right click on a tab opens the sheet menu", s.menuOpen && (await page.evaluate(() => window.sheet.app.ctxMenu.name)) === "Sheet actions");
+  ok("…on that sheet", s.activeSheet === 1, String(s.activeSheet));
+  ok("…above the tabs", await page.evaluate(() => {
+    const m = window.sheet.app.rectOf("sx-ctx-content").split(",").map(Number);
+    const t = window.sheet.app.rectOf("sx-tabs-tab-1").split(",").map(Number);
+    return m[1] + m[3] <= t[1] + 2;
+  }));
+  await shot(page, "05b_tab_menu");
+  await click(page, "sx-ctx-item-t-dup");
+  s = await state(page);
+  ok("Duplicate adds a copy after it, shown", s.sheets.length === names0.length + 1 && s.activeSheet === 2 && s.sheets[2] === names0[1] + " (2)", s.sheets.join(","));
+  // Delete asks first.
+  const t2 = await centre(page, "sx-tabs-tab-2");
+  await page.mouse.click(t2.x, t2.y, { button: "right" });
+  await page.waitForTimeout(100);
+  await click(page, "sx-ctx-item-t-delete");
+  ok("Delete… asks before deleting", await page.evaluate(() => window.sheet.app.delSheet.win.open) && (await state(page)).sheets.length === names0.length + 1);
+  await shot(page, "05c_delete_sheet");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("…Escape keeps the sheet", (await state(page)).sheets.length === names0.length + 1);
+  await page.mouse.click(t2.x, t2.y, { button: "right" });
+  await page.waitForTimeout(100);
+  await click(page, "sx-ctx-item-t-delete");
+  await click(page, "sx-delsheet-ok");
+  s = await state(page);
+  ok("…and Delete deletes it", s.sheets.join(",") === names0.join(",") && !(await page.evaluate(() => window.sheet.app.delSheet.win.open)), s.sheets.join(","));
+  // Dragging the first tab past the second.
+  const d0 = await centre(page, "sx-tabs-tab-0");
+  const d2 = await centre(page, "sx-tabs-tab-2");
+  await page.mouse.move(d0.x, d0.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(d0.x + ((d2.x + 30 - d0.x) * i) / 12, d0.y);
+  await shot(page, "05d_tab_drag");
+  await page.mouse.up();
+  await page.waitForTimeout(80);
+  s = await state(page);
+  ok("dragging a tab reorders the sheets", s.sheets[2] === names0[0] && s.sheets[0] === names0[1], s.sheets.join(","));
+  ok("…and the dragged sheet stays shown", s.activeSheet === 2, String(s.activeSheet));
+  await page.evaluate(() => window.sheet.run("sheet.move", "0"));
+  s = await state(page);
+  ok("…and moves back by command", s.sheets.join(",") === names0.join(","), s.sheets.join(","));
+  await click(page, "sx-tabs-tab-0");
+  s = await state(page);
   // A selection's sum in the status bar.
   await page.evaluate(() => window.sheet.run("nav.goto", "D2"));
   await page.evaluate(() => window.sheet.run("select.column", ""));

@@ -40,6 +40,22 @@ class DataValidation {
     Constructor () {
     }
 
+    fn copy:DataValidation () {
+        def d (new DataValidation)
+        d.kind = kind
+        d.op = op
+        d.r0 = r0
+        d.c0 = c0
+        d.r1 = r1
+        d.c1 = c1
+        d.f1 = f1
+        d.f2 = f2
+        d.allowBlank = allowBlank
+        d.errorTitle = errorTitle
+        d.errorText = errorText
+        return d
+    }
+
     fn covers:boolean (row:int col:int) {
         if (row < r0) {
             return false

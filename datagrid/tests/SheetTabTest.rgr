@@ -217,6 +217,91 @@ class SheetTabTest {
         def after:ChartPanel (a2.view.chartLayer.panelAt(0))
         c.eqInt("the chart followed its sheet" after.chart.sheet 2)
 
+        print "-- a moved sheet still feeds its formulas --"
+        def mv:GridApp (SheetTabTest.build())
+        c.ok("Sales moves to the end" (mv.moveSheetTo(0 2)))
+        c.eqStr("Costs is first" ((mv.book.sheetAt(0)).name) "Costs")
+        mv.setActiveSheet(0)
+        mv.sel.setAnchor(3 1)
+        mv.sel.setActive(3 1)
+        mv.editing = true
+        mv.editBuf = "100"
+        mv.commitEdit()
+        c.eqStr("an edit on Costs reaches Sales" ((mv.book.sheetAt(2)).getDisplay(1 0)) "110")
+        c.eqStr("and Costs keeps its own value" ((mv.book.sheetAt(0)).getDisplay(3 1)) "100")
+
+        mv.setActiveSheet(2)
+        mv.sel.setAnchor(0 0)
+        mv.sel.setActive(0 0)
+        mv.editing = true
+        mv.editBuf = "1"
+        mv.commitEdit()
+        c.eqStr("an edit on the moved sheet reaches its own formula" (mv.model.getDisplay(1 0)) "101")
+        def addw:GridApp (SheetTabTest.build())
+        addw.setActiveSheet(0)
+        def ok2:boolean (addw.runCommand("sheet.add" ""))
+        addw.setActiveSheet(2)
+        addw.sel.setAnchor(3 1)
+        addw.sel.setActive(3 1)
+        addw.editing = true
+        addw.editBuf = "5"
+        addw.commitEdit()
+        c.eqStr("after an add, an edit on Costs reaches Sales" ((addw.book.sheetAt(0)).getDisplay(1 0)) "15")
+
+        print "-- move left and right --"
+        def lr:GridApp (SheetTabTest.build())
+        lr.setActiveSheet(1)
+        c.ok("move right runs" (lr.runCommand("sheet.move.right" "")))
+        c.eqStr("Costs is last" ((lr.book.sheetAt(2)).name) "Costs")
+        c.eqInt("and still active" lr.book.activeIndex 2)
+        c.ok("move right at the end does nothing" ((lr.runCommand("sheet.move.right" "")) == false))
+        c.ok("move left runs" (lr.runCommand("sheet.move.left" "")))
+        c.eqStr("Costs is back in the middle" ((lr.book.sheetAt(1)).name) "Costs")
+
+        print "-- duplicate --"
+        def du:GridApp (SheetTabTest.build())
+        du.setActiveSheet(0)
+        du.model.setCellStyleId(0 0 0)
+        c.ok("duplicate runs" (du.runCommand("sheet.duplicate" "")))
+        c.eqInt("four sheets" (du.book.sheetCount()) 4)
+        c.eqStr("the copy follows the original" ((du.book.sheetAt(1)).name) "Sales (2)")
+        c.eqInt("and is shown" du.book.activeIndex 1)
+        c.eqStr("with the original's values" (du.model.getCell(0 0)) "10")
+        c.eqStr("and formulas" (du.model.getFormula(1 0)) "Costs!B4+A1")
+        c.eqStr("which compute" (du.model.getDisplay(1 0)) "50")
+        du.model.setCellRaw(0 0 "99")
+        c.eqStr("an edit on the copy leaves the original alone" ((du.book.sheetAt(0)).getCell(0 0)) "10")
+        du.setActiveSheet(0)
+        c.ok("a second copy" (du.runCommand("sheet.duplicate" "")))
+        c.eqStr("counts up" ((du.book.sheetAt(1)).name) "Sales (3)")
+        c.eqStr("a long name is cut to fit" (du.book.copyName("abcdefghijabcdefghijabcdefghija")) "abcdefghijabcdefghijabcdefg (2)")
+
+        print "-- delete --"
+        def de:GridApp (SheetTabTest.build())
+        de.setActiveSheet(1)
+        de.sel.setAnchor(3 1)
+        de.sel.setActive(3 1)
+        de.openChartDialog(0)
+        de.applyChartDialog()
+        de.setActiveSheet(2)
+        de.sel.setAnchor(0 0)
+        de.sel.setActive(0 0)
+        de.openChartDialog(0)
+        de.applyChartDialog()
+        c.eqInt("two charts" (de.view.chartLayer.count()) 2)
+        de.setActiveSheet(1)
+        c.ok("delete runs" (de.runCommand("sheet.delete" "")))
+        c.eqInt("two sheets left" (de.book.sheetCount()) 2)
+        c.eqStr("Costs is gone" ((de.book.sheetAt(1)).name) "Notes")
+        c.eqInt("the one that slid into its place is shown" de.book.activeIndex 1)
+        c.eqInt("its chart went with it" (de.view.chartLayer.count()) 1)
+        def left:ChartPanel (de.view.chartLayer.panelAt(0))
+        c.eqInt("and Notes' chart was renumbered" left.chart.sheet 1)
+        c.ok("the last sheet" (de.runCommand("sheet.delete" "")))
+        c.eqInt("goes to the one before it" de.book.activeIndex 0)
+        c.ok("but the only sheet cannot go" ((de.runCommand("sheet.delete" "")) == false))
+        c.eqInt("one left" (de.book.sheetCount()) 1)
+
         print "== through the tab strip =="
         def t:GridApp (SheetTabTest.build())
         t.render()

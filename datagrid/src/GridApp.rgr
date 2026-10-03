@@ -1124,6 +1124,10 @@ class GridApp {
         commands.add("sheet.add" "New sheet" "Sheet" "")
         commands.addArg("sheet.rename" "Rename sheet…" "Sheet" "")
         commands.addArg("sheet.move" "Move sheet" "Sheet" "")
+        commands.add("sheet.move.left" "Move sheet left" "Sheet" "")
+        commands.add("sheet.move.right" "Move sheet right" "Sheet" "")
+        commands.add("sheet.duplicate" "Duplicate sheet" "Sheet" "")
+        commands.add("sheet.delete" "Delete sheet" "Sheet" "")
         commands.addArg("nav.goto" "Go to cell" "Select" "")
         commands.addArg("view.theme" "Colour theme" "View" "")
         commands.add("view.theme.next" "Next colour theme" "View" "Ctrl+Shift+T")
@@ -1580,6 +1584,18 @@ class GridApp {
                 return true
             }
             return (this.renameSheetTo(book.activeIndex arg))
+        }
+        if (id == "sheet.delete") {
+            return (this.deleteSheetAt(book.activeIndex))
+        }
+        if (id == "sheet.duplicate") {
+            return (this.duplicateSheetAt(book.activeIndex))
+        }
+        if (id == "sheet.move.left") {
+            return (this.moveSheetTo(book.activeIndex (book.activeIndex - 1)))
+        }
+        if (id == "sheet.move.right") {
+            return (this.moveSheetTo(book.activeIndex (book.activeIndex + 1)))
         }
         if (id == "sheet.move") {
             def want@(optional):int (to_int arg)
@@ -2261,6 +2277,8 @@ class GridApp {
         def at:int (book.activeIndex + 1)
         book.insertSheet(at fresh)
         this.remapChartSheets(at 1)
+        ; Every sheet after `at` has a new number; see moveSheetTo.
+        engine.rebuildAll()
         this.setActiveSheet(at)
         sheetView.markDirty()
         sheetView.rebuild()
@@ -2309,12 +2327,103 @@ class GridApp {
         def nm:string moved.name
         book.moveSheet(from dest)
         this.remapChartMove(from dest)
+        ; The engine keys every formula and dependency by sheet NUMBER, so a
+        ; move has to register them again under the numbers the sheets now
+        ; have: left alone, an edit reached none of its dependents.
+        engine.rebuildAll()
         this.syncActiveModel()
         view.chartLayer.showSheet(book.activeIndex)
         sheetView.markDirty()
         sheetView.rebuild()
         grid.updateVisible(model)
         view.status = ("moved " + nm)
+        return true
+    }
+
+    ; Delete the sheet at `at`. Not undoable — the undo history lives on the
+    ; sheet — so a host asks first; this does not. The last sheet cannot go.
+    ; Charts on the sheet go with it and the rest are renumbered; formulas on
+    ; other sheets that named it stop resolving, as they do in Excel.
+    fn deleteSheetAt:boolean (at:int) {
+        if ((at < 0) || (at >= (book.sheetCount())) || ((book.sheetCount()) <= 1)) {
+            return false
+        }
+        if editing {
+            this.commitEdit()
+        }
+        def nm:string ((book.sheetAt(at)).name)
+        def gone:[int]
+        def i:int 0
+        while (i < (view.chartLayer.count())) {
+            def p:ChartPanel (view.chartLayer.panelAt(i))
+            if (p.chart.sheet == at) {
+                push gone p.chart.id
+            }
+            i = (i + 1)
+        }
+        def g:int 0
+        while (g < (array_length gone)) {
+            view.chartLayer.remove(windows (itemAt gone g))
+            g = (g + 1)
+        }
+        def j:int 0
+        while (j < (view.chartLayer.count())) {
+            def q:ChartPanel (view.chartLayer.panelAt(j))
+            if (q.chart.sheet > at) {
+                q.chart.sheet = (q.chart.sheet - 1)
+            }
+            j = (j + 1)
+        }
+        book.removeSheet(at)
+        this.syncActiveModel()
+        engine.rebuildAll()
+        view.chartLayer.showSheet(book.activeIndex)
+        sheetView.markDirty()
+        sheetView.rebuild()
+        grid.updateVisible(model)
+        view.status = ("deleted " + nm)
+        return true
+    }
+
+    ; A copy of the sheet at `at`, right after it, and shown: Excel's "Move or
+    ; Copy… / Create a copy" and Sheets' "Duplicate". Its charts are copied
+    ; onto it too.
+    fn duplicateSheetAt:boolean (at:int) {
+        if ((at < 0) || (at >= (book.sheetCount()))) {
+            return false
+        }
+        if editing {
+            this.commitEdit()
+        }
+        def src:SpreadsheetModel (book.sheetAt(at))
+        def copy:SpreadsheetModel (src.duplicate())
+        copy.name = (book.copyName(src.name))
+        def dest:int (at + 1)
+        book.insertSheet(dest copy)
+        this.remapChartSheets(dest 1)
+        def specs:[GridChart]
+        def i:int 0
+        while (i < (view.chartLayer.count())) {
+            def p:ChartPanel (view.chartLayer.panelAt(i))
+            if (p.chart.sheet == at) {
+                def spec (new GridChart)
+                spec.copyFrom(p.chart)
+                spec.sheet = dest
+                push specs spec
+            }
+            i = (i + 1)
+        }
+        def k:int 0
+        while (k < (array_length specs)) {
+            def made:GridChart (view.chartLayer.add(windows (itemAt specs k)))
+            k = (k + 1)
+        }
+        engine.rebuildAll()
+        this.setActiveSheet(dest)
+        sheetView.markDirty()
+        sheetView.rebuild()
+        grid.updateVisible(model)
+        view.status = ("copied " + src.name + " to " + copy.name)
         return true
     }
 

@@ -1,0 +1,100 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; DeleteSheetDialog — asking before a sheet is deleted
+; =============================================================================
+;
+;   ┌─ Delete sheet ───────────────────────────────── × ┐
+;   │ Delete the sheet “Costs”?                         │
+;   │ This cannot be undone.                            │
+;   │                              [Cancel] [Delete]    │
+;   └───────────────────────────────────────────────────┘
+;
+; Undo lives on each sheet, so a deleted sheet takes its own history with it
+; and Ctrl+Z cannot bring it back. Hence the question, as Excel and Sheets
+; ask it. The deleting is the core's: deleteSheetAt.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class DeleteSheetDialog extends SxDialog {
+    def msgEl:EVGElement (EVGElement.createSpan())
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def okBtn:ButtonCtl (new ButtonCtl)
+    def at:int 0
+
+    Constructor () {
+        this.setup("sx-delsheet" "Delete sheet")
+        this.button(cancelBtn "sx-delsheet-cancel" "Cancel" "secondary")
+        this.button(okBtn "sx-delsheet-ok" "Delete" "danger")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a cancelBtn
+        push a okBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a cancelBtn.tid
+        push a okBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == cancelBtn.tid) || (target == okBtn.tid))
+    }
+
+    fn defaultTid:string () {
+        return okBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        msgEl.className = "sx-dlg-text"
+        msgEl.elementType = 1
+        body.addChild(msgEl)
+        def note:EVGElement (EVGElement.createSpan())
+        note.className = "sx-dlg-note"
+        note.elementType = 1
+        note.textContent = "This cannot be undone."
+        body.addChild(note)
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap cancelBtn.rootEl))
+        acts.addChild((unwrap okBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Opens on the sheet that is shown (a tab's menu shows its sheet first),
+    ; with focus on Delete: Enter confirms, Escape does not.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        at = app.book.activeIndex
+        def sh:SpreadsheetModel (app.book.sheetAt(at))
+        msgEl.textContent = (("Delete the sheet “" + sh.name) + "”?")
+        this.openOn(pageW pageH)
+        return okBtn.tid
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == okBtn.tid) {
+            this.close()
+            def ok:boolean (app.deleteSheetAt(at))
+            return true
+        }
+        this.close()
+        return true
+    }
+}
