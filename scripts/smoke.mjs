@@ -373,6 +373,28 @@ try {
   await page.evaluate(() => { const a = window.sheet.app.grid.app; const p = a.view.chartLayer.panelAt(a.view.chartLayer.count() - 1); a.view.chartLayer.remove(a.windows, p.chart.id); window.sheet.app.sync(); });
   await page.evaluate(() => window.sheet.redraw());
 
+  // The SQL box and the connection window: EVGUI dialogs too.
+  await page.evaluate(() => window.sheet.run("db.sql.dialog", ""));
+  await page.waitForTimeout(100);
+  ok("the SQL box opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.sql.win.open && !window.sheet.app.grid.app.sqlDialog.visible && window.sheet.app.ui.focusId === "sx-sql-text"));
+  await shot(page, "15_sql");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  await page.evaluate(() => window.sheet.run("db.connection", ""));
+  await page.waitForTimeout(100);
+  ok("the connection window opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.conn.win.open && !window.sheet.app.grid.app.connDialog.visible));
+  await click(page, "sx-conn-table");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("sales");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("Connect leaves the host a request", await page.evaluate(() => { const a = window.sheet.app.grid.app; return window.sheet.app.conn.win.open && a.dbRequest === "connect" && a.dbRequestTable === "sales"; }));
+  await shot(page, "16_connection");
+  await page.evaluate(() => { window.sheet.app.grid.app.takeDbRequest(); window.sheet.app.grid.app.dbConnStatus = ""; });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  ok("Escape closes it", await page.evaluate(() => !window.sheet.app.conn.win.open));
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);
