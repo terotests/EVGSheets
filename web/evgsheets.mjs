@@ -432,6 +432,10 @@ export async function mountSheets(container, options = {}) {
   canvas.addEventListener("pointercancel", release);
   canvas.addEventListener("contextmenu", async (ev) => {
     ev.preventDefault();
+    // On a Mac, Ctrl+click is also a secondary click. Here Ctrl (or Cmd)
+    // adds a column, row or cell to the selection, which the press already
+    // did, so no menu opens over it.
+    if (ev.button === 0 && ev.ctrlKey) return;
     const { x, y } = at(ev);
     app.rightClick(x, y);
     await after();
