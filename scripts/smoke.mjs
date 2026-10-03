@@ -357,6 +357,22 @@ try {
   ok("Choose writes the value", await page.evaluate(() => !window.sheet.app.pick.win.open && window.sheet.app.grid.app.model.getCell(13, 9) === "Maybe"));
   await page.evaluate(() => { window.sheet.run("edit.undo", ""); const a = window.sheet.app.grid.app; a.model.clearValidationsIn(13, 9, 13, 9); });
 
+  // Insert chart: the core reads the selection, the app's EVGUI dialog asks.
+  await page.evaluate(() => window.sheet.run("nav.goto", "B4"));
+  const charts0 = await page.evaluate(() => window.sheet.app.grid.app.view.chartLayer.count());
+  await page.evaluate(() => window.sheet.run("insert.chart", ""));
+  await page.waitForTimeout(120);
+  ok("Insert chart opens as an EVGUI dialog", await page.evaluate(() => window.sheet.app.chart.win.open && !window.sheet.app.grid.app.chartDialog.visible));
+  const kinds = await page.evaluate(() => window.sheet.app.chart.kind.items.filter((it) => !it.disabled).map((it) => it.value));
+  ok("…offering only the types the data suits", kinds.length > 0 && kinds.length < 20, kinds.join(","));
+  await click(page, "sx-chart-kind-" + kinds[kinds.length - 1]);
+  ok("a type chosen is the pending chart's", await page.evaluate((k) => String(window.sheet.app.grid.app.pendingChart.kind) === k, kinds[kinds.length - 1]));
+  await shot(page, "14_chart");
+  await click(page, "sx-chart-ok");
+  ok("Create puts the chart on the sheet", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
+  await page.evaluate(() => { const a = window.sheet.app.grid.app; const p = a.view.chartLayer.panelAt(a.view.chartLayer.count() - 1); a.view.chartLayer.remove(a.windows, p.chart.id); window.sheet.app.sync(); });
+  await page.evaluate(() => window.sheet.redraw());
+
   // Sheet tabs.
   await click(page, "sx-tabs-tab-0");
   s = await state(page);

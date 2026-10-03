@@ -650,6 +650,8 @@
 .sx-chip-on { background-color: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
 /* Chips that sit beside a label, in a field row. */
 .sx-chip-row { flex-direction: row; flex-wrap: wrap; gap: 6px; width: 300px; }
+.sx-chip-wide { flex-direction: row; flex-wrap: wrap; gap: 6px; width: 476px; }
+.sx-chip-off { opacity: 0.4; }
 .sx-dlg-presets { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; }
 /* The border preview: bars around two rows of two cells. */
 .sx-border-preview { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; padding: 6px; background-color: #FFFFFF; border: 1px solid var(--field-border); border-radius: 6px; }

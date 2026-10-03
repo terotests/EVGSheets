@@ -53,6 +53,7 @@ Import "BorderDialog.rgr"
 Import "CfDialog.rgr"
 Import "ValidationDialog.rgr"
 Import "ListDialog.rgr"
+Import "ChartDialog.rgr"
 Import "pkg:evg/EVGElement.rgr"
 Import "pkg:evg/EVGUnit.rgr"
 Import "pkg:evg/EVGLayout.rgr"
@@ -112,6 +113,7 @@ class SheetsApp {
     def cf:CfDialog (new CfDialog)
     def dv:ValidationDialog (new ValidationDialog)
     def pick:ListDialog (new ListDialog)
+    def chart:ChartDialog (new ChartDialog)
     def dlgHolder:EVGElement (EVGElement.createDiv())
 
     def actions:[string:SxAction]
@@ -1571,6 +1573,7 @@ class SheetsApp {
         push a cf
         push a dv
         push a pick
+        push a chart
         return a
     }
 

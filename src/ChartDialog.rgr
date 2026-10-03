@@ -1,0 +1,362 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; ChartDialog — the chart picker, built from EVGUI controllers
+; =============================================================================
+;
+;   ┌─ Insert chart ─────────────────────────────────────────────── × ┐
+;   │ Data: A1:C9, 8 rows x 2 series                                   │
+;   │ Chart type  (Column) (Bar) (Line) (Pie) …  the ones the data suits│
+;   │ Style       (Classic) (Modern) …                                 │
+;   │ ☑ First row names the columns                                    │
+;   │ Combine repeated Region rows  (Don't) (Sum) (Average) …          │
+;   │   or ☑ First column labels the rows                              │
+;   │ ☑ Show legend                                                    │
+;   │ Title [_______________________]                                  │
+;   │                                   [Delete] [Cancel] [Create]     │
+;   └──────────────────────────────────────────────────────────────────┘
+;
+; The core prepares the chart (openChartDialog reads the selection, or the
+; chart being edited, into pendingChart and chartEditId) and the app adopts
+; its window. From then on the controls write pendingChart after every input,
+; as the core's syncChartDialog did: the header question re-reads the
+; selection, a type the data cannot draw is not offered, and a title the app
+; worked out follows the combining function until the reader types their own.
+;
+; The core's window drew a live preview of the chart beside the options; this
+; one has none. The chart appears on the sheet on Create.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class ChartDialog extends SxDialog {
+    def kind:RadioGroupCtl (new RadioGroupCtl)
+    def style:RadioGroupCtl (new RadioGroupCtl)
+    def headerRow:CheckboxCtl (new CheckboxCtl)
+    def headerCol:CheckboxCtl (new CheckboxCtl)
+    def agg:RadioGroupCtl (new RadioGroupCtl)
+    def legend:CheckboxCtl (new CheckboxCtl)
+    def titleIn:InputCtl (new InputCtl)
+    def deleteBtn:ButtonCtl (new ButtonCtl)
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def okBtn:ButtonCtl (new ButtonCtl)
+    def dataEl:EVGElement (EVGElement.createSpan())
+    def aggEl:EVGElement (EVGElement.createSpan())
+    def editId:int 0
+    ; The shape of the questions, so a change of it rebuilds the body.
+    def planned:boolean false
+    def seenTitle:string ""
+
+    Constructor () {
+        this.setup("sx-chart" "Insert chart")
+        kind.tid = "sx-chart-kind"
+        kind.name = "Chart type"
+        def k:int (ChartKind.lowest())
+        while (k <= (ChartKind.highest())) {
+            kind.addItem((to_string k) (ChartKind.label(k)) false)
+            k = (k + 1)
+        }
+        style.tid = "sx-chart-style"
+        style.name = "Style"
+        def s:int (ChartStyle.lowest())
+        while (s <= (ChartStyle.highest())) {
+            style.addItem((to_string s) (ChartStyle.label(s)) false)
+            s = (s + 1)
+        }
+        this.check(headerRow "sx-chart-hrow" "First row names the columns")
+        this.check(headerCol "sx-chart-hcol" "First column labels the rows")
+        agg.tid = "sx-chart-agg"
+        agg.name = "Combine"
+        def ai:int 0
+        while (ai < (GridApp.aggCount())) {
+            def fname:string (GridApp.aggAt(ai))
+            agg.addItem(("a" + fname) (GridChart.aggLabel(fname)) false)
+            ai = (ai + 1)
+        }
+        this.check(legend "sx-chart-legend" "Show legend")
+        this.field(titleIn "sx-chart-title" "Title")
+        titleIn.boxWidth = 300.0
+        this.button(deleteBtn "sx-chart-delete" "Delete" "secondary")
+        this.button(cancelBtn "sx-chart-cancel" "Cancel" "secondary")
+        this.button(okBtn "sx-chart-ok" "Create" "primary")
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a kind
+        push a style
+        push a headerRow
+        push a headerCol
+        push a agg
+        push a legend
+        push a titleIn
+        push a deleteBtn
+        push a cancelBtn
+        push a okBtn
+        return a
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        push a (kind.itemTid(kind.rovingValue))
+        push a (style.itemTid(style.rovingValue))
+        push a headerRow.tid
+        if planned {
+            push a (agg.itemTid(agg.rovingValue))
+        } {
+            push a headerCol.tid
+        }
+        push a legend.tid
+        push a titleIn.tid
+        if (editId > 0) {
+            push a deleteBtn.tid
+        }
+        push a cancelBtn.tid
+        push a okBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == deleteBtn.tid) || (target == cancelBtn.tid) || (target == okBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((kind.owns(target)) || (style.owns(target)) || (agg.owns(target)) || (titleIn.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return okBtn.tid
+    }
+
+    fn writes:boolean () {
+        return true
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        if app.chartDialog.visible {
+            app.chartDialog.close()
+            return true
+        }
+        return false
+    }
+
+    fn line:EVGElement (lbl:string c:UiCtl) {
+        def r:EVGElement (this.row("sx-dlg-field"))
+        r.addChild((this.label(lbl)))
+        r.addChild((unwrap c.rootEl))
+        return r
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        dataEl.className = "sx-dlg-note"
+        dataEl.elementType = 1
+        body.addChild(dataEl)
+        body.addChild((this.line(kind.name kind)))
+        body.addChild((this.line(style.name style)))
+        body.addChild((unwrap headerRow.rootEl))
+        if planned {
+            aggEl.className = "sx-dlg-note"
+            aggEl.elementType = 1
+            body.addChild(aggEl)
+            body.addChild((this.line(agg.name agg)))
+        } {
+            body.addChild((unwrap headerCol.rootEl))
+        }
+        body.addChild((unwrap legend.rootEl))
+        body.addChild((this.line(titleIn.name titleIn)))
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        if (editId > 0) {
+            acts.addChild((unwrap deleteBtn.rootEl))
+        }
+        acts.addChild((unwrap cancelBtn.rootEl))
+        acts.addChild((unwrap okBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; Which types the data can draw; a choice that has just become impossible
+    ; moves to the first one that is not.
+    fn offer:void (app:GridApp) {
+        def ch:GridChart app.pendingChart
+        def probe:ChartData (new ChartData)
+        def has:boolean (probe.extract(app.model ch))
+        def i:int 0
+        while (i < (array_length kind.items)) {
+            def it:UiItem (itemAt kind.items i)
+            def k:int (?? (to_int it.value) 0)
+            it.disabled = ((has == false) || ((probe.suits(k)) == false))
+            i = (i + 1)
+        }
+        if (has && ((probe.suits(ch.kind)) == false)) {
+            def k2:int (ChartKind.lowest())
+            while (k2 <= (ChartKind.highest())) {
+                if (probe.suits(k2)) {
+                    ch.kind = k2
+                    k2 = ((ChartKind.highest()) + 1)
+                } {
+                    k2 = (k2 + 1)
+                }
+            }
+        }
+        kind.value = (to_string ch.kind)
+        dataEl.textContent = ("Data: " + (ch.rangeLabel()) + ", " + (to_string (probe.catCount())) + " rows x " + (to_string (probe.seriesCount())) + " series")
+        aggEl.textContent = (app.groupLabel())
+        kind.build()
+    }
+
+    ; Opens on the chart the core prepared; focus on its type.
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        def ch:GridChart app.pendingChart
+        editId = app.chartEditId
+        if (editId > 0) {
+            win.title = "Chart"
+            okBtn.name = "Apply"
+        } {
+            win.title = "Insert chart"
+            okBtn.name = "Create"
+        }
+        win.name = win.title
+        planned = (ch.planned())
+        style.value = (to_string ch.style)
+        style.rovingValue = style.value
+        headerRow.checkState = (SxDialog.tri(ch.useHeaderRow))
+        headerCol.checkState = (SxDialog.tri(ch.useHeaderCol))
+        agg.value = ("a" + (ch.effectiveAgg()))
+        agg.rovingValue = agg.value
+        legend.checkState = (SxDialog.tri(ch.showLegend))
+        titleIn.setValue(ch.title)
+        seenTitle = ch.title
+        this.offer(app)
+        kind.rovingValue = kind.value
+        this.openOn(pageW pageH)
+        this.paint()
+        return (kind.itemTid(kind.value))
+    }
+
+    fn paint:void () {
+        UiTree.inline((unwrap win.frameEl) "width" "620px")
+        SxDialog.restyle(kind "sx-chip-wide" "sx-chip" "sx-chip-on")
+        SxDialog.restyle(style "sx-chip-wide" "sx-chip" "sx-chip-on")
+        SxDialog.restyle(agg "sx-chip-wide" "sx-chip" "sx-chip-on")
+        def i:int 0
+        while (i < (array_length kind.items)) {
+            def it:UiItem (itemAt kind.items i)
+            if it.disabled {
+                UiTree.addClass((unwrap it.el) "sx-chip-off")
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; After every input: the controls into pendingChart, as the core's own
+    ; window did every frame.
+    fn follow:void (app:GridApp) {
+        if (win.open == false) {
+            return
+        }
+        def ch:GridChart app.pendingChart
+        ch.kind = (?? (to_int kind.value) ch.kind)
+        ch.style = (?? (to_int style.value) ch.style)
+        def wantHeader:boolean (headerRow.checkState == 1)
+        def wantCol:boolean (headerCol.checkState == 1)
+        def reread:boolean false
+        if (wantHeader != ch.useHeaderRow) {
+            ; The header row decides what every column is called, so it is a
+            ; reason to read the selection again, not a flag to store.
+            ch.useHeaderRow = wantHeader
+            if (ch.planned()) {
+                ChartInference.replan(app.model ch wantHeader)
+            }
+            reread = true
+        }
+        if (ch.planned()) {
+            def fname:string (substring agg.value 1 (strlen agg.value))
+            if (((strlen agg.value) > 0) && (fname != (ch.effectiveAgg()))) {
+                ; Nothing to average when there are no measures: it counts.
+                if ((array_length ch.valueCols) == 0) {
+                    ch.agg = "count"
+                } {
+                    ch.agg = fname
+                }
+                if app.chartTitleIsOurs {
+                    ChartInference.retitle(app.model ch)
+                    titleIn.setValue(ch.title)
+                    titleIn.build()
+                    seenTitle = ch.title
+                }
+            }
+        } {
+            if (wantCol != ch.useHeaderCol) {
+                ch.useHeaderCol = wantCol
+                reread = true
+            }
+        }
+        ch.showLegend = (legend.checkState == 1)
+        if (titleIn.value != seenTitle) {
+            ; The box says something the app did not put there.
+            app.chartTitleIsOurs = false
+            seenTitle = titleIn.value
+        }
+        ch.title = titleIn.value
+        if reread {
+            this.offer(app)
+            if ((ch.planned()) != planned) {
+                planned = (ch.planned())
+                agg.value = ("a" + (ch.effectiveAgg()))
+                agg.rovingValue = agg.value
+                this.buildAll()
+            }
+        }
+        this.paint()
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        this.follow(app)
+        if (target == cancelBtn.tid) {
+            this.close()
+            app.chartEditId = 0
+            return true
+        }
+        if (target == deleteBtn.tid) {
+            this.close()
+            if (editId > 0) {
+                app.view.chartLayer.remove(app.windows editId)
+            }
+            app.chartEditId = 0
+            return true
+        }
+        if (target == okBtn.tid) {
+            this.close()
+            def ch:GridChart app.pendingChart
+            if (editId > 0) {
+                app.view.chartLayer.apply(editId ch)
+            } {
+                ; New charts cascade, so the second is not under the first.
+                def step:int ((app.view.chartLayer.count()) % 5)
+                ch.x = ((app.grid.x + 96) + (step * 26))
+                ch.y = ((app.grid.y + 64) + (step * 22))
+                if ((ch.x + ch.w) > app.W) {
+                    ch.x = (app.W - (ch.w + 12))
+                }
+                if (ch.x < 4) {
+                    ch.x = 4
+                }
+                def added:GridChart (app.view.chartLayer.add(app.windows ch))
+            }
+            app.chartEditId = 0
+            return true
+        }
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.caretFor(titleIn focusId)
+    }
+}
