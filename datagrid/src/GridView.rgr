@@ -1067,6 +1067,30 @@ class GridView {
         return ([] _:string ("#C00000" "#FFC000" "#00B050"))
     }
 
+    ; A cell's type size in pixels: the style's points, zoomed.
+    fn cellTextPx:double (model:SpreadsheetModel st:CellStyle) {
+        def px:double fontSize
+        if (st.fontSizePt > 0.0) {
+            px = ((st.fontSizePt * 96.0) / 72.0)
+        }
+        px = (px * model.zoom)
+        if (px < 6.0) {
+            px = 6.0
+        }
+        return px
+    }
+
+    ; Where the edited cell's plain text starts, for the in-cell caret.
+    fn placeEditText:void (rect:GridRect st:CellStyle px:double) {
+        def lineH:int (to_int (ctx.tr.lineHeight(px)))
+        if (lineH < 8) {
+            lineH = 8
+        }
+        editTextX = (rect.x + 4)
+        editTextPx = px
+        editTextY = (this.textTopFor(rect st lineH 1 px))
+    }
+
     fn paintCell:void (dl:EVGDisplayList model:SpreadsheetModel sel:GridSelection grid:DataGrid editing:boolean editBuf:string r:int c:int) {
         if (model.isMergeOrigin(r c) == false) {
             return
@@ -1112,10 +1136,15 @@ class GridView {
                 generalSide = ""
             }
         }
+        ; Only the cell being edited says where the caret goes. Every other
+        ; cell painted after it used to overwrite the spot, so the caret stood
+        ; in whichever filled cell came last (often a column to the left).
+        def editCell:boolean false
         if editing {
             if ((r == sel.active.row) && (c == sel.active.col)) {
                 txt = editBuf
                 generalSide = ""
+                editCell = true
             }
         }
         ; A cell that links somewhere says so the way every document does: in
@@ -1145,14 +1174,7 @@ class GridView {
             }
             ; Cell font size comes from the style (pt → px), bold / italic ride
             ; on the draw command so both backends can honour them.
-            def cellPx:double fontSize
-            if (st.fontSizePt > 0.0) {
-                cellPx = ((st.fontSizePt * 96.0) / 72.0)
-            }
-            cellPx = (cellPx * model.zoom)
-            if (cellPx < 6.0) {
-                cellPx = 6.0
-            }
+            def cellPx:double (this.cellTextPx(model st))
             this.applyFaceNamed(st.fontName st.bold st.italic)
             def paintStyle:CellStyle st
             if linked {
@@ -1198,18 +1220,19 @@ class GridView {
                 }
                 this.paintFormulaBarText(dl txt (rect.x + 4) editTop cellPx)
             } {
-                editTextX = (rect.x + 4)
-                editTextPx = cellPx
-                def plainLineH:int (to_int (ctx.tr.lineHeight(cellPx)))
-                if (plainLineH < 8) {
-                    plainLineH = 8
+                if editCell {
+                    this.placeEditText(rect paintStyle cellPx)
                 }
-                editTextY = (this.textTopFor(rect paintStyle plainLineH 1 cellPx))
                 if st.wrapText {
                     this.paintWrapped(dl txt rect paintStyle cellPx col)
                 } {
                     this.paintSingleLine(dl model rect paintStyle cellPx col txt r c)
                 }
+            }
+        } {
+            ; Nothing typed yet: the caret still belongs at this cell's start.
+            if editCell {
+                this.placeEditText(rect st (this.cellTextPx(model st)))
             }
         }
         if (tblAt >= 0) {
