@@ -46,12 +46,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout EVGSheets
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: evgsheets
 
       - name: Checkout Ranger (compiler, the libraries the core imports, EVG)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: terotests/Ranger
           ref: ${{ env.RANGER_REF }}
@@ -79,7 +79,7 @@ jobs:
             gallery/zip
 
       - name: Checkout EVGUI (the controllers)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: terotests/EVGUI
           ref: ${{ env.EVGUI_REF }}
@@ -87,7 +87,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
 
@@ -111,7 +111,7 @@ jobs:
 
       - name: Keep the screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: screenshots
           path: evgsheets/shots
