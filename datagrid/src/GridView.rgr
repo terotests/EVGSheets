@@ -24,6 +24,7 @@ Import "TableLook.rgr"
 Import "pkg:evg_window/EVGWindow.rgr"
 Import "GridChartView.rgr"
 Import "GridImages.rgr"
+Import "SheetShape.rgr"
 Import "pkg:evg/EVGCommands.rgr"
 Import "GridToolbar.rgr"
 Import "pkg:evg_window/EVGToolbarView.rgr"
@@ -106,6 +107,29 @@ class GridView {
     def formulaHiliteC1:[int]
     ; Last-painted formula-bar field geometry, so a click can place the caret.
     def fbFieldX:int 0
+    ; Cancel, Enter and Insert Function, between the name box and the field.
+    def fxAreaW:int 84
+    ; Trace Precedents / Dependents: arrows as (r0 c0 r1 c1) quadruples, from
+    ; the cell read to the cell reading it, on the sheet named here.
+    def traceArrows:[int]
+    ; Drawing objects: which are selected, the lasso being dragged, and the
+    ; theme's effect strength (0 none, 1 subtle .. 3 intense shadows).
+    def selShapes:[int]
+    ; Formula AutoComplete: the matching names and the picked row; the tip
+    ; ("NAME|arg1|arg2") and which argument the caret is in.
+    def acItems:[string]
+    def acPick:int 0
+    def acTip:string ""
+    def acTipArg:int -1
+    def lassoOn:boolean false
+    def lassoX0:int 0
+    def lassoY0:int 0
+    def lassoX1:int 0
+    def lassoY1:int 0
+    def shapeEffect:int 0
+    ; View › Hide on the last window: the workbook is open and out of sight.
+    def hiddenWindow:boolean false
+    def traceSheet:string ""
     def fbFieldY:int 0
     def fbFieldW:int 0
     def fbFieldH:int 0
@@ -714,6 +738,54 @@ class GridView {
         return fallback
     }
 
+    ; Accounting formats (`_($* #,##0.00_)`): the `* ` fill puts the currency
+    ; symbol against the left edge and the amount against the right, as Excel
+    ; does. accountingSplit gives the index after the symbol, or -1.
+    sfn accountingSplit:int (txt:string numFmt:string) {
+        if ((indexOf numFmt "* ") < 0) {
+            return -1
+        }
+        def n:int (strlen txt)
+        def i:int 0
+        while (i < n) {
+            def ch:int (charAt txt i)
+            if ((ch == 36) || (ch == 8364) || (ch == 163) || (ch == 165)) {
+                return (i + 1)
+            }
+            if ((ch != 32) && (ch != 40)) {
+                return -1
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
+    fn paintAccounting:boolean (dl:EVGDisplayList rect:GridRect st:CellStyle cellPx:double col:EVGColor txt:string) {
+        def cut:int (GridView.accountingSplit(txt st.numFmt))
+        if (cut < 0) {
+            return false
+        }
+        def head:string (trim (substring txt 0 cut))
+        def tail:string (trim (substring txt cut (strlen txt)))
+        def headW:int (to_int (ctx.tr.measureWidth(head cellPx)))
+        def tailW:int (to_int (ctx.tr.measureWidth(tail cellPx)))
+        if ((headW + tailW + 14) > rect.w) {
+            return false
+        }
+        def lineH:int (to_int (ctx.tr.lineHeight(cellPx)))
+        if (lineH < 8) {
+            lineH = 8
+        }
+        def top:int (this.textTopFor(rect st lineH 1 cellPx))
+        def rx:double (to_double ((rect.x + rect.w) - tailW - 10))
+        this.pushClip(dl (to_double rect.x) (to_double rect.y) (to_double rect.w) (to_double rect.h))
+        textDir = (st.textDirection())
+        this.pushStyledText(dl head (to_double (rect.x + 4)) (to_double top) cellPx col st.fontName st.bold st.italic)
+        this.pushStyledText(dl tail rx (to_double top) cellPx col st.fontName st.bold st.italic)
+        this.popClip(dl)
+        return true
+    }
+
     fn paintSingleLine:void (dl:EVGDisplayList model:SpreadsheetModel rect:GridRect st:CellStyle cellPx:double col:EVGColor txt:string r:int c:int) {
         if (model.hasRichText(r c)) {
             def rt:RichText (model.richTextAt(r c))
@@ -743,6 +815,9 @@ class GridView {
     }
 
     fn paintFlatLine:void (dl:EVGDisplayList model:SpreadsheetModel rect:GridRect st:CellStyle cellPx:double col:EVGColor txt:string r:int c:int) {
+        if (this.paintAccounting(dl rect st cellPx col txt)) {
+            return
+        }
         def textW:int (to_int (ctx.tr.measureWidth(txt cellPx)))
         def lineH:int (to_int (ctx.tr.lineHeight(cellPx)))
         if (lineH < 8) {
@@ -806,6 +881,192 @@ class GridView {
         this.pushEdge(dl st.borderRight rightX (rect.y - 1) (rect.h + 1) false)
     }
 
+    ; Data bars and icon sets: drawn under the text, as Excel does. A bar is
+    ; a gradient-free fill from the left edge; an icon sits at the left.
+    fn paintCfGraphics:void (dl:EVGDisplayList model:SpreadsheetModel rect:GridRect r:int c:int) {
+        if ((array_length model.cfRules) == 0) {
+            return
+        }
+        def x:double (to_double rect.x)
+        def y:double (to_double rect.y)
+        def w:double (to_double rect.w)
+        def h:double (to_double rect.h)
+        def frac:double (ConditionalFormat.barFraction(model r c))
+        if (frac > 0.0) {
+            def barCol:EVGColor (EVGColor.parse((ConditionalFormat.mixRgb((ConditionalFormat.barColor(model r c)) "#FFFFFF" 0.3))))
+            this.pushRect(dl (x + 2.0) (y + 2.0) ((w - 4.0) * frac) (h - 4.0) barCol)
+        }
+        def level:int (ConditionalFormat.iconLevel(model r c))
+        if (level < 0) {
+            return
+        }
+        def setName:string (ConditionalFormat.iconSetAt(model r c))
+        def n:int (ConditionalFormat.iconCount(setName))
+        ; Level colours, lowest first: red, (orange,) yellow, (light green,) green.
+        def hexes:[string] (GridView.iconPalette(n))
+        def col:EVGColor (EVGColor.parse((itemAt hexes level)))
+        def sz:double (h - 8.0)
+        if (sz > 12.0) {
+            sz = 12.0
+        }
+        if (sz < 6.0) {
+            sz = 6.0
+        }
+        def cx:double ((x + 4.0) + (sz / 2.0))
+        def cy:double (y + (h / 2.0))
+        def half:double (sz / 2.0)
+        def pts:[double]
+        if ((indexOf setName "Arrows") >= 0) {
+            if (level == (n - 1)) {
+                push pts cx
+                push pts (cy - half)
+                push pts (cx + half)
+                push pts (cy + half)
+                push pts (cx - half)
+                push pts (cy + half)
+            } {
+                if (level == 0) {
+                    push pts (cx - half)
+                    push pts (cy - half)
+                    push pts (cx + half)
+                    push pts (cy - half)
+                    push pts cx
+                    push pts (cy + half)
+                } {
+                    push pts (cx - half)
+                    push pts (cy - half)
+                    push pts (cx + half)
+                    push pts cy
+                    push pts (cx - half)
+                    push pts (cy + half)
+                }
+            }
+            dl.addPolygon(pts col)
+            return
+        }
+        def i:int 0
+        while (i < 16) {
+            def a:double ((6.283185307179586 * (to_double i)) / 16.0)
+            push pts (cx + (half * (cos a)))
+            push pts (cy + (half * (sin a)))
+            i = (i + 1)
+        }
+        dl.addPolygon(pts col)
+    }
+
+    ; A sparkline: the source range's numbers as a line (or columns) inside
+    ; the cell, with a little padding, scaled to the range's own min..max.
+    fn paintSparkline:void (dl:EVGDisplayList model:SpreadsheetModel rect:GridRect r:int c:int) {
+        def n:int (array_length model.sparklines)
+        if (n == 0) {
+            return
+        }
+        def k:int 0
+        while (k < n) {
+            def sp:Sparkline (itemAt model.sparklines k)
+            if ((sp.row == r) && (sp.col == c)) {
+                def vals:[double]
+                def rr:int sp.r1
+                while (rr <= sp.r2) {
+                    def cc:int sp.c1
+                    while (cc <= sp.c2) {
+                        push vals (ConditionalFormat.cellNumber(model rr cc))
+                        cc = (cc + 1)
+                    }
+                    rr = (rr + 1)
+                }
+                def m:int (array_length vals)
+                if (m == 0) {
+                    return
+                }
+                def lo:double (itemAt vals 0)
+                def hi:double (itemAt vals 0)
+                def i:int 0
+                while (i < m) {
+                    def v:double (itemAt vals i)
+                    if (v < lo) {
+                        lo = v
+                    }
+                    if (v > hi) {
+                        hi = v
+                    }
+                    i = (i + 1)
+                }
+                def span:double (hi - lo)
+                if (span <= 0.0) {
+                    span = 1.0
+                }
+                def x0:double ((to_double rect.x) + 4.0)
+                def y0:double ((to_double rect.y) + 3.0)
+                def w:double ((to_double rect.w) - 8.0)
+                def h:double ((to_double rect.h) - 6.0)
+                def col:EVGColor (EVGColor.parse(sp.color))
+                if (sp.kind == "column") {
+                    def bw:double (w / (to_double m))
+                    i = 0
+                    while (i < m) {
+                        def bh:double ((((itemAt vals i) - lo) / span) * h)
+                        if (bh < 1.0) {
+                            bh = 1.0
+                        }
+                        this.pushRect(dl (x0 + ((to_double i) * bw)) ((y0 + h) - bh) (bw - 1.0) bh col)
+                        i = (i + 1)
+                    }
+                    return
+                }
+                def pts:[double]
+                i = 0
+                while (i < m) {
+                    def fx:double 0.5
+                    if (m > 1) {
+                        fx = ((to_double i) / (to_double (m - 1)))
+                    }
+                    push pts (x0 + (fx * w))
+                    push pts ((y0 + h) - ((((itemAt vals i) - lo) / span) * h))
+                    i = (i + 1)
+                }
+                dl.addPolyline(pts 1.5 col)
+                return
+            }
+            k = (k + 1)
+        }
+    }
+
+    fn paintCheckbox:void (dl:EVGDisplayList rect:GridRect on:boolean) {
+        def side:double 12.0
+        if (side > ((to_double rect.h) - 4.0)) {
+            side = ((to_double rect.h) - 4.0)
+        }
+        def bx:double ((to_double rect.x) + (((to_double rect.w) - side) / 2.0))
+        def by:double ((to_double rect.y) + (((to_double rect.h) - side) / 2.0))
+        def edge:EVGColor (EVGColor.rgb(96 96 96))
+        if on {
+            def acc:EVGColor (EVGColor.rgb(33 115 70))
+            this.pushRect(dl bx by side side acc)
+            def ck:[double]
+            push ck (bx + (side * 0.22))
+            push ck (by + (side * 0.52))
+            push ck (bx + (side * 0.42))
+            push ck (by + (side * 0.72))
+            push ck (bx + (side * 0.8))
+            push ck (by + (side * 0.3))
+            dl.addPolyline(ck 1.8 (EVGColor.rgb(255 255 255)))
+        } {
+            this.pushRect(dl bx by side side theme.bg)
+            this.pushBorder(dl bx by side side 1.0 edge)
+        }
+    }
+
+    sfn iconPalette:[string] (n:int) {
+        if (n == 4) {
+            return ([] _:string ("#C00000" "#FFC000" "#92D050" "#00B050"))
+        }
+        if (n == 5) {
+            return ([] _:string ("#C00000" "#ED7D31" "#FFC000" "#92D050" "#00B050"))
+        }
+        return ([] _:string ("#C00000" "#FFC000" "#00B050"))
+    }
+
     fn paintCell:void (dl:EVGDisplayList model:SpreadsheetModel sel:GridSelection grid:DataGrid editing:boolean editBuf:string r:int c:int) {
         if (model.isMergeOrigin(r c) == false) {
             return
@@ -829,6 +1090,13 @@ class GridView {
                 def bg:EVGColor (this.colorOr(st.fillRgb theme.bg))
                 this.pushRect(dl (to_double rect.x) (to_double rect.y) (to_double rect.w) (to_double rect.h) bg)
             }
+        }
+        this.paintCfGraphics(dl model rect r c)
+        this.paintSparkline(dl model rect r c)
+        ; Insert › Checkbox: the cell's TRUE / FALSE drawn as a box, centred.
+        if ((model.isCheckbox(r c)) && ((editing == false) || (r != sel.active.row) || (c != sel.active.col))) {
+            this.paintCheckbox(dl rect ((model.getCell(r c)) == "TRUE"))
+            return
         }
         if editing {
             if ((r == sel.active.row) && (c == sel.active.col)) {
@@ -881,6 +1149,7 @@ class GridView {
             if (st.fontSizePt > 0.0) {
                 cellPx = ((st.fontSizePt * 96.0) / 72.0)
             }
+            cellPx = (cellPx * model.zoom)
             if (cellPx < 6.0) {
                 cellPx = 6.0
             }
@@ -889,6 +1158,16 @@ class GridView {
             if linked {
                 paintStyle = (st.copy())
                 paintStyle.underline = true
+            }
+            ; Superscript and subscript: smaller, at the top or the foot.
+            if ((strlen st.vertAlign) > 0) {
+                cellPx = (cellPx * 0.7)
+                paintStyle = (paintStyle.copy())
+                if (st.vertAlign == "superscript") {
+                    paintStyle.valign = "top"
+                } {
+                    paintStyle.valign = "bottom"
+                }
             }
             def formulaEdit:boolean false
             if editing {
@@ -941,6 +1220,17 @@ class GridView {
         }
         ; A note is marked rather than shown: the text would cover the numbers
         ; it is about. The corner triangle is the mark every spreadsheet uses.
+        if (model.hasThread(r c)) {
+            def tk:int 7
+            def tx:int ((rect.x + rect.w) - (tk + 1))
+            def ty:int (rect.y + 1)
+            def tstep:int 0
+            while (tstep < tk) {
+                this.pushRect(dl (to_double (tx + tstep)) (to_double ty) (to_double (tk - tstep)) 1.0 (EVGColor.rgb(112 48 160)))
+                ty = (ty + 1)
+                tstep = (tstep + 1)
+            }
+        }
         if (model.hasNote(r c)) {
             def mk:int 6
             def mx:int ((rect.x + rect.w) - (mk + 1))
@@ -1377,6 +1667,142 @@ class GridView {
         this.pushRect(dl (to_double (x + x0)) (to_double y) (to_double w) (to_double h) theme.selection)
     }
 
+    ; The expanded formula bar: the text broken into lines that fit, at
+    ; newlines and where a line runs out of room, with the caret on its line.
+    fn barLines:[string] (text:string w:int) {
+        def out:[string]
+        def line:string ""
+        def i:int 0
+        def n:int (strlen text)
+        while (i < n) {
+            def ch:int (charAt text i)
+            if (ch == 10) {
+                push out (line + " ")
+                line = ""
+            } {
+                def next:string (line + (substring text i (i + 1)))
+                if (((ctx.tr.measureWidth(next 13.0)) > (to_double w)) && ((strlen line) > 0)) {
+                    push out line
+                    line = (substring text i (i + 1))
+                } {
+                    line = next
+                }
+            }
+            i = (i + 1)
+        }
+        push out line
+        return out
+    }
+
+    fn paintExpandedBar:void (dl:EVGDisplayList text:string x:int y:int w:int h:int caret:boolean) {
+        def lines:[string] (this.barLines(text w))
+        def lineH:int 17
+        def fit:int (idiv h lineH)
+        if (fit < 1) {
+            fit = 1
+        }
+        def caretLine:int 0
+        def caretCol:int 0
+        def acc:int 0
+        def li:int 0
+        while (li < (array_length lines)) {
+            def ln:string (itemAt lines li)
+            if ((editCaret >= acc) && (editCaret <= (acc + (strlen ln)))) {
+                caretLine = li
+                caretCol = (editCaret - acc)
+            }
+            acc = (acc + (strlen ln))
+            li = (li + 1)
+        }
+        def first:int 0
+        if (caretLine >= fit) {
+            first = ((caretLine - fit) + 1)
+        }
+        def k:int 0
+        while ((k < fit) && ((first + k) < (array_length lines))) {
+            def t:string (itemAt lines (first + k))
+            this.pushText(dl t (to_double x) (to_double (y + (k * lineH))) 13.0 theme.formulaText)
+            k = (k + 1)
+        }
+        if caret {
+            def cl:string (itemAt lines caretLine)
+            if (caretCol > (strlen cl)) {
+                caretCol = (strlen cl)
+            }
+            def cw:int (to_int (ctx.tr.measureWidth((substring cl 0 caretCol) 13.0)))
+            def cy:int (y + ((caretLine - first) * lineH))
+            this.pushRect(dl (to_double ((x + cw) + 1)) (to_double cy) 2.0 15.0 theme.activeBorder)
+        }
+    }
+
+    ; Formula AutoComplete under the active cell: the names that match what
+    ; is typed, the picked one highlighted; otherwise the argument tip.
+    fn paintAutocomplete:void (dl:EVGDisplayList model:SpreadsheetModel sel:GridSelection grid:DataGrid) {
+        def n:int (array_length acItems)
+        if ((n == 0) && ((strlen acTip) == 0)) {
+            return
+        }
+        def cr:GridRect (grid.cellRect(model sel.active.row sel.active.col))
+        def x:int cr.x
+        def y:int ((cr.y + cr.h) + 2)
+        def ink:EVGColor (EVGColor.rgb(32 32 32))
+        def paper:EVGColor (EVGColor.rgb(255 255 255))
+        def edge:EVGColor (EVGColor.rgb(160 160 160))
+        if (n > 0) {
+            def w:int 180
+            def rowH:int 20
+            this.pushRect(dl (to_double (x + 2)) (to_double (y + 2)) (to_double w) (to_double (n * rowH)) (EVGColor.rgba(0 0 0 0.15)))
+            this.pushRect(dl (to_double x) (to_double y) (to_double w) (to_double (n * rowH)) paper)
+            def i:int 0
+            while (i < n) {
+                def ry:int (y + (i * rowH))
+                if (i == acPick) {
+                    this.pushRect(dl (to_double x) (to_double ry) (to_double w) (to_double rowH) (EVGColor.rgb(204 228 247)))
+                }
+                this.pushStyledText(dl "fx" (to_double (x + 6)) (to_double (ry + 3)) 11.0 (EVGColor.rgb(90 90 90)) "" false true)
+                this.pushText(dl (itemAt acItems i) (to_double (x + 26)) (to_double (ry + 3)) 12.0 ink)
+                i = (i + 1)
+            }
+            this.pushBorder(dl (to_double x) (to_double y) (to_double w) (to_double (n * rowH)) 1.0 edge)
+            return
+        }
+        ; NAME(arg1, arg2, …) with the argument being typed in bold.
+        def parts:[string] (strsplit acTip "|")
+        def segs:[string]
+        push segs ((itemAt parts 0) + "(")
+        def j:int 1
+        while (j < (array_length parts)) {
+            def a:string (itemAt parts j)
+            if (j < ((array_length parts) - 1)) {
+                a = (a + ", ")
+            }
+            push segs a
+            j = (j + 1)
+        }
+        push segs ")"
+        def total:double 0.0
+        def m:int 0
+        while (m < (array_length segs)) {
+            total = (total + (ctx.tr.measureWidth((itemAt segs m) 12.0)))
+            m = (m + 1)
+        }
+        def tw:int ((to_int total) + 20)
+        this.pushRect(dl (to_double x) (to_double y) (to_double tw) 22.0 (EVGColor.rgb(255 255 225)))
+        this.pushBorder(dl (to_double x) (to_double y) (to_double tw) 22.0 1.0 edge)
+        def cx:double (to_double (x + 6))
+        def q:int 0
+        while (q < (array_length segs)) {
+            def sg:string (itemAt segs q)
+            def bold:boolean (((q - 1) == acTipArg) && (q > 0) && (q < ((array_length segs) - 1)))
+            this.pushStyledText(dl sg cx (to_double (y + 4)) 12.0 ink "" bold false)
+            cx = (cx + (ctx.tr.measureWidth(sg 12.0)))
+            if bold {
+                cx = (cx + 1.0)
+            }
+            q = (q + 1)
+        }
+    }
+
     fn paintFormulaBarText:void (dl:EVGDisplayList text:string x:int y:int size:double) {
         if ((strlen text) == 0) {
             return
@@ -1543,10 +1969,16 @@ class GridView {
             }
             def addrBoxW:int 64
             def addrX:int (grid.x + 4)
-            def fieldX:int ((grid.x + addrBoxW) + 10)
-            def fieldW:int ((grid.w - addrBoxW) - 18)
+            def fieldX:int (((grid.x + addrBoxW) + 10) + fxAreaW)
+            def fieldW:int (((grid.w - addrBoxW) - 18) - fxAreaW)
             def fieldY:int (fbY + 3)
             def fieldH:int (grid.formulaBarH - 6)
+            def boxH:int fieldH
+            if (boxH > 26) {
+                boxH = 26
+            }
+            def expanded:boolean (grid.formulaBarH > 40)
+            this.paintFxButtons(dl ((grid.x + addrBoxW) + 10) fieldY boxH editing)
             def nameEdge:EVGColor theme.gridLine
             def fieldEdge:EVGColor (EVGColor.rgb(160 170 185))
             if editing {
@@ -1555,8 +1987,8 @@ class GridView {
                     nameEdge = theme.activeBorder
                 }
             }
-            this.pushRect(dl (to_double addrX) (to_double fieldY) (to_double addrBoxW) (to_double fieldH) theme.formulaBg)
-            this.pushBorder(dl (to_double addrX) (to_double fieldY) (to_double addrBoxW) (to_double fieldH) 1.0 nameEdge)
+            this.pushRect(dl (to_double addrX) (to_double fieldY) (to_double addrBoxW) (to_double boxH) theme.formulaBg)
+            this.pushBorder(dl (to_double addrX) (to_double fieldY) (to_double addrBoxW) (to_double boxH) 1.0 nameEdge)
             this.pushText(dl addr (to_double (addrX + 6)) (to_double (fieldY + 3)) 12.0 theme.headerText)
             this.pushRect(dl (to_double fieldX) (to_double fieldY) (to_double fieldW) (to_double fieldH) theme.formulaBg)
             this.pushBorder(dl (to_double fieldX) (to_double fieldY) (to_double fieldW) (to_double fieldH) 1.0 fieldEdge)
@@ -1567,13 +1999,26 @@ class GridView {
             fbTextX = (fieldX + 6)
             fbTextY = (fieldY + 3)
             fbFontSize = 13.0
-            if caretInFormulaBar {
+            ; The expand / collapse chevron at the field's right end.
+            def chx:double (to_double ((fieldX + fieldW) - 12))
+            def chy:double (to_double (fieldY + 13))
+            if expanded {
+                dl.addPolyline(([] _:double ((chx - 4.0) (chy + 2.0) chx (chy - 2.0) (chx + 4.0) (chy + 2.0))) 1.4 theme.headerText)
+            } {
+                dl.addPolyline(([] _:double ((chx - 4.0) (chy - 2.0) chx (chy + 2.0) (chx + 4.0) (chy - 2.0))) 1.4 theme.headerText)
+            }
+            if expanded {
+                this.paintExpandedBar(dl shown (fieldX + 6) (fieldY + 3) (fieldW - 30) (fieldH - 6) caretInFormulaBar)
+            }
+            if (caretInFormulaBar && (expanded == false)) {
                 this.paintTextSelection(dl shown (fieldX + 6) (fieldY + 3) 13.0 (fieldH - 6))
             }
-            this.paintFormulaBarText(dl shown (fieldX + 6) (fieldY + 3) 13.0)
+            if (expanded == false) {
+                this.paintFormulaBarText(dl shown (fieldX + 6) (fieldY + 3) 13.0)
+            }
             ; Formula edits always put the solid caret here, even when editing was
             ; entered from the cell (F2 / typing). There must be only one caret.
-            if caretInFormulaBar {
+            if (caretInFormulaBar && (expanded == false)) {
                 def upTo:string shown
                 def cn:int (strlen shown)
                 if (editCaret < cn) {
@@ -1586,7 +2031,7 @@ class GridView {
                 def ew:int (to_int (ctx.tr.measureWidth(upTo 13.0)))
                 ; One pixel of visual gap keeps the caret after, not over, a glyph.
                 def caretX:int (((fieldX + 6) + ew) + 1)
-                this.pushRect(dl (to_double caretX) (to_double (fieldY + 3)) 2.0 (to_double (fieldH - 6)) theme.activeBorder)
+                this.pushRect(dl (to_double caretX) (to_double (fieldY + 3)) 2.0 (to_double (boxH - 6)) theme.activeBorder)
             }
             this.pushBorder(dl (to_double grid.x) (to_double fbY) (to_double grid.w) (to_double grid.formulaBarH) 1.0 theme.gridLine)
         }
@@ -1640,6 +2085,35 @@ class GridView {
         ; body: backgrounds + text + gridlines (visible cells only)
         this.pushClip(dl (to_double bodyLeft) (to_double bodyTop) (to_double vw) (to_double vh))
         this.pushRect(dl (to_double bodyLeft) (to_double bodyTop) (to_double vw) (to_double vh) theme.bg)
+        ; Page Layout › Background: the picture tiled from A1, under the cells.
+        if (((strlen model.backgroundSrc) > 0) && (model.bgWidth > 0) && (model.bgHeight > 0)) {
+            def a1:GridRect (grid.cellRect(model 0 0))
+            def tx0:int a1.x
+            while (tx0 > bodyLeft) {
+                tx0 = (tx0 - model.bgWidth)
+            }
+            while ((tx0 + model.bgWidth) <= bodyLeft) {
+                tx0 = (tx0 + model.bgWidth)
+            }
+            def ty0:int a1.y
+            while (ty0 > bodyTop) {
+                ty0 = (ty0 - model.bgHeight)
+            }
+            while ((ty0 + model.bgHeight) <= bodyTop) {
+                ty0 = (ty0 + model.bgHeight)
+            }
+            def ty:int ty0
+            def tiles:int 0
+            while ((ty < (bodyTop + vh)) && (tiles < 400)) {
+                def tx:int tx0
+                while ((tx < (bodyLeft + vw)) && (tiles < 400)) {
+                    GridImages.pushImageCmd(dl (GridRect.create(tx ty model.bgWidth model.bgHeight)) model.backgroundSrc)
+                    tx = (tx + model.bgWidth)
+                    tiles = (tiles + 1)
+                }
+                ty = (ty + model.bgHeight)
+            }
+        }
 
         ; FortuneSheet-style freeze: four bands (corner / frozen rows / frozen cols / scroll)
         ; Ranges are VIEW indices when SheetView is bound.
@@ -1689,6 +2163,15 @@ class GridView {
 
         ; Cell borders go OVER the gridlines they replace.
         this.paintBordersBands(dl model grid fzR fzC)
+        if (model.viewMode != "normal") {
+            this.paintPages(dl model grid bodyLeft bodyTop vw vh)
+        }
+        if ((model.viewMode == "pageLayout") && model.showRuler) {
+            this.paintRuler(dl model bodyLeft bodyTop vw)
+        }
+        if (((array_length traceArrows) > 0) && (traceSheet == model.name)) {
+            this.paintTraceArrows(dl model grid bodyLeft bodyTop vw vh)
+        }
 
         ; freeze separators
         if (fzC > 0) {
@@ -1729,6 +2212,12 @@ class GridView {
                 this.popClip(dl)
             }
             imgI = (imgI + 1)
+        }
+
+        this.paintShapes(dl model grid bodyLeft bodyTop vw vh)
+        if hiddenWindow {
+            this.pushRect(dl (to_double bodyLeft) (to_double bodyTop) (to_double vw) (to_double vh) (EVGColor.rgb(160 160 160)))
+            this.pushText(dl "Hidden window — View › Unhide" (to_double (bodyLeft + 20)) (to_double (bodyTop + 20)) 13.0 (EVGColor.rgb(255 255 255)))
         }
 
         ; Selection overlay: one cheap rect per rectangle, clipped to the
@@ -1778,34 +2267,32 @@ class GridView {
         ; note exists and not what it says; a hover tooltip needs a hover state
         ; this input layer does not have. The selected cell is the one you are
         ; asking about, so that is the one whose note is opened.
+        ; Notes kept open, then the active cell's note or comment thread.
+        def nk:int 0
+        while (nk < (array_length model.noteKeys)) {
+            def parts:[string] (strsplit (itemAt model.noteKeys nk) ",")
+            if ((array_length parts) == 2) {
+                def kr:int (?? (to_int (itemAt parts 0)) -1)
+                def kc:int (?? (to_int (itemAt parts 1)) -1)
+                if ((kr >= 0) && (model.noteShown(kr kc)) && (((kr == sel.active.row) && (kc == sel.active.col)) == false)) {
+                    this.paintNoteBox(dl model grid kr kc (model.noteAt(kr kc)) bodyLeft bodyTop vw vh)
+                }
+            }
+            nk = (nk + 1)
+        }
         if (model.hasNote(sel.active.row sel.active.col)) {
-            def noteText:string (model.noteAt(sel.active.row sel.active.col))
-            def nr:GridRect (grid.cellRect(model sel.active.row sel.active.col))
-            def boxW:int 210
-            def nx:int (nr.x + nr.w + 6)
-            if ((nx + boxW) > (bodyLeft + vw)) {
-                nx = ((nr.x - boxW) - 6)
+            this.paintNoteBox(dl model grid sel.active.row sel.active.col (model.noteAt(sel.active.row sel.active.col)) bodyLeft bodyTop vw vh)
+        } {
+            if (model.hasThread(sel.active.row sel.active.col)) {
+                this.paintNoteBox(dl model grid sel.active.row sel.active.col (model.threadAt(sel.active.row sel.active.col)) bodyLeft bodyTop vw vh)
             }
-            if (nx < bodyLeft) {
-                nx = bodyLeft
-            }
-            def lines:[string] (ctx.tr.wrap(noteText 12.0 (to_double (boxW - 16))))
-            def lineH:int (to_int (ctx.tr.lineHeight(12.0)))
-            def boxH:int (((array_length lines) * lineH) + 12)
-            def ny:int nr.y
-            if ((ny + boxH) > (bodyTop + vh)) {
-                ny = ((bodyTop + vh) - boxH)
-            }
-            if (ny < bodyTop) {
-                ny = bodyTop
-            }
-            this.pushRect(dl (to_double nx) (to_double ny) (to_double boxW) (to_double boxH) theme.noteBg)
-            this.pushBorder(dl (to_double nx) (to_double ny) (to_double boxW) (to_double boxH) 1.0 theme.noteMark)
-            def li:int 0
-            while (li < (array_length lines)) {
-                this.pushText(dl (itemAt lines li) (to_double (nx + 8)) (to_double ((ny + 6) + (li * lineH))) 12.0 theme.cellText)
-                li = (li + 1)
-            }
+        }
+        ; Circle Invalid Data: a red ring round each circled cell.
+        def ic:int 0
+        while ((ic + 1) < (array_length model.invalidCircles)) {
+            def cr:GridRect (grid.cellRect(model (itemAt model.invalidCircles ic) (itemAt model.invalidCircles (ic + 1))))
+            this.pushBorder(dl (to_double (cr.x - 2)) (to_double (cr.y - 2)) (to_double (cr.w + 4)) (to_double (cr.h + 4)) 1.5 (EVGColor.rgb(220 38 38)))
+            ic = (ic + 2)
         }
 
         ; A list-validated active cell offers its choices.
@@ -2203,6 +2690,8 @@ class GridView {
             this.pushText(dl "+ Chart" (to_double (cbx + 10)) (to_double (cby + 1)) 12.0 theme.barText)
         }
 
+        this.paintAutocomplete(dl model sel grid)
+
         ; Dialogs and floating charts sit above everything, including the
         ; status bar. Each window is painted and then immediately asked for its
         ; content, so a chart's drawing lands inside its own frame and under
@@ -2494,6 +2983,432 @@ class GridView {
         return t
     }
 
+    fn shapeRect:GridRect (model:SpreadsheetModel grid:DataGrid sh:SheetShape) {
+        def tl:GridRect (grid.cellRect(model sh.fromRow sh.fromCol))
+        return (GridRect.create((tl.x + sh.offX) (tl.y + sh.offY) sh.widthPx sh.heightPx))
+    }
+
+    fn isShapeSelected:boolean (i:int) {
+        def k:int 0
+        while (k < (array_length selShapes)) {
+            if ((itemAt selShapes k) == i) {
+                return true
+            }
+            k = (k + 1)
+        }
+        return false
+    }
+
+    ; Shapes, text boxes, ink and slicers, bottom first, clipped to the body.
+    fn paintShapes:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid bodyLeft:int bodyTop:int vw:int vh:int) {
+        def n:int (array_length model.shapes)
+        if ((n == 0) && (lassoOn == false)) {
+            return
+        }
+        this.pushClip(dl (to_double bodyLeft) (to_double bodyTop) (to_double vw) (to_double vh))
+        def i:int 0
+        while (i < n) {
+            def sh:SheetShape (itemAt model.shapes i)
+            if (sh.hidden == false) {
+                def r:GridRect (this.shapeRect(model grid sh))
+                this.paintShape(dl sh r)
+                if (this.isShapeSelected(i)) {
+                    def hc:EVGColor (EVGColor.rgb(26 115 232))
+                    this.pushBorder(dl ((to_double r.x) - 2.0) ((to_double r.y) - 2.0) ((to_double r.w) + 4.0) ((to_double r.h) + 4.0) 1.0 hc)
+                    def hx:[int] ([] _:int (0 1 2 0 2 0 1 2))
+                    def hy:[int] ([] _:int (0 0 0 1 1 2 2 2))
+                    def hk:int 0
+                    while (hk < 8) {
+                        def gx:double (((to_double r.x) + (((to_double r.w) * (to_double (itemAt hx hk))) / 2.0)) - 3.0)
+                        def gy:double (((to_double r.y) + (((to_double r.h) * (to_double (itemAt hy hk))) / 2.0)) - 3.0)
+                        this.pushRect(dl gx gy 6.0 6.0 (EVGColor.rgb(255 255 255)))
+                        this.pushBorder(dl gx gy 6.0 6.0 1.0 hc)
+                        hk = (hk + 1)
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+        if lassoOn {
+            def lx:int lassoX0
+            def ly:int lassoY0
+            def lw:int (lassoX1 - lassoX0)
+            def lh:int (lassoY1 - lassoY0)
+            if (lw < 0) {
+                lx = lassoX1
+                lw = (0 - lw)
+            }
+            if (lh < 0) {
+                ly = lassoY1
+                lh = (0 - lh)
+            }
+            this.pushRect(dl (to_double lx) (to_double ly) (to_double lw) (to_double lh) (EVGColor.rgba(26 115 232 0.12)))
+            this.pushBorder(dl (to_double lx) (to_double ly) (to_double lw) (to_double lh) 1.0 (EVGColor.rgb(26 115 232)))
+        }
+        this.popClip(dl)
+    }
+
+    fn paintShape:void (dl:EVGDisplayList sh:SheetShape r:GridRect) {
+        def x:double (to_double r.x)
+        def y:double (to_double r.y)
+        def w:double (to_double r.w)
+        def h:double (to_double r.h)
+        def line:EVGColor (EVGColor.parse(sh.outline))
+        if (sh.kind == "ink") {
+            def pts:[double] (sh.place(sh.points x y))
+            dl.addPolyline(pts 2.5 line)
+            return
+        }
+        if (sh.kind == "line") {
+            def lp:[double]
+            push lp 0.0
+            push lp 0.0
+            push lp w
+            push lp h
+            dl.addPolyline((sh.place(lp x y)) 2.0 line)
+            return
+        }
+        if ((sh.kind == "slicer") || (sh.kind == "timeline")) {
+            this.paintSlicer(dl sh x y w h)
+            return
+        }
+        if (sh.kind == "signature") {
+            def sc:EVGColor (EVGColor.rgb(32 32 32))
+            this.pushText(dl "X" (x + 4.0) ((y + h) - 40.0) 20.0 sc)
+            this.pushRect(dl x ((y + h) - 22.0) w 1.0 sc)
+            this.pushText(dl sh.text (x + 4.0) ((y + h) - 18.0) 12.0 sc)
+            return
+        }
+        if ((sh.kind == "textBox") || (sh.kind == "wordArt")) {
+            if (sh.kind == "textBox") {
+                def tf:[double] (sh.place((sh.outlinePoints()) x y))
+                dl.addPolygon(tf (EVGColor.parse(sh.fill)))
+                def tl:[double] tf
+                push tl (itemAt tf 0)
+                push tl (itemAt tf 1)
+                dl.addPolyline(tl 1.0 line)
+            }
+            this.paintShapeText(dl sh x y w h)
+            return
+        }
+        def poly:[double] (sh.place((sh.outlinePoints()) x y))
+        if (shapeEffect > 0) {
+            def off:double (to_double (shapeEffect * 2))
+            def shadow:[double] (sh.place((sh.outlinePoints()) (x + off) (y + off)))
+            dl.addPolygon(shadow (EVGColor.rgba(0 0 0 (0.12 * (to_double shapeEffect)))))
+        }
+        dl.addPolygon(poly (EVGColor.parse(sh.fill)))
+        def ring:[double] poly
+        push ring (itemAt poly 0)
+        push ring (itemAt poly 1)
+        dl.addPolyline(ring 1.0 line)
+        if ((strlen sh.text) > 0) {
+            this.paintShapeText(dl sh x y w h)
+        }
+    }
+
+    fn paintShapeText:void (dl:EVGDisplayList sh:SheetShape x:double y:double w:double h:double) {
+        def size:double sh.fontSize
+        def col:EVGColor (EVGColor.parse(sh.textColor))
+        def lines:[string]
+        def paras:[string] (strsplit sh.text "\n")
+        def pi:int 0
+        while (pi < (array_length paras)) {
+            def wrapped:[string] (ctx.tr.wrap((itemAt paras pi) size (w - 12.0)))
+            def wi:int 0
+            while (wi < (array_length wrapped)) {
+                push lines (itemAt wrapped wi)
+                wi = (wi + 1)
+            }
+            pi = (pi + 1)
+        }
+        def lineH:double (ctx.tr.lineHeight(size))
+        def top:double (y + ((h - (lineH * (to_double (array_length lines)))) / 2.0))
+        if (sh.kind == "textBox") {
+            top = (y + 6.0)
+        }
+        def li:int 0
+        while (li < (array_length lines)) {
+            def t:string (itemAt lines li)
+            def tw:double (ctx.tr.measureWidth(t size))
+            def tx:double (x + ((w - tw) / 2.0))
+            if (sh.kind == "textBox") {
+                tx = (x + 6.0)
+            }
+            def ty:double (top + (lineH * (to_double li)))
+            if (sh.kind == "wordArt") {
+                ; WordArt: a soft shadow under bold, outlined letters.
+                this.pushStyledText(dl t (tx + 2.0) (ty + 2.0) size (EVGColor.rgba(0 0 0 0.25)) "" true false)
+                this.pushStyledText(dl t tx ty size col "" true false)
+            } {
+                this.pushText(dl t tx ty size col)
+            }
+            li = (li + 1)
+        }
+    }
+
+    fn paintSlicer:void (dl:EVGDisplayList sh:SheetShape x:double y:double w:double h:double) {
+        def edge:EVGColor (EVGColor.rgb(160 160 160))
+        this.pushRect(dl x y w h (EVGColor.rgb(255 255 255)))
+        this.pushBorder(dl x y w h 1.0 edge)
+        this.pushStyledText(dl sh.text (x + 8.0) (y + 6.0) 13.0 (EVGColor.rgb(32 32 32)) "" true false)
+        def i:int 0
+        while (i < (array_length sh.items)) {
+            def v:string (itemAt sh.items i)
+            def by:double ((y + 30.0) + (24.0 * (to_double i)))
+            def on:boolean ((array_length sh.picked) == 0)
+            if (sh.isPicked(v)) {
+                on = true
+            }
+            def bg:EVGColor (EVGColor.rgb(242 242 242))
+            if on {
+                bg = (EVGColor.rgb(218 233 248))
+            }
+            this.pushRect(dl (x + 6.0) by (w - 12.0) 20.0 bg)
+            this.pushBorder(dl (x + 6.0) by (w - 12.0) 20.0 1.0 edge)
+            this.pushText(dl v (x + 12.0) (by + 3.0) 12.0 (EVGColor.rgb(32 32 32)))
+            i = (i + 1)
+        }
+    }
+
+    ; Page Layout view's ruler: inches along the top of the sheet.
+    fn paintRuler:void (dl:EVGDisplayList model:SpreadsheetModel bodyLeft:int bodyTop:int vw:int) {
+        def bg:EVGColor (EVGColor.rgb(240 240 240))
+        def ink:EVGColor (EVGColor.rgb(110 110 110))
+        this.pushRect(dl (to_double bodyLeft) (to_double bodyTop) (to_double vw) 16.0 bg)
+        this.pushRect(dl (to_double bodyLeft) (to_double (bodyTop + 15)) (to_double vw) 1.0 ink)
+        def inch:double (96.0 * model.zoom)
+        def i:int 0
+        def x:double (to_double bodyLeft)
+        while ((x < (to_double (bodyLeft + vw))) && (i < 200)) {
+            def q:int 0
+            while (q < 4) {
+                def tx:double (x + ((inch * (to_double q)) / 4.0))
+                def th:double 4.0
+                if (q == 0) {
+                    th = 8.0
+                }
+                this.pushRect(dl tx ((to_double (bodyTop + 15)) - th) 1.0 th ink)
+                q = (q + 1)
+            }
+            if (i > 0) {
+                this.pushText(dl (to_string i) (x + 2.0) (to_double (bodyTop + 1)) 9.0 ink)
+            }
+            x = (x + inch)
+            i = (i + 1)
+        }
+    }
+
+    fn paintNoteBox:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid r:int c:int noteText:string bodyLeft:int bodyTop:int vw:int vh:int) {
+        def nr:GridRect (grid.cellRect(model r c))
+        def boxW:int 210
+        def nx:int (nr.x + nr.w + 6)
+        if ((nx + boxW) > (bodyLeft + vw)) {
+            nx = ((nr.x - boxW) - 6)
+        }
+        if (nx < bodyLeft) {
+            nx = bodyLeft
+        }
+        def lines:[string]
+        def paras:[string] (strsplit noteText "\n")
+        def pi:int 0
+        while (pi < (array_length paras)) {
+            def wrapped:[string] (ctx.tr.wrap((itemAt paras pi) 12.0 (to_double (boxW - 16))))
+            def wi:int 0
+            while (wi < (array_length wrapped)) {
+                push lines (itemAt wrapped wi)
+                wi = (wi + 1)
+            }
+            pi = (pi + 1)
+        }
+        def lineH:int (to_int (ctx.tr.lineHeight(12.0)))
+        def boxH:int (((array_length lines) * lineH) + 12)
+        def ny:int nr.y
+        if ((ny + boxH) > (bodyTop + vh)) {
+            ny = ((bodyTop + vh) - boxH)
+        }
+        if (ny < bodyTop) {
+            ny = bodyTop
+        }
+        this.pushRect(dl (to_double nx) (to_double ny) (to_double boxW) (to_double boxH) theme.noteBg)
+        this.pushBorder(dl (to_double nx) (to_double ny) (to_double boxW) (to_double boxH) 1.0 theme.noteMark)
+        def li:int 0
+        while (li < (array_length lines)) {
+            this.pushText(dl (itemAt lines li) (to_double (nx + 8)) (to_double ((ny + 6) + (li * lineH))) 12.0 theme.cellText)
+            li = (li + 1)
+        }
+    }
+
+    ; Excel's auditing arrows: blue, from a dot in the cell read to an
+    ; arrowhead in the cell that reads it.
+    fn paintTraceArrows:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid bodyLeft:int bodyTop:int vw:int vh:int) {
+        def blue:EVGColor (EVGColor.rgb(31 78 193))
+        this.pushClip(dl (to_double bodyLeft) (to_double bodyTop) (to_double vw) (to_double vh))
+        def i:int 0
+        while ((i + 3) < (array_length traceArrows)) {
+            def a:GridRect (grid.cellRect(model (itemAt traceArrows i) (itemAt traceArrows (i + 1))))
+            def b:GridRect (grid.cellRect(model (itemAt traceArrows (i + 2)) (itemAt traceArrows (i + 3))))
+            if ((a.x > -50000) && (b.x > -50000)) {
+                def x0:double ((to_double a.x) + ((to_double a.w) / 2.0))
+                def y0:double ((to_double a.y) + ((to_double a.h) / 2.0))
+                def x1:double ((to_double b.x) + ((to_double b.w) / 2.0))
+                def y1:double ((to_double b.y) + ((to_double b.h) / 2.0))
+                def line:[double] ([] _:double (x0 y0 x1 y1))
+                dl.addPolyline(line 1.5 blue)
+                this.pushRect(dl (x0 - 3.0) (y0 - 3.0) 6.0 6.0 blue)
+                def dx:double (x1 - x0)
+                def dy:double (y1 - y0)
+                def len:double (sqrt ((dx * dx) + (dy * dy)))
+                if (len > 1.0) {
+                    def ux:double (dx / len)
+                    def uy:double (dy / len)
+                    def head:[double] ([] _:double (x1 y1 ((x1 - (ux * 9.0)) - (uy * 4.0)) ((y1 - (uy * 9.0)) + (ux * 4.0)) ((x1 - (ux * 9.0)) + (uy * 4.0)) ((y1 - (uy * 9.0)) - (ux * 4.0))))
+                    dl.addPolygon(head blue)
+                }
+            }
+            i = (i + 4)
+        }
+        this.popClip(dl)
+    }
+
+    ; Page Break Preview and Page Layout: the pages the sheet prints on.
+    ; Break preview draws Excel's blue page edges, greys what does not print
+    ; and numbers the pages; page layout outlines each page and shows its
+    ; header and footer.
+    fn paintPages:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid bodyLeft:int bodyTop:int vw:int vh:int) {
+        def rowsAt:[int] (model.pageBreaks(false))
+        def colsAt:[int] (model.pageBreaks(true))
+        def lastR:int ((model.usedRow()) + 1)
+        def lastC:int ((model.usedCol()) + 1)
+        def blue:EVGColor (EVGColor.rgb(36 92 196))
+        def edge:EVGColor blue
+        def thick:double 3.0
+        if (model.viewMode == "pageLayout") {
+            edge = (EVGColor.rgb(150 150 150))
+            thick = 2.0
+        }
+        def end:GridRect (grid.cellRect(model lastR lastC))
+        def x0:double (to_double bodyLeft)
+        def y0:double (to_double bodyTop)
+        def x1:double (to_double end.x)
+        def y1:double (to_double end.y)
+        if ((end.x < -50000) || (x1 > (to_double (bodyLeft + vw)))) {
+            x1 = (to_double (bodyLeft + vw))
+        }
+        if ((end.y < -50000) || (y1 > (to_double (bodyTop + vh)))) {
+            y1 = (to_double (bodyTop + vh))
+        }
+        this.pushClip(dl x0 y0 (to_double vw) (to_double vh))
+        if (model.viewMode == "pageBreak") {
+            def grey:EVGColor (EVGColor.rgba(120 120 120 0.25))
+            if (x1 < (to_double (bodyLeft + vw))) {
+                this.pushRect(dl x1 y0 ((to_double (bodyLeft + vw)) - x1) (to_double vh) grey)
+            }
+            if (y1 < (to_double (bodyTop + vh))) {
+                this.pushRect(dl x0 y1 (x1 - x0) ((to_double (bodyTop + vh)) - y1) grey)
+            }
+        }
+        ; The outer edge of what prints, then each break inside it.
+        this.pushRect(dl x0 (y1 - 1.0) (x1 - x0) thick edge)
+        this.pushRect(dl (x1 - 1.0) y0 thick (y1 - y0) edge)
+        def i:int 0
+        while (i < (array_length rowsAt)) {
+            def rr:GridRect (grid.cellRect(model (itemAt rowsAt i) 0))
+            if (rr.y > -50000) {
+                this.pushRect(dl x0 ((to_double rr.y) - 1.0) (x1 - x0) thick edge)
+            }
+            i = (i + 1)
+        }
+        i = 0
+        while (i < (array_length colsAt)) {
+            def cr:GridRect (grid.cellRect(model 0 (itemAt colsAt i)))
+            if (cr.x > -50000) {
+                this.pushRect(dl ((to_double cr.x) - 1.0) y0 thick (y1 - y0) edge)
+            }
+            i = (i + 1)
+        }
+        ; "Page N" in each page, or the header and footer.
+        def pageNo:int 1
+        def pr:int 0
+        while (pr <= (array_length rowsAt)) {
+            def rStart:int 0
+            if (pr > 0) {
+                rStart = (itemAt rowsAt (pr - 1))
+            }
+            def rEnd:int lastR
+            if (pr < (array_length rowsAt)) {
+                rEnd = (itemAt rowsAt pr)
+            }
+            def pc:int 0
+            while (pc <= (array_length colsAt)) {
+                def cStart:int 0
+                if (pc > 0) {
+                    cStart = (itemAt colsAt (pc - 1))
+                }
+                def cEnd:int lastC
+                if (pc < (array_length colsAt)) {
+                    cEnd = (itemAt colsAt pc)
+                }
+                def a:GridRect (grid.cellRect(model rStart cStart))
+                def b:GridRect (grid.cellRect(model rEnd cEnd))
+                if ((a.x > -50000) && (a.y > -50000)) {
+                    def bx:double (to_double b.x)
+                    def by:double (to_double b.y)
+                    if (b.x < -50000) {
+                        bx = x1
+                    }
+                    if (b.y < -50000) {
+                        by = y1
+                    }
+                    if (model.viewMode == "pageBreak") {
+                        def label:string ("Page " + (to_string pageNo))
+                        def lw:double (ctx.tr.measureWidth(label 28.0))
+                        this.pushText(dl label ((((to_double a.x) + bx) / 2.0) - (lw / 2.0)) ((((to_double a.y) + by) / 2.0) - 14.0) 28.0 (EVGColor.rgba(120 120 120 0.55)))
+                    } {
+                        def hdr:string model.pageHeader
+                        if ((strlen hdr) == 0) {
+                            hdr = "Add header"
+                        }
+                        this.pushText(dl hdr ((to_double a.x) + 6.0) ((to_double a.y) + 2.0) 10.0 (EVGColor.rgb(140 140 140)))
+                        def ftr:string model.pageFooter
+                        if ((strlen ftr) == 0) {
+                            ftr = ("Page " + (to_string pageNo))
+                        }
+                        this.pushText(dl ftr ((to_double a.x) + 6.0) (by - 14.0) 10.0 (EVGColor.rgb(140 140 140)))
+                    }
+                }
+                pageNo = (pageNo + 1)
+                pc = (pc + 1)
+            }
+            pr = (pr + 1)
+        }
+        this.popClip(dl)
+    }
+
+    ; ✕ (cancel) and ✓ (enter) are live while editing; fx always is.
+    fn paintFxButtons:void (dl:EVGDisplayList x0:int y:int h:int editing:boolean) {
+        def ink:EVGColor theme.headerText
+        def off:EVGColor theme.gridLine
+        def cy:double ((to_double y) + ((to_double h) / 2.0))
+        def bx:double ((to_double x0) + 14.0)
+        def col:EVGColor off
+        if editing {
+            col = (EVGColor.rgb(196 43 28))
+        }
+        def c1:[double] ([] _:double ((bx - 5.0) (cy - 5.0) (bx + 5.0) (cy + 5.0)))
+        def c2:[double] ([] _:double ((bx - 5.0) (cy + 5.0) (bx + 5.0) (cy - 5.0)))
+        dl.addPolyline(c1 1.6 col)
+        dl.addPolyline(c2 1.6 col)
+        def ex:double (bx + 26.0)
+        def col2:EVGColor off
+        if editing {
+            col2 = (EVGColor.rgb(16 124 65))
+        }
+        def ck:[double] ([] _:double ((ex - 6.0) cy (ex - 2.0) (cy + 4.0) (ex + 6.0) (cy - 5.0)))
+        dl.addPolyline(ck 1.6 col2)
+        this.pushStyledText(dl "fx" ((to_double x0) + 56.0) ((to_double y) + 4.0) 13.0 ink "" false true)
+    }
+
     fn a11yFormulaBar:void (t:EVGA11yTree model:SpreadsheetModel sel:GridSelection grid:DataGrid editing:boolean editBuf:string) {
         def fbY:int (grid.formulaBarY())
         def bar:EVGA11yNode (t.group("app/formulabar" "app" "Formula bar"))
@@ -2507,6 +3422,32 @@ class GridView {
         def fieldY:int (fbY + 3)
         def fieldH:int (grid.formulaBarH - 6)
         t.place(nameBox addrX fieldY 64 fieldH)
+        def bx0:int ((grid.x + 64) + 10)
+        def bCancel:EVGA11yNode (t.button("app/fx-cancel" "app/formulabar" "Cancel"))
+        t.place(bCancel bx0 fieldY 26 fieldH)
+        def bEnter:EVGA11yNode (t.button("app/fx-enter" "app/formulabar" "Enter"))
+        t.place(bEnter (bx0 + 27) fieldY 26 fieldH)
+        def bFx:EVGA11yNode (t.button("app/fx-insert" "app/formulabar" "Insert Function"))
+        t.place(bFx (bx0 + 54) fieldY 28 fieldH)
+        if (fbFieldW > 0) {
+            def expName:string "Expand Formula Bar"
+            if (grid.formulaBarH > 40) {
+                expName = "Collapse Formula Bar"
+            }
+            def bExp:EVGA11yNode (t.button("app/fx-expand" "app/formulabar" expName))
+            t.place(bExp ((fbFieldX + fbFieldW) - 20) fbFieldY 20 26)
+        }
+        if ((array_length acItems) > 0) {
+            def acl:EVGA11yNode (t.group("app/autocomplete" "app" "Formula AutoComplete"))
+            def ai:int 0
+            while (ai < (array_length acItems)) {
+                def an:EVGA11yNode (t.button(("app/ac-" + (to_string ai)) "app/autocomplete" (itemAt acItems ai)))
+                ai = (ai + 1)
+            }
+        }
+        if ((strlen acTip) > 0) {
+            def tipN:EVGA11yNode (t.group("app/argtip" "app" acTip))
+        }
 
         def shown:string (model.formulaBarText(sel.active.row sel.active.col))
         if editing {
@@ -2519,8 +3460,8 @@ class GridView {
         if (fbFieldW > 0) {
             t.place(f fbFieldX fbFieldY fbFieldW fbFieldH)
         } {
-            def fx:int ((grid.x + 64) + 10)
-            def fw:int ((grid.w - 64) - 18)
+            def fx:int (((grid.x + 64) + 10) + fxAreaW)
+            def fw:int (((grid.w - 64) - 18) - fxAreaW)
             t.place(f fx fieldY fw fieldH)
         }
     }

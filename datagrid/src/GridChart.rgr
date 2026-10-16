@@ -288,7 +288,18 @@ class GridChart {
     ; Drawn above the plot, and used as the window's caption when it is set —
     ; one title, in both places it belongs.
     def title:string ""
+    ; Alt text, for a reader (Check Accessibility asks for it).
+    def altText:string ""
     def showLegend:boolean true
+    ; Chart elements and format (Chart Design / Format): data labels, the
+    ; value grid ("" as the style has it, "on", "off"), axis titles, series
+    ; read from rows instead of columns, and the marks' fill and outline.
+    def dataLabels:boolean false
+    def gridlines:string ""
+    def axisTitles:boolean true
+    def transposed:boolean false
+    def fillColor:string ""
+    def outlineColor:string ""
     ; Window rectangle, in page pixels.
     def x:int 0
     def y:int 0
@@ -331,6 +342,12 @@ class GridChart {
         catBucket = o.catBucket
         title = o.title
         showLegend = o.showLegend
+        dataLabels = o.dataLabels
+        gridlines = o.gridlines
+        axisTitles = o.axisTitles
+        transposed = o.transposed
+        fillColor = o.fillColor
+        outlineColor = o.outlineColor
         x = o.x
         y = o.y
         w = o.w
@@ -499,6 +516,8 @@ class ChartData {
     ; the field name the generator invented ("cat", "value"), which is a
     ; detail of this file leaking onto the user's chart.
     def catTitle:string ""
+    ; Characters a category name may show, 0 for all of them (see specJson).
+    def catClip:int 0
     def valueTitle:string ""
     def seriesTitle:string ""
 
@@ -584,7 +603,45 @@ class ChartData {
 
     ; Read the chart's rectangle out of the model. Returns false when there is
     ; nothing to draw — no value column, or no row under the header.
+    ; Switch Row/Column: the series become the categories and back.
     fn extract:boolean (model:SpreadsheetModel ch:GridChart) {
+        def ok:boolean (this.extractRead(model ch))
+        if (ok && ch.transposed) {
+            this.transpose()
+        }
+        return ok
+    }
+
+    fn transpose:void () {
+        def nc:int (array_length cats)
+        def ns:int (array_length series)
+        def nv:[double]
+        def nf:[boolean]
+        def s:int 0
+        while (s < ns) {
+            def c:int 0
+            while (c < nc) {
+                push nv (itemAt values ((c * ns) + s))
+                push nf (itemAt filled ((c * ns) + s))
+                c = (c + 1)
+            }
+            s = (s + 1)
+        }
+        def oldCats:[string] cats
+        cats = series
+        series = oldCats
+        values = nv
+        filled = nf
+        catNumeric = false
+        def t:string catTitle
+        catTitle = seriesTitle
+        seriesTitle = t
+        if ((array_length series) > 1) {
+            valueTitle = ""
+        }
+    }
+
+    fn extractRead:boolean (model:SpreadsheetModel ch:GridChart) {
         clear cats
         clear series
         clear values
@@ -1204,7 +1261,7 @@ class ChartData {
                     if (wrote > 0) {
                         out = (out + ",")
                     }
-                    def cat:string (itemAt cats ci)
+                    def cat:string (this.shownCat(ci))
                     out = (out + "{\"cat\":")
                     if catNumeric {
                         out = (out + cat)
@@ -1298,7 +1355,66 @@ class ChartData {
 
     ; The whole Vega-Lite specification, sized to the box it will be drawn in.
     fn specJson:string (ch:GridChart plotW:int plotH:int) {
+        def keepCat:string catTitle
+        def keepValue:string valueTitle
+        ; A small chart keeps its words inside its box: titles and category
+        ; names are cut with an ellipsis to the room they have.
+        catTitle = (ChartData.clipText(catTitle (to_int ((to_double plotW) / 7.5))))
+        valueTitle = (ChartData.clipText(valueTitle (to_int ((to_double plotH) / 7.5))))
+        catClip = 0
+        if (((this.catCount()) > 0) && (catNumeric == false)) {
+            if (this.levelLabels()) {
+                catClip = (to_int (((to_double plotW) / (to_double (this.catCount()))) / 6.0))
+            } {
+                catClip = (to_int (((to_double plotH) * 0.45) / 5.5))
+            }
+            if (catClip < 8) {
+                catClip = 8
+            }
+        }
+        def spec:string (this.specJsonIn(ch plotW plotH))
+        catTitle = keepCat
+        valueTitle = keepValue
+        catClip = 0
+        return spec
+    }
+
+    ; `s` cut to `most` characters, the last of them an ellipsis.
+    sfn clipText:string (s:string most:int) {
+        if ((strlen s) <= most) {
+            return s
+        }
+        if (most < 2) {
+            return "…"
+        }
+        return ((substring s 0 (most - 1)) + "…")
+    }
+
+    ; A category as the axis shows it: clipped to `catClip`, unless that would
+    ; make it read the same as an earlier one.
+    fn shownCat:string (ci:int) {
+        def cat:string (itemAt cats ci)
+        if ((catClip <= 0) || ((strlen cat) <= catClip)) {
+            return cat
+        }
+        def cut:string (ChartData.clipText(cat catClip))
+        def k:int 0
+        while (k < ci) {
+            if ((ChartData.clipText((itemAt cats k) catClip)) == cut) {
+                return cat
+            }
+            k = (k + 1)
+        }
+        return cut
+    }
+
+    fn specJsonIn:string (ch:GridChart plotW:int plotH:int) {
         def kind:int ch.kind
+        if (ch.axisTitles == false) {
+            catTitle = ""
+            valueTitle = ""
+            seriesTitle = ""
+        }
         def single:boolean false
         if (kind == (ChartKind.pie())) {
             single = true
@@ -1313,7 +1429,8 @@ class ChartData {
         out = ((out + "\"width\":") + (to_string plotW) + ",\"height\":" + (to_string plotH))
         out = ((out + ",\"background\":\"") + (ChartStyle.background(ch.style)) + "\"")
         if ((strlen ch.title) > 0) {
-            out = ((out + ",\"title\":\"") + (ChartData.jsonEscape(ch.title)) + "\"")
+            def shownTitle:string (ChartData.clipText(ch.title (to_int (((to_double plotW) + 60.0) / 7.5))))
+            out = ((out + ",\"title\":\"") + (ChartData.jsonEscape(shownTitle)) + "\"")
         }
         if (ChartKind.wantsXY(kind)) {
             out = ((out + ",\"data\":{\"values\":[") + (this.rowsXyJson()) + "]}")
@@ -1444,8 +1561,67 @@ class ChartData {
             out = (out + ",\"mark\":\"boxplot\",\"encoding\":{\"x\":{\"field\":\"series\",\"type\":\"nominal\"" + (ChartData.titleMember(seriesTitle)) + "},\"y\":{" + valueField + "}}")
         }
 
-        out = ((out + ",") + (ChartStyle.configJson(ch.style (this.levelLabels()))))
+        out = (this.decorate(ch out))
+        def cfg:string (ChartStyle.configJson(ch.style (this.levelLabels())))
+        if (ch.gridlines == "off") {
+            cfg = (ChartData.replaceOnce(cfg "\"axis\":{" "\"axis\":{\"grid\":false,"))
+        }
+        if (ch.gridlines == "on") {
+            cfg = (ChartData.replaceOnce(cfg "\"grid\":false," ""))
+            cfg = (ChartData.replaceOnce(cfg "\"axis\":{" "\"axis\":{\"grid\":true,"))
+        }
+        if ((strlen ch.fillColor) > 0) {
+            def scheme:string ("\"range\":{\"category\":{\"scheme\":\"" + ((ChartStyle.scheme(ch.style)) + "\"}}"))
+            def fill:string ("\"range\":{\"category\":[\"" + (ch.fillColor + "\",\"#ED7D31\",\"#A5A5A5\",\"#FFC000\",\"#5B9BD5\",\"#70AD47\"]}"))
+            cfg = (ChartData.replaceOnce(cfg scheme fill))
+            cfg = (ChartData.replaceOnce(cfg "\"config\":{" ("\"config\":{\"mark\":{\"color\":\"" + (ch.fillColor + "\"},"))))
+        }
+        out = ((out + ",") + cfg)
         return (out + "}")
+    }
+
+    sfn replaceOnce:string (s:string find:string repl:string) {
+        def at:int (indexOf s find)
+        if (at < 0) {
+            return s
+        }
+        return ((substring s 0 at) + (repl + (substring s (at + (strlen find)) (strlen s))))
+    }
+
+    ; Outline and data labels, worked into the mark the kind chose. Labels are
+    ; a text layer over the same encoding, which is how Vega-Lite does it.
+    fn decorate:string (ch:GridChart spec:string) {
+        def at:int (indexOf spec ",\"mark\":")
+        if (at < 0) {
+            return spec
+        }
+        def head:string (substring spec 0 at)
+        def tail:string (substring spec (at + 8) (strlen spec))
+        def encAt:int (indexOf tail ",\"encoding\":")
+        if (encAt < 0) {
+            return spec
+        }
+        def mark:string (substring tail 0 encAt)
+        def enc:string (substring tail (encAt + 12) (strlen tail))
+        if ((strlen ch.outlineColor) > 0) {
+            def stroke:string ("\"stroke\":\"" + (ch.outlineColor + "\",\"strokeWidth\":1.5"))
+            if ((charAt mark 0) == 34) {
+                mark = ("{\"type\":" + (mark + ("," + (stroke + "}"))))
+            } {
+                mark = ("{" + (stroke + ("," + (substring mark 1 (strlen mark)))))
+            }
+        }
+        def k:int ch.kind
+        def labelled:boolean (ch.dataLabels && ((k == 1) || ((k == 2) || ((k == 6) || (k == 7)))))
+        if (labelled == false) {
+            return (head + (",\"mark\":" + (mark + (",\"encoding\":" + enc))))
+        }
+        def offset:string "\"dy\":-7"
+        if (k == 2) {
+            offset = "\"dx\":14"
+        }
+        def label:string ("{\"mark\":{\"type\":\"text\"," + (offset + ",\"fontSize\":9},\"encoding\":{\"text\":{\"field\":\"value\",\"type\":\"quantitative\",\"format\":\",\"}}}"))
+        return (head + (",\"encoding\":" + (enc + (",\"layer\":[{\"mark\":" + (mark + ("}," + (label + "]")))))))
     }
 
     ; Whether the category names are short enough to read lying down. Six

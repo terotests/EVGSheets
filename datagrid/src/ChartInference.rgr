@@ -712,15 +712,21 @@ class ChartInference {
         def flag:[boolean]
         def topText:int 0
         def bodyNum:int 0
+        ; A number over a number is data: a row of a name and its figures is
+        ; the first row of the table, not the names of its series.
+        def numOnNum:int 0
         def i:int 0
         while (i < n) {
             def col:int (ch.sourceColAt(i))
             def head:string (model.getCell(ch.r0 col))
+            def headNum:boolean false
             if ((strlen head) > 0) {
                 ChartInference.asNumber(head flag)
                 if ((array_length flag) > 0) {
                     if ((itemAt flag 0) == false) {
                         topText = (topText + 1)
+                    } {
+                        headNum = true
                     }
                 }
             }
@@ -730,12 +736,18 @@ class ChartInference {
                 if ((array_length flag) > 0) {
                     if (itemAt flag 0) {
                         bodyNum = (bodyNum + 1)
+                        if headNum {
+                            numOnNum = (numOnNum + 1)
+                        }
                     }
                 }
             }
             i = (i + 1)
         }
         if (topText == 0) {
+            return false
+        }
+        if (numOnNum > 0) {
             return false
         }
         ; Words on top and at least one number under them: a header. Words on

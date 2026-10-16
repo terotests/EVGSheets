@@ -233,16 +233,13 @@ class GridScriptEngine {
                 def pg:EVGElement (itemAt pages pi)
                 lay.setPageSize(contentW contentH)
                 pg.resetLayoutState()
-                ; Same four writes the PDF renderer makes before laying a page
-                ; out: the sheet decides the box, not the page's own CSS.
-                pg.width.pixels = contentW
-                pg.width.value = contentW
-                pg.width.unitType = 0
-                pg.width.isSet = true
-                pg.height.pixels = contentH
-                pg.height.value = contentH
-                pg.height.unitType = 0
-                pg.height.isSet = true
+                ; The sheet decides the box, not the page's own CSS. New units
+                ; are assigned rather than written into: a page with no size
+                ; of its own holds EVG's one shared unset unit, and setting
+                ; that one in place gave every unsized element of the whole
+                ; app (the ribbon, the panes) this page's size.
+                pg.width = (EVGUnit.px(contentW))
+                pg.height = (EVGUnit.px(contentH))
                 lay.layout(pg)
                 def out:GridScriptPage (new GridScriptPage)
                 out.element = pg
@@ -288,6 +285,22 @@ class GridScriptEngine {
             renderer.setAssetPaths(assetPaths)
         }
         renderer.setMeasurer((this.measurer()))
+        ; The renderer sizes each page by writing into its width and height
+        ; units. An unsized page holds EVG's shared unset unit, so each gets
+        ; one of its own first, or the write resizes every unsized element.
+        def pages:[EVGElement]
+        this.collectPages(result.root pages)
+        def i:int 0
+        while (i < (array_length pages)) {
+            def pg:EVGElement (itemAt pages i)
+            if (pg.width.isSet == false) {
+                pg.width = (new EVGUnit())
+            }
+            if (pg.height.isSet == false) {
+                pg.height = (new EVGUnit())
+            }
+            i = (i + 1)
+        }
         return (renderer.render(result.root))
     }
 

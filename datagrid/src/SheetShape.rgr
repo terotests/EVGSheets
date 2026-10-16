@@ -1,0 +1,288 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; SheetShape.rgr — a drawing object floating over the grid.
+; ==============================================================================
+;
+; Shapes, text boxes, icons, WordArt, slicers and pen strokes are one kind of
+; thing to a sheet: a box anchored to a cell, painted over the cells, with a
+; z-order and a selection. Like SheetImage the anchor is a cell plus a pixel
+; offset, so a shape moves with the column it sits in.
+;
+; `kind` says how the box is drawn:
+;   rect roundRect ellipse triangle diamond line arrow   a geometric shape
+;   textBox wordArt signature                            text first
+;   icon                                                 `icon` names it
+;   ink                                                  `points`, relative
+;   slicer timeline                                      buttons over a column
+; ==============================================================================
+
+class SheetShape {
+    def kind:string "rect"
+    def name:string ""
+    def fromRow:int 0
+    def fromCol:int 0
+    def offX:int 0
+    def offY:int 0
+    def widthPx:int 120
+    def heightPx:int 80
+    def fill:string "#4472C4"
+    def outline:string "#2F528F"
+    def textColor:string "#FFFFFF"
+    def text:string ""
+    def fontSize:double 14.0
+    def rotation:int 0
+    def flipH:boolean false
+    def groupId:int 0
+    def hidden:boolean false
+    def icon:string ""
+    def altText:string ""
+    ; A pen stroke: x,y pairs relative to the box's top-left corner.
+    def points:[double]
+    ; A slicer: the table column it filters, and the values it offers.
+    def column:int -1
+    def items:[string]
+    def picked:[string]
+
+    Constructor () {
+    }
+
+    fn copyFrom:void (o:SheetShape) {
+        kind = o.kind
+        name = o.name
+        fromRow = o.fromRow
+        fromCol = o.fromCol
+        offX = o.offX
+        offY = o.offY
+        widthPx = o.widthPx
+        heightPx = o.heightPx
+        fill = o.fill
+        outline = o.outline
+        textColor = o.textColor
+        text = o.text
+        fontSize = o.fontSize
+        rotation = o.rotation
+        flipH = o.flipH
+        groupId = o.groupId
+        hidden = o.hidden
+        icon = o.icon
+        altText = o.altText
+        clear points
+        def i:int 0
+        while (i < (array_length o.points)) {
+            push points (itemAt o.points i)
+            i = (i + 1)
+        }
+        column = o.column
+        clear items
+        def j:int 0
+        while (j < (array_length o.items)) {
+            push items (itemAt o.items j)
+            j = (j + 1)
+        }
+        clear picked
+        def k:int 0
+        while (k < (array_length o.picked)) {
+            push picked (itemAt o.picked k)
+            k = (k + 1)
+        }
+    }
+
+    fn isPicked:boolean (v:string) {
+        def i:int 0
+        while (i < (array_length picked)) {
+            if ((itemAt picked i) == v) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    ; The outline of a geometric kind as a polygon in box space (0..w, 0..h),
+    ; before rotation. Lines and ink are strokes, not polygons.
+    fn outlinePoints:[double] () {
+        def w:double (to_double widthPx)
+        def h:double (to_double heightPx)
+        def pts:[double]
+        if ((kind == "ellipse") || (kind == "roundRect")) {
+            def n:int 32
+            def i:int 0
+            while (i < n) {
+                def a:double ((6.283185307179586 * (to_double i)) / (to_double n))
+                if (kind == "ellipse") {
+                    push pts ((w / 2.0) + ((w / 2.0) * (cos a)))
+                    push pts ((h / 2.0) + ((h / 2.0) * (sin a)))
+                } {
+                    ; A rounded rectangle: the corners of a superellipse.
+                    def ca:double (cos a)
+                    def sa:double (sin a)
+                    def px:double (SheetShape.softSign(ca))
+                    def py:double (SheetShape.softSign(sa))
+                    push pts ((w / 2.0) + ((w / 2.0) * px))
+                    push pts ((h / 2.0) + ((h / 2.0) * py))
+                }
+                i = (i + 1)
+            }
+            return pts
+        }
+        if (kind == "triangle") {
+            push pts (w / 2.0)
+            push pts 0.0
+            push pts w
+            push pts h
+            push pts 0.0
+            push pts h
+            return pts
+        }
+        if (kind == "diamond") {
+            push pts (w / 2.0)
+            push pts 0.0
+            push pts w
+            push pts (h / 2.0)
+            push pts (w / 2.0)
+            push pts h
+            push pts 0.0
+            push pts (h / 2.0)
+            return pts
+        }
+        if (kind == "arrow") {
+            ; A block arrow pointing right.
+            push pts 0.0
+            push pts (h * 0.3)
+            push pts (w * 0.65)
+            push pts (h * 0.3)
+            push pts (w * 0.65)
+            push pts 0.0
+            push pts w
+            push pts (h / 2.0)
+            push pts (w * 0.65)
+            push pts h
+            push pts (w * 0.65)
+            push pts (h * 0.7)
+            push pts 0.0
+            push pts (h * 0.7)
+            return pts
+        }
+        if (kind == "icon") {
+            return (this.iconPoints(w h))
+        }
+        push pts 0.0
+        push pts 0.0
+        push pts w
+        push pts 0.0
+        push pts w
+        push pts h
+        push pts 0.0
+        push pts h
+        return pts
+    }
+
+    ; |x|^(1/4) with the sign of x: pushes a circle out toward its square.
+    sfn softSign:double (x:double) {
+        def ax:double x
+        if (ax < 0.0) {
+            ax = (0.0 - ax)
+        }
+        def r:double (sqrt (sqrt ax))
+        if (x < 0.0) {
+            return (0.0 - r)
+        }
+        return r
+    }
+
+    fn iconPoints:[double] (w:double h:double) {
+        def pts:[double]
+        if (icon == "check") {
+            push pts 0.0
+            push pts (h * 0.55)
+            push pts (w * 0.15)
+            push pts (h * 0.4)
+            push pts (w * 0.4)
+            push pts (h * 0.65)
+            push pts (w * 0.85)
+            push pts 0.0
+            push pts w
+            push pts (h * 0.15)
+            push pts (w * 0.4)
+            push pts h
+            return pts
+        }
+        if (icon == "heart") {
+            def i:int 0
+            while (i < 32) {
+                def t:double ((6.283185307179586 * (to_double i)) / 32.0)
+                def s:double (sin t)
+                def x:double ((16.0 * s) * (s * s))
+                def y:double (((13.0 * (cos t)) - (5.0 * (cos (2.0 * t)))) - ((2.0 * (cos (3.0 * t))) + (cos (4.0 * t))))
+                push pts ((w / 2.0) + ((x / 34.0) * w))
+                push pts ((h * 0.45) - ((y / 34.0) * h))
+                i = (i + 1)
+            }
+            return pts
+        }
+        if (icon == "arrow") {
+            push pts (w / 2.0)
+            push pts 0.0
+            push pts w
+            push pts (h * 0.5)
+            push pts (w * 0.7)
+            push pts (h * 0.5)
+            push pts (w * 0.7)
+            push pts h
+            push pts (w * 0.3)
+            push pts h
+            push pts (w * 0.3)
+            push pts (h * 0.5)
+            push pts 0.0
+            push pts (h * 0.5)
+            return pts
+        }
+        ; A five-pointed star, the default icon.
+        def k:int 0
+        while (k < 10) {
+            def a:double ((-1.5707963267948966) + ((3.141592653589793 * (to_double k)) / 5.0))
+            def rr:double 0.5
+            if ((k % 2) == 1) {
+                rr = 0.2
+            }
+            push pts ((w / 2.0) + ((w * rr) * (cos a)))
+            push pts ((h * 0.52) + ((h * rr) * (sin a)))
+            k = (k + 1)
+        }
+        return pts
+    }
+
+    ; Box-space points turned about the box's centre and flipped, then moved
+    ; to the screen at (x, y).
+    fn place:[double] (pts:[double] x:double y:double) {
+        def w:double (to_double widthPx)
+        def h:double (to_double heightPx)
+        def cx:double (w / 2.0)
+        def cy:double (h / 2.0)
+        def rad:double (((to_double rotation) * 3.141592653589793) / 180.0)
+        def c:double (cos rad)
+        def s:double (sin rad)
+        def out:[double]
+        def i:int 0
+        while ((i + 1) < (array_length pts)) {
+            def px:double ((itemAt pts i) - cx)
+            def py:double ((itemAt pts (i + 1)) - cy)
+            if flipH {
+                px = (0.0 - px)
+            }
+            push out ((x + cx) + ((px * c) - (py * s)))
+            push out ((y + cy) + ((px * s) + (py * c)))
+            i = (i + 2)
+        }
+        return out
+    }
+
+    fn isStroke:boolean () {
+        return ((kind == "line") || (kind == "ink"))
+    }
+
+    fn isTextFirst:boolean () {
+        return ((kind == "textBox") || (kind == "wordArt") || (kind == "signature"))
+    }
+}

@@ -79,6 +79,20 @@ class XlsxLoader {
         return (OpcPackage.joinPartPath(partPath target))
     }
 
+    ; The text of the first <tag>…</tag> in a small part, entities decoded.
+    sfn tagText:string (xml:string tag:string) {
+        def open:int (indexOf xml ("<" + tag + ">"))
+        if (open < 0) {
+            return ""
+        }
+        def from:int ((open + (strlen tag)) + 2)
+        def close:int (indexOf xml ("</" + tag + ">"))
+        if (close < from) {
+            return ""
+        }
+        return (XmlLite.decodeEntities((substring xml from close)))
+    }
+
     fn loadPackage:boolean (pkg:XlsxPackage book:WorkbookModel) {
         book.clear()
         ; Kept so a later save can preserve the parts nothing here models —
@@ -86,9 +100,21 @@ class XlsxLoader {
         book.sourceBytes = pkg.plainBytes
         def wb:XlsxWorkbook (new XlsxWorkbook)
         wb.load(pkg)
+        def ni:int 0
+        while (ni < (array_length wb.nameKeys)) {
+            book.setName((itemAt wb.nameKeys ni) (itemAt wb.nameRefs ni))
+            ni = (ni + 1)
+        }
         if ((wb.sheetCount()) == 0) {
             lastError = "workbook has no sheets"
             return false
+        }
+        if (pkg.hasEntry("docProps/core.xml")) {
+            def core:string (pkg.entryText("docProps/core.xml"))
+            book.propTitle = (XlsxLoader.tagText(core "dc:title"))
+            book.propSubject = (XlsxLoader.tagText(core "dc:subject"))
+            book.propAuthor = (XlsxLoader.tagText(core "dc:creator"))
+            book.propKeywords = (XlsxLoader.tagText(core "cp:keywords"))
         }
         def sst:XlsxSharedStrings (new XlsxSharedStrings)
         if (pkg.hasEntry("xl/sharedStrings.xml")) {
@@ -158,6 +184,16 @@ class XlsxLoader {
                         sheet.addImage(pic)
                         di = (di + 1)
                     }
+                    def ci:int 0
+                    while (ci < (array_length drawing.charts)) {
+                        def ch:SheetImage (itemAt drawing.charts ci)
+                        def chartXml:string (pkg.entryText(ch.chartPart))
+                        if ((strlen chartXml) > 0) {
+                            XlsxDrawing.readChart(ch chartXml)
+                            push sheet.fileCharts ch
+                        }
+                        ci = (ci + 1)
+                    }
                 }
             }
             ; Tables. A sheet can carry several, each behind a relationship of
@@ -184,6 +220,9 @@ class XlsxLoader {
             ; Only now can a row be measured: until the style table is on the
             ; sheet, every cell reports the default size rather than its own.
             parser.autoFitRows(sheet)
+            if (parser.fileZoom != 1.0) {
+                sheet.setZoom(parser.fileZoom)
+            }
             sheet.quietWrites = false
             sheet.version = (sheet.version + 1)
             book.addSheet(sheet)

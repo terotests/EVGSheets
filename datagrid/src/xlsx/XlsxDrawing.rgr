@@ -27,6 +27,8 @@ Import "../../../ooxml/OpcPackage.rgr"
 class XlsxDrawing {
     ; Every image the drawing described, in document order.
     def images:[SheetImage]
+    ; Chart anchors (graphicFrame → c:chart r:id), in document order.
+    def charts:[SheetImage]
     ; The drawing's own package path — what its relationship targets are
     ; relative to. Set by the loader before `parse`; the conventional name is
     ; only the fallback for a caller that does not know.
@@ -132,6 +134,12 @@ class XlsxDrawing {
                     if (local == "cNvPr") {
                         img.name = (t.attr("name"))
                     }
+                    if (local == "chart") {
+                        def crid:string (t.attrAny("r:id" "id"))
+                        if ((strlen crid) > 0) {
+                            img.chartPart = (this.relTarget(rels crid))
+                        }
+                    }
                     ; The relationship id of the media part.
                     if (local == "blip") {
                         def rid:string (t.attrAny("r:embed" "embed"))
@@ -145,6 +153,9 @@ class XlsxDrawing {
         img.stretched = sawTo
         if ((strlen img.src) > 0) {
             push images img
+        }
+        if ((strlen img.chartPart) > 0) {
+            push charts img
         }
     }
 
@@ -175,8 +186,91 @@ class XlsxDrawing {
         return ""
     }
 
+    ; What the chart part says, as far as a GridChart can use it: the plot's
+    ; kind, the title's text, the category range and each series' values.
+    sfn readChart:void (img:SheetImage xml:string) {
+        def p:XmlLite (new XmlLite)
+        p.reset(xml)
+        def inTitle:boolean false
+        def inCat:boolean false
+        def inVal:boolean false
+        def barDir:string "col"
+        def grouping:string ""
+        def plot:string ""
+        while (p.pos < p.len) {
+            def t:XmlTag (p.nextTag())
+            if (t.valid == false) {
+                break
+            }
+            def local:string (p.localName(t.name))
+            def opening:boolean (t.isEnd == false)
+            if (local == "title") {
+                inTitle = opening
+            }
+            if (local == "cat") {
+                inCat = opening
+            }
+            if (local == "val") {
+                inVal = opening
+            }
+            if opening {
+                if ((strlen plot) == 0) {
+                    if ((strlen local) > 5) {
+                        if ((indexOf local "Chart") == ((strlen local) - 5)) {
+                            plot = local
+                        }
+                    }
+                }
+                if (local == "barDir") {
+                    barDir = (t.attr("val"))
+                }
+                if (local == "grouping") {
+                    grouping = (t.attr("val"))
+                }
+                if ((local == "t") && inTitle && (t.selfClose == false)) {
+                    img.chartTitle = (img.chartTitle + (p.readTextUntilEnd(t.name)))
+                    inTitle = true
+                }
+                if ((local == "f") && (t.selfClose == false)) {
+                    def fref:string (p.readTextUntilEnd(t.name))
+                    if inCat {
+                        img.catRef = fref
+                    }
+                    if inVal {
+                        push img.valRefs fref
+                    }
+                }
+            }
+        }
+        img.chartKind = 1
+        if ((plot == "barChart") || (plot == "bar3DChart")) {
+            if (barDir == "bar") {
+                img.chartKind = 2
+            }
+            if ((grouping == "stacked") || (grouping == "percentStacked")) {
+                img.chartKind = 3
+            }
+        }
+        if ((plot == "lineChart") || (plot == "line3DChart") || (plot == "radarChart")) {
+            img.chartKind = 6
+        }
+        if ((plot == "pieChart") || (plot == "pie3DChart")) {
+            img.chartKind = 16
+        }
+        if (plot == "doughnutChart") {
+            img.chartKind = 17
+        }
+        if (plot == "areaChart") {
+            img.chartKind = 10
+        }
+        if (plot == "scatterChart") {
+            img.chartKind = 13
+        }
+    }
+
     fn parse:void (xml:string rels:string) {
         clear images
+        clear charts
         if ((strlen xml) == 0) {
             return
         }

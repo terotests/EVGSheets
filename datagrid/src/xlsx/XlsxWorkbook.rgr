@@ -24,6 +24,9 @@ class XlsxWorkbook {
     ; The workbook part itself — what sheet targets are resolved against. Read
     ; from the package when it opens rather than assumed.
     def mainPart:string "xl/workbook.xml"
+    ; Workbook-wide defined names (not Excel's own _xlnm.*), as name / ref.
+    def nameKeys:[string]
+    def nameRefs:[string]
 
     Constructor () {
     }
@@ -68,6 +71,16 @@ class XlsxWorkbook {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break
+            }
+            if ((t.name == "definedName") && (t.isEnd == false) && (t.selfClose == false)) {
+                def dn:string (t.attr("name"))
+                def local:boolean (t.has("localSheetId"))
+                def body:string (p.readTextUntilEnd("definedName"))
+                if (((indexOf dn "_xlnm.") != 0) && (local == false) && ((strlen dn) > 0)) {
+                    push nameKeys dn
+                    push nameRefs body
+                }
+                continue
             }
             if ((t.name == "sheet") && (t.isEnd == false)) {
                 def info:XlsxSheetInfo (new XlsxSheetInfo)

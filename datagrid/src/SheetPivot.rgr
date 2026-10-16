@@ -1,0 +1,720 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; SheetPivot.rgr — a PivotTable: a source range summarised onto a sheet.
+; ==============================================================================
+;
+; The description (source, fields, layout) is kept on the workbook; the result
+; is written into ordinary cells, so it saves, prints and charts like any other
+; range. Refresh recomputes it from the source and writes it again.
+;
+;   rows      row fields, outer first (two are enough for subtotals)
+;   colField  one column field, or ""
+;   values    value fields, each with its aggregate in `aggs`
+;             ("sum" "count" "average" "max" "min")
+;   filter    one report filter: `filterField` = `filterValue`
+;
+; `layout` is "compact" (one Row Labels column, inner items indented) or
+; "tabular" (a column per row field). Calculated fields are written as
+; formulas over the value columns of the same output row.
+; ==============================================================================
+
+Import "SpreadsheetModel.rgr"
+Import "ConditionalFormat.rgr"
+Import "DateSerial.rgr"
+
+class SheetPivot {
+    def name:string "PivotTable1"
+    def srcSheet:string ""
+    def r0:int 0
+    def c0:int 0
+    def r1:int 0
+    def c1:int 0
+    def outSheet:string ""
+    def outRow:int 2
+    def outCol:int 0
+    def rows:[string]
+    def colField:string ""
+    def values:[string]
+    def aggs:[string]
+    def filterField:string ""
+    def filterValue:string ""
+    def grandTotals:boolean true
+    def subtotals:boolean true
+    def layout:string "compact"
+    ; "" keeps labels in order; "asc" / "desc" orders rows by the first value.
+    def sortDir:string ""
+    ; Grouping of the first row field: "" | "year" | "month" | "bin:<size>".
+    def groupMode:string ""
+    def collapsed:boolean false
+    def calcNames:[string]
+    def calcExprs:[string]
+    def styleName:string "PivotStyleLight16"
+    ; The extent last written, so a refresh can clear it first.
+    def lastRows:int 0
+    def lastCols:int 0
+    ; The output, row-major, `outW` wide. A cell starting "=" is a formula.
+    def out:[string]
+    def outW:int 0
+    ; Which output rows are headers / totals (for the style).
+    def boldRows:[int]
+
+    Constructor () {
+    }
+
+    fn fieldNames:[string] (src:SpreadsheetModel) {
+        def names:[string]
+        def c:int c0
+        while (c <= c1) {
+            push names (src.getDisplay(r0 c))
+            c = (c + 1)
+        }
+        return names
+    }
+
+    fn fieldCol:int (src:SpreadsheetModel field:string) {
+        def c:int c0
+        while (c <= c1) {
+            if ((src.getDisplay(r0 c)) == field) {
+                return c
+            }
+            c = (c + 1)
+        }
+        return -1
+    }
+
+    fn hasRowField:boolean (field:string) {
+        def i:int 0
+        while (i < (array_length rows)) {
+            if ((itemAt rows i) == field) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    fn valueIndex:int (field:string) {
+        def i:int 0
+        while (i < (array_length values)) {
+            if ((itemAt values i) == field) {
+                return i
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
+    fn removeField:boolean (field:string) {
+        def found:boolean false
+        def keepR:[string]
+        def i:int 0
+        while (i < (array_length rows)) {
+            if ((itemAt rows i) == field) {
+                found = true
+            } {
+                push keepR (itemAt rows i)
+            }
+            i = (i + 1)
+        }
+        rows = keepR
+        def keepV:[string]
+        def keepA:[string]
+        i = 0
+        while (i < (array_length values)) {
+            if ((itemAt values i) == field) {
+                found = true
+            } {
+                push keepV (itemAt values i)
+                push keepA (itemAt aggs i)
+            }
+            i = (i + 1)
+        }
+        values = keepV
+        aggs = keepA
+        if (colField == field) {
+            colField = ""
+            found = true
+        }
+        if (filterField == field) {
+            filterField = ""
+            filterValue = ""
+            found = true
+        }
+        return found
+    }
+
+    ; Put `field` in `area` ("rows" "columns" "values" "filters"), out of
+    ; wherever it was.
+    fn placeField:void (field:string area:string) {
+        def ignored:boolean (this.removeField(field))
+        if (area == "rows") {
+            push rows field
+        }
+        if (area == "columns") {
+            colField = field
+        }
+        if (area == "values") {
+            push values field
+            push aggs "sum"
+        }
+        if (area == "filters") {
+            filterField = field
+        }
+    }
+
+    sfn aggLabel:string (agg:string) {
+        if (agg == "count") {
+            return "Count"
+        }
+        if (agg == "average") {
+            return "Average"
+        }
+        if (agg == "max") {
+            return "Max"
+        }
+        if (agg == "min") {
+            return "Min"
+        }
+        return "Sum"
+    }
+
+    ; The row-field text of one source cell, grouped when asked.
+    fn labelOf:string (src:SpreadsheetModel r:int c:int first:boolean) {
+        def txt:string (src.getDisplay(r c))
+        if ((first == false) || ((strlen groupMode) == 0)) {
+            return txt
+        }
+        if ((ConditionalFormat.isNumberCell(src r c)) == false) {
+            return txt
+        }
+        def v:double (ConditionalFormat.cellNumber(src r c))
+        if ((groupMode == "year") || (groupMode == "month")) {
+            def ymd:[int]
+            DateSerial.toYMD(v ymd)
+            if ((array_length ymd) < 2) {
+                return txt
+            }
+            if (groupMode == "year") {
+                return (to_string (itemAt ymd 0))
+            }
+            def m:int (itemAt ymd 1)
+            def mm:string (to_string m)
+            if (m < 10) {
+                mm = ("0" + mm)
+            }
+            return (((to_string (itemAt ymd 0)) + "-") + mm)
+        }
+        if ((indexOf groupMode "bin:") == 0) {
+            def size:double (?? (to_double (substring groupMode 4 (strlen groupMode))) 10.0)
+            if (size <= 0.0) {
+                return txt
+            }
+            def lo:double ((to_double (floor (v / size))) * size)
+            return (((SheetPivot.num(lo)) + "-") + (SheetPivot.num(((lo + size) - 1.0))))
+        }
+        return txt
+    }
+
+    sfn num:string (v:double) {
+        def i:int (to_int v)
+        if ((to_double i) == v) {
+            return (to_string i)
+        }
+        def rounded:double ((to_double (to_int ((v * 10000.0) + 0.5))) / 10000.0)
+        if (v < 0.0) {
+            rounded = ((to_double (to_int ((v * 10000.0) - 0.5))) / 10000.0)
+        }
+        return (to_string rounded)
+    }
+
+    sfn addUnique:void (list:[string] v:string) {
+        def i:int 0
+        while (i < (array_length list)) {
+            if ((itemAt list i) == v) {
+                return
+            }
+            i = (i + 1)
+        }
+        push list v
+    }
+
+    ; Text order, with numbers before words and in numeric order.
+    sfn lessThan:boolean (a:string b:string) {
+        def na@(optional):double (to_double a)
+        def nb@(optional):double (to_double b)
+        if ((!null? na) && (!null? nb)) {
+            return ((unwrap na) < (unwrap nb))
+        }
+        if (!null? na) {
+            return true
+        }
+        if (!null? nb) {
+            return false
+        }
+        def la:string (to_lowercase a)
+        def lb:string (to_lowercase b)
+        def n:int (strlen la)
+        if ((strlen lb) < n) {
+            n = (strlen lb)
+        }
+        def i:int 0
+        while (i < n) {
+            def ca:int (charAt la i)
+            def cb:int (charAt lb i)
+            if (ca != cb) {
+                return (ca < cb)
+            }
+            i = (i + 1)
+        }
+        return ((strlen la) < (strlen lb))
+    }
+
+    sfn sortTexts:void (list:[string]) {
+        def n:int (array_length list)
+        def i:int 1
+        while (i < n) {
+            def v:string (itemAt list i)
+            def j:int (i - 1)
+            def moving:boolean true
+            while ((j >= 0) && moving) {
+                if (SheetPivot.lessThan(v (itemAt list j))) {
+                    set_at list (j + 1) (itemAt list j)
+                    j = (j - 1)
+                } {
+                    moving = false
+                }
+            }
+            set_at list (j + 1) v
+            i = (i + 1)
+        }
+    }
+
+    ; --- the aggregation ------------------------------------------------------
+    def accSum:[string:double]
+    def accCnt:[string:double]
+    def accMin:[string:double]
+    def accMax:[string:double]
+
+    fn accumulate:void (key:string v:double isNum:boolean) {
+        def cnt:double 0.0
+        if (has accCnt key) {
+            cnt = (unwrap (get accCnt key))
+        }
+        set accCnt key (cnt + 1.0)
+        if (isNum == false) {
+            return
+        }
+        def s:double 0.0
+        if (has accSum key) {
+            s = (unwrap (get accSum key))
+        }
+        set accSum key (s + v)
+        if (has accMin key) {
+            if (v < (unwrap (get accMin key))) {
+                set accMin key v
+            }
+        } {
+            set accMin key v
+        }
+        if (has accMax key) {
+            if (v > (unwrap (get accMax key))) {
+                set accMax key v
+            }
+        } {
+            set accMax key v
+        }
+    }
+
+    fn result:string (key:string agg:string) {
+        if ((has accCnt key) == false) {
+            return ""
+        }
+        def cnt:double (unwrap (get accCnt key))
+        if (agg == "count") {
+            return (SheetPivot.num(cnt))
+        }
+        if ((has accSum key) == false) {
+            return "0"
+        }
+        def s:double (unwrap (get accSum key))
+        if (agg == "average") {
+            return (SheetPivot.num((s / cnt)))
+        }
+        if (agg == "max") {
+            return (SheetPivot.num((unwrap (get accMax key))))
+        }
+        if (agg == "min") {
+            return (SheetPivot.num((unwrap (get accMin key))))
+        }
+        return (SheetPivot.num(s))
+    }
+
+    sfn sep:string () {
+        return "~^~"
+    }
+
+    ; Every source row that passes the filter adds its values under its row
+    ; key, its outer key (for subtotals), its column key and the grand total.
+    fn compute:void (src:SpreadsheetModel) {
+        def e1:[string:double]
+        accSum = e1
+        def e2:[string:double]
+        accCnt = e2
+        def e3:[string:double]
+        accMin = e3
+        def e4:[string:double]
+        accMax = e4
+        def emptyOut:[string]
+        out = emptyOut
+        def emptyBold:[int]
+        boldRows = emptyBold
+        def S:string (SheetPivot.sep())
+        def rowCols:[int]
+        def i:int 0
+        while (i < (array_length rows)) {
+            push rowCols (this.fieldCol(src (itemAt rows i)))
+            i = (i + 1)
+        }
+        def valCols:[int]
+        i = 0
+        while (i < (array_length values)) {
+            push valCols (this.fieldCol(src (itemAt values i)))
+            i = (i + 1)
+        }
+        def colCol:int -1
+        if ((strlen colField) > 0) {
+            colCol = (this.fieldCol(src colField))
+        }
+        def filterCol:int -1
+        if ((strlen filterField) > 0) {
+            filterCol = (this.fieldCol(src filterField))
+        }
+        def outerKeys:[string]
+        def innerKeys:[string:string]
+        def colKeys:[string]
+        def r:int (r0 + 1)
+        while (r <= r1) {
+            def keep:boolean true
+            if ((filterCol >= 0) && ((strlen filterValue) > 0)) {
+                if ((src.getDisplay(r filterCol)) != filterValue) {
+                    keep = false
+                }
+            }
+            if keep {
+                def outer:string ""
+                def inner:string ""
+                if ((array_length rowCols) > 0) {
+                    outer = (this.labelOf(src r (itemAt rowCols 0) true))
+                }
+                if ((array_length rowCols) > 1) {
+                    inner = (this.labelOf(src r (itemAt rowCols 1) false))
+                }
+                SheetPivot.addUnique(outerKeys outer)
+                if ((array_length rowCols) > 1) {
+                    def have:string ""
+                    if (has innerKeys outer) {
+                        have = (unwrap (get innerKeys outer))
+                    }
+                    if ((indexOf ((S + have) + S) ((S + inner) + S)) < 0) {
+                        set innerKeys outer ((have + inner) + S)
+                    }
+                }
+                def ck:string ""
+                if (colCol >= 0) {
+                    ck = (src.getDisplay(r colCol))
+                    SheetPivot.addUnique(colKeys ck)
+                }
+                def vi:int 0
+                while (vi < (array_length valCols)) {
+                    def vc:int (itemAt valCols vi)
+                    if (vc >= 0) {
+                        def isNum:boolean (ConditionalFormat.isNumberCell(src r vc))
+                        def v:double (ConditionalFormat.cellNumber(src r vc))
+                        def nonEmpty:boolean ((strlen (src.getCell(r vc))) > 0)
+                        if nonEmpty {
+                            def tail:string ((S + ck) + (S + (to_string vi)))
+                            this.accumulate((((outer + S) + inner) + tail) v isNum)
+                            this.accumulate((((outer + S) + "*") + tail) v isNum)
+                            this.accumulate((("*" + S) + ("*" + tail)) v isNum)
+                            ; Grand total column: every column key at once.
+                            def tailAll:string ((S + "*") + (S + (to_string vi)))
+                            this.accumulate((((outer + S) + inner) + tailAll) v isNum)
+                            this.accumulate((((outer + S) + "*") + tailAll) v isNum)
+                            this.accumulate((("*" + S) + ("*" + tailAll)) v isNum)
+                        }
+                    }
+                    vi = (vi + 1)
+                }
+            }
+            r = (r + 1)
+        }
+        SheetPivot.sortTexts(colKeys)
+        if ((strlen sortDir) > 0) {
+            this.sortByValue(outerKeys)
+        } {
+            SheetPivot.sortTexts(outerKeys)
+        }
+        ; --- the header row --------------------------------------------------
+        def tabular:boolean ((layout == "tabular") && ((array_length rows) > 1))
+        def labelCols:int 1
+        if tabular {
+            labelCols = (array_length rows)
+        }
+        def colSpec:[string]
+        if (colCol >= 0) {
+            def ci:int 0
+            while (ci < (array_length colKeys)) {
+                push colSpec (itemAt colKeys ci)
+                ci = (ci + 1)
+            }
+            if grandTotals {
+                push colSpec "*"
+            }
+        } {
+            push colSpec ""
+        }
+        def nv:int (array_length values)
+        outW = ((labelCols + ((array_length colSpec) * nv)) + (array_length calcNames))
+        def head:[string]
+        if tabular {
+            def hi:int 0
+            while (hi < (array_length rows)) {
+                push head (itemAt rows hi)
+                hi = (hi + 1)
+            }
+        } {
+            if ((array_length rows) == 1) {
+                push head (itemAt rows 0)
+            } {
+                push head "Row Labels"
+            }
+        }
+        def si:int 0
+        while (si < (array_length colSpec)) {
+            def ck2:string (itemAt colSpec si)
+            def vj:int 0
+            while (vj < nv) {
+                def vname:string (((SheetPivot.aggLabel((itemAt aggs vj))) + " of ") + (itemAt values vj))
+                if (colCol >= 0) {
+                    def cname:string ck2
+                    if (ck2 == "*") {
+                        cname = "Grand Total"
+                    }
+                    if (nv > 1) {
+                        cname = ((cname + " - ") + vname)
+                    }
+                    push head cname
+                } {
+                    push head vname
+                }
+                vj = (vj + 1)
+            }
+            si = (si + 1)
+        }
+        def ki:int 0
+        while (ki < (array_length calcNames)) {
+            push head (itemAt calcNames ki)
+            ki = (ki + 1)
+        }
+        this.pushRow(head)
+        push boldRows 0
+        ; --- body ---------------------------------------------------------------
+        def oi:int 0
+        while (oi < (array_length outerKeys)) {
+            def ok:string (itemAt outerKeys oi)
+            if ((array_length rows) > 1) {
+                def inners:[string]
+                if (has innerKeys ok) {
+                    def joined:string (unwrap (get innerKeys ok))
+                    def pieces:[string] (strsplit joined S)
+                    def pi:int 0
+                    while (pi < (array_length pieces)) {
+                        if ((strlen (itemAt pieces pi)) > 0) {
+                            push inners (itemAt pieces pi)
+                        }
+                        pi = (pi + 1)
+                    }
+                }
+                SheetPivot.sortTexts(inners)
+                if (subtotals || collapsed) {
+                    this.valueRow(ok "*" ok "" labelCols colSpec true)
+                } {
+                    if (tabular == false) {
+                        def label:[string]
+                        push label ok
+                        this.pushRow(label)
+                    }
+                }
+                if (collapsed == false) {
+                    def ii:int 0
+                    while (ii < (array_length inners)) {
+                        def ik:string (itemAt inners ii)
+                        def lab:string ("   " + ik)
+                        if tabular {
+                            lab = ik
+                        }
+                        def outerLab:string ""
+                        if (tabular && ((ii == 0) && ((subtotals == false) || collapsed))) {
+                            outerLab = ok
+                        }
+                        this.valueRow(ok ik outerLab lab labelCols colSpec false)
+                        ii = (ii + 1)
+                    }
+                }
+            } {
+                this.valueRow(ok "" ok "" labelCols colSpec false)
+            }
+            oi = (oi + 1)
+        }
+        if grandTotals {
+            this.valueRow("*" "*" "Grand Total" "" labelCols colSpec true)
+        }
+    }
+
+    fn pushRow:void (cells:[string]) {
+        def i:int 0
+        while (i < outW) {
+            if (i < (array_length cells)) {
+                push out (itemAt cells i)
+            } {
+                push out ""
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; One output row. In compact layout the label is `outerLab` or `innerLab`;
+    ; in tabular each row field has its own column.
+    fn valueRow:void (outer:string inner:string outerLab:string innerLab:string labelCols:int colSpec:[string] bold:boolean) {
+        def S:string (SheetPivot.sep())
+        def cells:[string]
+        if (labelCols == 1) {
+            if ((strlen innerLab) > 0) {
+                push cells innerLab
+            } {
+                push cells outerLab
+            }
+        } {
+            push cells outerLab
+            def li:int 1
+            while (li < labelCols) {
+                if (li == 1) {
+                    push cells innerLab
+                } {
+                    push cells ""
+                }
+                li = (li + 1)
+            }
+        }
+        def nv:int (array_length values)
+        def si:int 0
+        while (si < (array_length colSpec)) {
+            def ck:string (itemAt colSpec si)
+            def vj:int 0
+            while (vj < nv) {
+                def key:string (((outer + S) + inner) + ((S + ck) + (S + (to_string vj))))
+                push cells (this.result(key (itemAt aggs vj)))
+                vj = (vj + 1)
+            }
+            si = (si + 1)
+        }
+        if (bold) {
+            push boldRows (idiv (array_length out) outW)
+        }
+        ; Calculated fields: the expression with each value field's name
+        ; replaced by that value's cell in this row ({col} placeholders, made
+        ; into references when the pivot is written).
+        def ki:int 0
+        while (ki < (array_length calcExprs)) {
+            def expr:string (itemAt calcExprs ki)
+            def vk:int 0
+            while (vk < nv) {
+                def token:string (itemAt values vk)
+                expr = (SheetPivot.replaceAll(expr token ("{" + ((to_string (labelCols + vk)) + "}"))))
+                vk = (vk + 1)
+            }
+            push cells ("=" + expr)
+            ki = (ki + 1)
+        }
+        this.pushRow(cells)
+    }
+
+    sfn replaceAll:string (s:string find:string repl:string) {
+        if ((strlen find) == 0) {
+            return s
+        }
+        def outS:string ""
+        def i:int 0
+        def n:int (strlen s)
+        def fl:int (strlen find)
+        while (i < n) {
+            if (((i + fl) <= n) && ((substring s i (i + fl)) == find)) {
+                outS = (outS + repl)
+                i = (i + fl)
+            } {
+                outS = (outS + (substring s i (i + 1)))
+                i = (i + 1)
+            }
+        }
+        return outS
+    }
+
+    ; Rows by their total of the first value, as Sort Largest to Smallest does.
+    fn sortByValue:void (keys:[string]) {
+        def S:string (SheetPivot.sep())
+        def n:int (array_length keys)
+        def totals:[double]
+        def i:int 0
+        while (i < n) {
+            def k:string ((((itemAt keys i) + S) + "*") + ((S + "*") + (S + "0")))
+            def t:double 0.0
+            if (has accSum k) {
+                t = (unwrap (get accSum k))
+            }
+            push totals t
+            i = (i + 1)
+        }
+        i = 1
+        while (i < n) {
+            def kv:string (itemAt keys i)
+            def tv:double (itemAt totals i)
+            def j:int (i - 1)
+            def moving:boolean true
+            while ((j >= 0) && moving) {
+                def before:boolean (tv < (itemAt totals j))
+                if (sortDir == "desc") {
+                    before = (tv > (itemAt totals j))
+                }
+                if before {
+                    set_at keys (j + 1) (itemAt keys j)
+                    set_at totals (j + 1) (itemAt totals j)
+                    j = (j - 1)
+                } {
+                    moving = false
+                }
+            }
+            set_at keys (j + 1) kv
+            set_at totals (j + 1) tv
+            i = (i + 1)
+        }
+    }
+
+    fn outRows:int () {
+        if (outW == 0) {
+            return 0
+        }
+        return (idiv (array_length out) outW)
+    }
+
+    fn cellAt:string (r:int c:int) {
+        return (itemAt out ((r * outW) + c))
+    }
+
+    fn covers:boolean (r:int c:int) {
+        if ((r < outRow) || (c < outCol)) {
+            return false
+        }
+        return ((r < (outRow + lastRows)) && (c < (outCol + lastCols)))
+    }
+}

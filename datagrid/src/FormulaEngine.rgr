@@ -1291,6 +1291,99 @@ class FormulaParser {
         return broke
     }
 
+    ; --- Insert / Delete Cells: a block shifts ---------------------------------
+    ; Cells shifted down (or up) inside columns c0..c1 from row `at`, by
+    ; `delta` rows; with `columns`, cells shifted right (left) inside rows
+    ; c0..c1 from column `at`. A reference moves with its cells when it lies
+    ; wholly inside the band; one into cells a delete removed breaks.
+    sfn shiftBlockNode:boolean (n:FormulaNode sheetName:string columns:boolean at:int lo:int hi:int delta:int allowUnprefixed:boolean) {
+        def broke:boolean false
+        if ((n.kind == 3) || (n.kind == 4)) {
+            def applies:boolean false
+            if ((strlen n.sheet) == 0) {
+                applies = allowUnprefixed
+            } {
+                if (n.sheet == sheetName) {
+                    applies = true
+                }
+            }
+            def a0:int n.col
+            def a1:int n.col
+            def m0:int n.row
+            def m1:int n.row
+            if (n.kind == 4) {
+                a1 = n.col2
+                m1 = n.row2
+            }
+            if columns {
+                a0 = n.row
+                a1 = n.row
+                m0 = n.col
+                m1 = n.col
+                if (n.kind == 4) {
+                    a1 = n.row2
+                    m1 = n.col2
+                }
+            }
+            if (applies && (a0 >= lo) && (a1 <= hi)) {
+                if (delta < 0) {
+                    ; The removed cells are at .. at-delta-1.
+                    def gone0:int at
+                    def gone1:int ((at - delta) - 1)
+                    if ((m0 >= gone0) && (m1 <= gone1)) {
+                        broke = true
+                    }
+                }
+                if (broke == false) {
+                    def n0:int m0
+                    def n1:int m1
+                    if (m0 >= at) {
+                        n0 = (m0 + delta)
+                    }
+                    if (m1 >= at) {
+                        n1 = (m1 + delta)
+                    }
+                    if (n0 < at) {
+                        if (m0 >= at) {
+                            n0 = at
+                        }
+                    }
+                    if columns {
+                        n.col = n0
+                        if (n.kind == 4) {
+                            n.col2 = n1
+                        }
+                    } {
+                        n.row = n0
+                        if (n.kind == 4) {
+                            n.row2 = n1
+                        }
+                    }
+                }
+            }
+        }
+        def i:int 0
+        while (i < (array_length n.kids)) {
+            if (FormulaParser.shiftBlockNode((itemAt n.kids i) sheetName columns at lo hi delta allowUnprefixed)) {
+                broke = true
+            }
+            i = (i + 1)
+        }
+        return broke
+    }
+
+    sfn shiftBlock:string (expr:string sheetName:string columns:boolean at:int lo:int hi:int delta:int allowUnprefixed:boolean) {
+        def p:FormulaParser (new FormulaParser)
+        def ast:FormulaNode (p.parse(expr))
+        if (p.ok == false) {
+            return ""
+        }
+        if (FormulaParser.shiftBlockNode(ast sheetName columns at lo hi delta allowUnprefixed)) {
+            return "#REF!"
+        }
+        return (FormulaParser.serializeNode(ast))
+    }
+
     ; --- renaming a sheet -----------------------------------------------------
     ; A cross-sheet reference names its sheet in TEXT — `Costs!B4`, or
     ; `'Q3 Forecast'!B4` when the name needs quoting — so renaming a sheet and
@@ -1597,6 +1690,7 @@ class FormulaEngine {
     def depsOf:[string:string]
     ; reverse: cellKey → dependents joined
     def usedBy:[string:string]
+    def manualCalc:boolean false
     def calcValues:[string:string]
     def calcStatus:[string:string]
     def lastError:string ""
@@ -1605,6 +1699,7 @@ class FormulaEngine {
     ; date — a spreadsheet that quietly disagrees with the calendar is worse
     ; than one that admits it does not know.
     def todaySerial:double 0.0
+    def subtotalDepth:int 0
     ; Instrumentation for workbook-scale recalc demos / benches.
     def dirtyMarked:int 0
     def recalculated:int 0
@@ -1687,10 +1782,131 @@ class FormulaEngine {
         this.recalcAll()
     }
 
+    ; Defined names, written out: each identifier that is a name (and not a
+    ; function, a sheet prefix or a cell) becomes what it refers to. Done on
+    ; the text so every later step reads plain references.
+    fn expandNames:string (expr:string) {
+        def out:string ""
+        def i:int 0
+        def n:int (strlen expr)
+        def inStr:boolean false
+        def inQuote:boolean false
+        def depth:int 0
+        while (i < n) {
+            def ch:int (charAt expr i)
+            ; Structured references (`Tbl[[#Totals],[Qty]]`) name columns,
+            ; not defined names: copied as they are.
+            if ((inStr == false) && ((inQuote == false) && (ch == 91))) {
+                depth = (depth + 1)
+            }
+            if ((inStr == false) && ((inQuote == false) && ((ch == 93) && (depth > 0)))) {
+                depth = (depth - 1)
+                out = (out + (substring expr i (i + 1)))
+                i = (i + 1)
+                continue
+            }
+            if (depth > 0) {
+                out = (out + (substring expr i (i + 1)))
+                i = (i + 1)
+                continue
+            }
+            if ((ch == 39) && (inStr == false)) {
+                inQuote = (inQuote == false)
+                out = (out + (substring expr i (i + 1)))
+                i = (i + 1)
+                continue
+            }
+            if (inQuote) {
+                out = (out + (substring expr i (i + 1)))
+                i = (i + 1)
+                continue
+            }
+            if (ch == 34) {
+                inStr = (inStr == false)
+                out = (out + (substring expr i (i + 1)))
+                i = (i + 1)
+                continue
+            }
+            def startsWord:boolean (((ch >= 65) && (ch <= 90)) || (((ch >= 97) && (ch <= 122)) || (ch == 95)))
+            if (inStr || (startsWord == false)) {
+                out = (out + (substring expr i (i + 1)))
+                i = (i + 1)
+                continue
+            }
+            def j:int i
+            while (j < n) {
+                def cj:int (charAt expr j)
+                def wordCh:boolean (((cj >= 65) && (cj <= 90)) || (((cj >= 97) && (cj <= 122)) || (((cj >= 48) && (cj <= 57)) || ((cj == 95) || ((cj == 46) || (cj == 36))))))
+                if (wordCh == false) {
+                    break
+                }
+                j = (j + 1)
+            }
+            def word:string (substring expr i j)
+            def nextCh:int 0
+            if (j < n) {
+                nextCh = (charAt expr j)
+            }
+            def prevCh:int 0
+            if (i > 0) {
+                prevCh = (charAt expr (i - 1))
+            }
+            def ref:string ""
+            def free:boolean ((nextCh != 40) && ((nextCh != 33) && ((nextCh != 91) && ((prevCh != 33) && ((nextCh != 58) && (prevCh != 58))))))
+            if free {
+                ref = (book.nameRef(word))
+            }
+            if ((strlen ref) > 0) {
+                out = (out + ref)
+            } {
+                ; A word that is neither a name nor a cell is #NAME?, as in
+                ; Excel; an unknown function call says the same.
+                if (free && ((FormulaEngine.looksLikeCell(word)) == false)) {
+                    def up:string (to_uppercase word)
+                    if ((up == "TRUE") || (up == "FALSE")) {
+                        out = (out + word)
+                    } {
+                        out = (out + "NAME.ERROR()")
+                    }
+                } {
+                    out = (out + word)
+                }
+            }
+            i = j
+        }
+        return out
+    }
+
+    ; A1, $B$7, XFD1048576: one to three letters then digits.
+    sfn looksLikeCell:boolean (word:string) {
+        def i:int 0
+        def n:int (strlen word)
+        if ((i < n) && ((charAt word i) == 36)) {
+            i = (i + 1)
+        }
+        def letters:int 0
+        while ((i < n) && ((((charAt word i) >= 65) && ((charAt word i) <= 90)) || (((charAt word i) >= 97) && ((charAt word i) <= 122)))) {
+            letters = (letters + 1)
+            i = (i + 1)
+        }
+        if ((letters == 0) || (letters > 3)) {
+            return false
+        }
+        if ((i < n) && ((charAt word i) == 36)) {
+            i = (i + 1)
+        }
+        def digits:int 0
+        while ((i < n) && (((charAt word i) >= 48) && ((charAt word i) <= 57))) {
+            digits = (digits + 1)
+            i = (i + 1)
+        }
+        return ((digits > 0) && (i == n))
+    }
+
     fn registerFormula:void (sheetIdx:int row:int col:int expr:string) {
         def key:string (this.cellKey(sheetIdx row col))
         this.pruneDeps(key)
-        def ast:FormulaNode (parser.parse(expr))
+        def ast:FormulaNode (parser.parse((this.expandNames(expr))))
         def depList:[string]
         ; `[#This Row]` resolves against the cell holding the formula, and
         ; dependencies are worked out here rather than at evaluation time, so
@@ -2002,6 +2218,10 @@ class FormulaEngine {
     ; The walk carries its own stack. Recursion would have been shorter and a
     ; four-hundred-deep sheet is a perfectly ordinary thing to open.
     fn recalcDirty:void () {
+        ; Formulas > Calculation Options > Manual: edits wait for F9.
+        if manualCalc {
+            return
+        }
         def si:int 0
         def sn:int (book.sheetCount())
         while (si < sn) {
@@ -2144,7 +2364,7 @@ class FormulaEngine {
             set calcStatus key "cached"
             return
         }
-        def ast:FormulaNode (parser.parse(expr))
+        def ast:FormulaNode (parser.parse((this.expandNames(expr))))
         if (parser.ok == false) {
             ; keep cached XLSX value
             set calcStatus key "unsupported"
@@ -2419,6 +2639,15 @@ class FormulaEngine {
         return (FormulaValue.blank())
     }
 
+    fn isSubtotalCell:boolean (si:int row:int col:int) {
+        if ((si < 0) || (si >= (book.sheetCount()))) {
+            return false
+        }
+        def sheet:SpreadsheetModel (book.sheetAt(si))
+        def f:string (FormulaFunctions.upper((sheet.getFormula(row col))))
+        return ((indexOf f "SUBTOTAL(") >= 0)
+    }
+
     fn readCell:FormulaValue (sheetName:string sheetIdx:int row:int col:int) {
         def si:int sheetIdx
         if ((strlen sheetName) > 0) {
@@ -2680,10 +2909,19 @@ class FormulaEngine {
         def args:[FormulaValue]
         def i:int 0
         def kn:int (array_length n.kids)
+        ; SUBTOTAL leaves out the SUBTOTALs inside its ranges, as Excel's
+        ; does, so a grand total over grouped subtotals counts each row once.
+        def isSub:boolean ((FormulaFunctions.upper(name)) == "SUBTOTAL")
+        if isSub {
+            subtotalDepth = (subtotalDepth + 1)
+        }
         while (i < kn) {
             def arg:FormulaNode (itemAt n.kids i)
             push args (this.evalNode(arg sheetIdx))
             i = (i + 1)
+        }
+        if isSub {
+            subtotalDepth = (subtotalDepth - 1)
         }
         ; TODAY and NOW are not pure functions: they read a clock, and this
         ; layer has none. The HOST sets one — `setToday` — which also makes
@@ -2742,7 +2980,11 @@ class FormulaEngine {
         while (r <= r1) {
             def c:int c0
             while (c <= c1) {
-                push items (this.readCell("" si r c))
+                if ((subtotalDepth > 0) && (this.isSubtotalCell(si r c))) {
+                    push items (FormulaValue.blank())
+                } {
+                    push items (this.readCell("" si r c))
+                }
                 c = (c + 1)
             }
             r = (r + 1)

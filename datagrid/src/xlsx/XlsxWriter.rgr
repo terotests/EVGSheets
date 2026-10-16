@@ -295,6 +295,9 @@ class XlsxWriter {
         if st.strike {
             str_append x "<strike/>"
         }
+        if ((strlen st.vertAlign) > 0) {
+            str_append x ("<vertAlign val=\"" + st.vertAlign + "\"/>")
+        }
         def col:string (XlsxWriter.argb(st.textRgb))
         if ((strlen col) > 0) {
             str_append x ("<color rgb=\"" + col + "\"/>")
@@ -641,6 +644,15 @@ class XlsxWriter {
         if (m.showGridlines == false) {
             str_append out " showGridLines=\"0\""
         }
+        if (m.viewMode == "pageBreak") {
+            str_append out " view=\"pageBreakPreview\""
+        }
+        if (m.viewMode == "pageLayout") {
+            str_append out " view=\"pageLayout\""
+        }
+        if (m.zoom != 1.0) {
+            str_append out (" zoomScale=\"" + (to_string (to_int ((m.zoom * 100.0) + 0.5))) + "\"")
+        }
         if (m.showHeadings == false) {
             str_append out " showRowColHeaders=\"0\""
         }
@@ -668,7 +680,7 @@ class XlsxWriter {
         def lastGeomC:int (m.colCount - 1)
         def c:int 0
         while (c <= lastGeomC) {
-            def w:int (m.colWidth(c))
+            def w:int (m.rawColWidth(c))
             def hidden:boolean (m.isColHidden(c))
             if ((w != m.defaultColW) || hidden) {
                 str_append cols ("<col min=\"" + (to_string (c + 1)) + "\" max=\"" + (to_string (c + 1)) + "\" width=\"" + (XlsxWriter.numText((XlsxWriter.pxToColWidth(w)))) + "\" customWidth=\"1\"")
@@ -753,7 +765,7 @@ class XlsxWriter {
                 cc = (cc + 1)
             }
             def rowAttrs:string ""
-            def h:int (m.rowHeight(r))
+            def h:int (m.rawRowHeight(r))
             if (h != m.defaultRowH) {
                 str_append rowAttrs (" ht=\"" + (XlsxWriter.numText((XlsxWriter.pxToRowPoints(h)))) + "\" customHeight=\"1\"")
             }
@@ -996,6 +1008,7 @@ class XlsxWriter {
         str_append out "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
         str_append out "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
         str_append out "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+        str_append out "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>"
         def i:int 0
         while (i < (book.sheetCount())) {
             str_append out ("<Override PartName=\"/xl/worksheets/sheet" + (to_string (i + 1)) + ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>")
@@ -1159,6 +1172,15 @@ class XlsxWriter {
             }
             k = (k + 1)
         }
+        def un:int 0
+        while (un < (array_length book.nameOrder)) {
+            def uname:string (itemAt book.nameOrder un)
+            def uref:string (book.nameRef(uname))
+            if ((strlen uref) > 0) {
+                str_append names ("<definedName name=\"" + (XlsxWriter.esc(uname)) + "\">" + (XlsxWriter.esc(uref)) + "</definedName>")
+            }
+            un = (un + 1)
+        }
         if ((strlen names) > 0) {
             str_append out ("<definedNames>" + names + "</definedNames>")
         }
@@ -1242,6 +1264,9 @@ class XlsxWriter {
         }
         sheetRelBase = 0
         this.packScriptsOver(book z)
+        if (book.propsSet && (pkg.hasPart("docProps/core.xml"))) {
+            this.addOver(z "docProps/core.xml" (XlsxWriter.coreXml(book)))
+        }
 
         ; --- the three places that name parts
         this.addOver(z "xl/_rels/workbook.xml.rels" (this.mergedWorkbookRels(book pkg)))
@@ -1266,6 +1291,27 @@ class XlsxWriter {
         }
         overMode = false
         return true
+    }
+
+    ; docProps/core.xml: the title, subject, author and keywords File › Info
+    ; shows.
+    sfn coreXml:string (book:WorkbookModel) {
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        str_append out "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+        if ((strlen book.propTitle) > 0) {
+            str_append out ("<dc:title>" + (XlsxWriter.esc(book.propTitle)) + "</dc:title>")
+        }
+        if ((strlen book.propSubject) > 0) {
+            str_append out ("<dc:subject>" + (XlsxWriter.esc(book.propSubject)) + "</dc:subject>")
+        }
+        if ((strlen book.propAuthor) > 0) {
+            str_append out ("<dc:creator>" + (XlsxWriter.esc(book.propAuthor)) + "</dc:creator>")
+        }
+        if ((strlen book.propKeywords) > 0) {
+            str_append out ("<cp:keywords>" + (XlsxWriter.esc(book.propKeywords)) + "</cp:keywords>")
+        }
+        str_append out "</cp:coreProperties>"
+        return out
     }
 
     fn addOver:void (z:ZipWriter name:string text:string) {
@@ -1573,7 +1619,8 @@ class XlsxWriter {
             return false
         }
         XlsxWriter.addPart(z "[Content_Types].xml" (this.contentTypesXml(book)))
-        XlsxWriter.addPart(z "_rels/.rels" "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>")
+        XlsxWriter.addPart(z "_rels/.rels" "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>")
+        XlsxWriter.addPart(z "docProps/core.xml" (XlsxWriter.coreXml(book)))
         XlsxWriter.addPart(z "xl/workbook.xml" (this.workbookXml(book)))
         XlsxWriter.addPart(z "xl/_rels/workbook.xml.rels" (this.workbookRelsXml(book)))
         ; Every sheet shares the first sheet's style table, which is how the

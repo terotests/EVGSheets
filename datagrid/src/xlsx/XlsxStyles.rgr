@@ -39,6 +39,7 @@ class XlsxStyles {
     def fontsItalic:[boolean]
     def fontsUnderline:[boolean]
     def fontsStrike:[boolean]
+    def fontsVert:[string]
     def fontsSize:[double]
     def fontsColor:[string]
     def fontsName:[string]
@@ -260,6 +261,7 @@ class XlsxStyles {
         clear fontsItalic
         clear fontsUnderline
         clear fontsStrike
+        clear fontsVert
         clear fontsSize
         clear fontsColor
         clear fontsName
@@ -307,6 +309,7 @@ class XlsxStyles {
                 def italic:boolean false
                 def underline:boolean false
                 def strike:boolean false
+                def vert:string ""
                 ; Absent <sz> means the workbook default, which is font 0 —
                 ; 10pt Arial in a sheet written by Google, 11pt Calibri in one
                 ; written by Excel. Assuming 11 made a 10pt sheet a tenth too
@@ -347,6 +350,12 @@ class XlsxStyles {
                         if ((ft.name == "strike") && (ft.isEnd == false)) {
                             strike = true
                         }
+                        if ((ft.name == "vertAlign") && (ft.isEnd == false)) {
+                            def va:string (ft.attr("val"))
+                            if ((va == "superscript") || (va == "subscript")) {
+                                vert = va
+                            }
+                        }
                         if ((ft.name == "sz") && (ft.isEnd == false)) {
                             def szv:string (ft.attr("val"))
                             if ((strlen szv) > 0) {
@@ -368,6 +377,7 @@ class XlsxStyles {
                 push fontsItalic italic
                 push fontsUnderline underline
                 push fontsStrike strike
+                push fontsVert vert
                 push fontsSize sizePt
                 push fontsColor color
                 push fontsName face
@@ -514,6 +524,9 @@ class XlsxStyles {
                         st.italic = (itemAt fontsItalic fontId)
                         st.underline = (itemAt fontsUnderline fontId)
                         st.strike = (itemAt fontsStrike fontId)
+                        if (fontId < (array_length fontsVert)) {
+                            st.vertAlign = (itemAt fontsVert fontId)
+                        }
                         st.fontSizePt = (itemAt fontsSize fontId)
                         st.textRgb = (itemAt fontsColor fontId)
                         if (fontId < (array_length fontsName)) {

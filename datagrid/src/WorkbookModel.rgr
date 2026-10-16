@@ -33,6 +33,59 @@ class WorkbookModel {
     ; Review > Protect Workbook: sheets cannot be added, removed, renamed,
     ; moved, hidden or shown while this is on.
     def structureProtected:boolean false
+    ; Defined names (Formulas > Name Manager): NAME (upper case) -> what it
+    ; refers to, a reference such as "Sheet1!$B$2:$B$9" or a constant;
+    ; `nameOrder` keeps them as typed, in the order they were made.
+    def names:[string:string]
+    def nameOrder:[string]
+    ; File › Info › Properties (docProps/core.xml). `propsSet` goes up when one
+    ; is edited, so a save over the source rewrites its core part.
+    ; Page Layout › Themes: the theme's name (the colours and fonts it set are
+    ; the app's; this is what the workbook says it uses).
+    def themeName:string "Office"
+    def propTitle:string ""
+    def propSubject:string ""
+    def propAuthor:string ""
+    def propKeywords:string ""
+    def propsSet:boolean false
+
+    fn setName:void (name:string ref:string) {
+        def key:string (to_uppercase name)
+        if ((strlen (this.nameRef(name))) == 0) {
+            push nameOrder name
+        }
+        set names key ref
+    }
+
+    fn nameRef:string (name:string) {
+        def key:string (to_uppercase name)
+        if (has names key) {
+            return (unwrap (get names key))
+        }
+        return ""
+    }
+
+    fn hasName:boolean (name:string) {
+        return ((strlen (this.nameRef(name))) > 0)
+    }
+
+    fn removeName:boolean (name:string) {
+        def key:string (to_uppercase name)
+        if ((strlen (this.nameRef(name))) == 0) {
+            return false
+        }
+        set names key ""
+        def keep:[string]
+        def i:int 0
+        while (i < (array_length nameOrder)) {
+            if ((to_uppercase (itemAt nameOrder i)) != key) {
+                push keep (itemAt nameOrder i)
+            }
+            i = (i + 1)
+        }
+        nameOrder = keep
+        return true
+    }
 
     Constructor () {
     }
@@ -40,6 +93,9 @@ class WorkbookModel {
     fn clear:void () {
         clear sheets
         clear scripts
+        def noNames:[string:string]
+        names = noNames
+        clear nameOrder
         activeIndex = 0
         sourcePath = ""
         sourceBytes = (buffer_alloc 0)

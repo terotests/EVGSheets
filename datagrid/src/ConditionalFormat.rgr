@@ -143,6 +143,126 @@ class ConditionalFormat {
         push outMax mx
     }
 
+    ; The first rule of `kind` covering the cell, or -1.
+    sfn ruleIndexOf:int (model:SpreadsheetModel row:int col:int kind:int) {
+        def i:int 0
+        while (i < (array_length model.cfRules)) {
+            def rule:CfRule (itemAt model.cfRules i)
+            if ((rule.kind == kind) && (ConditionalFormat.inRange(rule row col))) {
+                return i
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
+    sfn isNumberCell:boolean (model:SpreadsheetModel row:int col:int) {
+        def raw:string (trim (model.getCell(row col)))
+        if ((strlen raw) == 0) {
+            return false
+        }
+        def p@(optional):double (to_double raw)
+        return (!null? p)
+    }
+
+    ; Data bar length as a share of the cell (0.1 .. 1), or -1 when no bar.
+    ; Excel's default: the smallest value gets a stub, the largest the cell.
+    sfn barFraction:double (model:SpreadsheetModel row:int col:int) {
+        def ri:int (ConditionalFormat.ruleIndexOf(model row col 2))
+        if (ri < 0) {
+            return -1.0
+        }
+        if ((ConditionalFormat.isNumberCell(model row col)) == false) {
+            return -1.0
+        }
+        def rule:CfRule (itemAt model.cfRules ri)
+        def mn:[double]
+        def mx:[double]
+        ConditionalFormat.rangeMinMax(model rule mn mx)
+        def lo:double (itemAt mn 0)
+        def hi:double (itemAt mx 0)
+        def v:double (ConditionalFormat.cellNumber(model row col))
+        if (hi <= lo) {
+            return 1.0
+        }
+        return (0.1 + (0.9 * ((v - lo) / (hi - lo))))
+    }
+
+    sfn barColor:string (model:SpreadsheetModel row:int col:int) {
+        def ri:int (ConditionalFormat.ruleIndexOf(model row col 2))
+        if (ri < 0) {
+            return ""
+        }
+        def rule:CfRule (itemAt model.cfRules ri)
+        def c:string rule.color0
+        if ((strlen c) == 8) {
+            c = (substring c 2 8)
+        }
+        if ((strlen c) > 0) {
+            if ((charAt c 0) == 35) {
+                return c
+            }
+        }
+        return ("#" + c)
+    }
+
+    ; Which icon of the set the cell gets: 0 is the lowest level, or -1.
+    sfn iconLevel:int (model:SpreadsheetModel row:int col:int) {
+        def ri:int (ConditionalFormat.ruleIndexOf(model row col 3))
+        if (ri < 0) {
+            return -1
+        }
+        if ((ConditionalFormat.isNumberCell(model row col)) == false) {
+            return -1
+        }
+        def rule:CfRule (itemAt model.cfRules ri)
+        def n:int (ConditionalFormat.iconCount(rule.iconSet))
+        def mn:[double]
+        def mx:[double]
+        ConditionalFormat.rangeMinMax(model rule mn mx)
+        def lo:double (itemAt mn 0)
+        def hi:double (itemAt mx 0)
+        def v:double (ConditionalFormat.cellNumber(model row col))
+        def pct:double 100.0
+        if (hi > lo) {
+            pct = ((100.0 * (v - lo)) / (hi - lo))
+        }
+        def level:int 0
+        def k:int 1
+        while (k < n) {
+            ; Thresholds as read (the first cfvo is the floor, 0); otherwise
+            ; Excel's even split.
+            def bound:double ((100.0 * (to_double k)) / (to_double n))
+            if (k < (array_length rule.thresholds)) {
+                bound = (itemAt rule.thresholds k)
+            }
+            if (pct >= bound) {
+                level = k
+            }
+            k = (k + 1)
+        }
+        return level
+    }
+
+    sfn iconSetAt:string (model:SpreadsheetModel row:int col:int) {
+        def ri:int (ConditionalFormat.ruleIndexOf(model row col 3))
+        if (ri < 0) {
+            return ""
+        }
+        def rule:CfRule (itemAt model.cfRules ri)
+        return rule.iconSet
+    }
+
+    sfn iconCount:int (setName:string) {
+        if ((strlen setName) > 0) {
+            def d:int ((charAt setName 0) - 48)
+            if ((d >= 3) && (d <= 5)) {
+                return d
+            }
+        }
+        return 3
+    }
+
     sfn resolveFill:string (model:SpreadsheetModel row:int col:int) {
         def n:int (array_length model.cfRules)
         def i:int 0

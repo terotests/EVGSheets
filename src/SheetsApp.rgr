@@ -85,6 +85,24 @@ class SheetsApp {
     def sizeMenu:MenuCtl (new MenuCtl)
     def numMenu:MenuCtl (new MenuCtl)
     def borderMenu:MenuCtl (new MenuCtl)
+    ; The Styles galleries: Conditional Formatting, Format as Table, Cell Styles.
+    def cfMenu:MenuCtl (new MenuCtl)
+    def tableMenu:MenuCtl (new MenuCtl)
+    def styleMenu:MenuCtl (new MenuCtl)
+    ; The Quick Access Toolbar in the title bar, and the status bar's zoom slider.
+    def qat:RibbonCtl (new RibbonCtl)
+    def zoomSlider:SliderCtl (new SliderCtl)
+    def sliderDrag:boolean false
+    ; A hover the pointer passed over on its way to an open submenu.
+    def holdHover:string ""
+    ; The first tab the strip shows (see tabWindow).
+    def tabFirst:int 0
+    def holdMs:double 0.0
+    def holdDelayMs:double 400.0
+    ; The contextual tab showing: "tabledesign", "chartdesign" or "".
+    def ctxTab:string ""
+    ; The colour each sheet's tab was drawn with, by sheet index.
+    def tabColours:[string:string]
     def ctxMenu:MenuCtl (new MenuCtl)
     def history:RibbonCtl (new RibbonCtl)
     def textTools:RibbonCtl (new RibbonCtl)
@@ -94,6 +112,16 @@ class SheetsApp {
     def insertTools:RibbonCtl (new RibbonCtl)
     def tabs:TabsCtl (new TabsCtl)
     def sheetTools:RibbonCtl (new RibbonCtl)
+    ; Excel's ribbon: a row of tabs, each with its own groups. Home keeps the
+    ; groups above; the rest are listed in `tabGroups`, `tabOf` naming the tab.
+    def ribTabs:TabsCtl (new TabsCtl)
+    def ribbonTab:string "home"
+    def tabGroups:[RibbonCtl]
+    def tabOf:[string]
+    def ribTabRow:EVGElement (EVGElement.createDiv())
+    ; Footer: scroll through the sheets, and the status bar's view and zoom.
+    def tabNav:RibbonCtl (new RibbonCtl)
+    def viewTools:RibbonCtl (new RibbonCtl)
 
     ; The page's own elements (not controllers).
     def headerEl:EVGElement (EVGElement.createDiv())
@@ -106,6 +134,17 @@ class SheetsApp {
     def statsEl:EVGElement (EVGElement.createSpan())
     def badgeEl:EVGElement (EVGElement.createSpan())
     def ctxHolder:EVGElement (EVGElement.createDiv())
+    ; The task pane at the right of the grid (Insert Function, Name Manager,
+    ; Watch Window, Comments, Selection, PivotTable Fields, Format Chart):
+    ; what it lists is the core's (`paneRows`), and a row pressed is
+    ; `paneChoose`.
+    def paneHolder:EVGElement (EVGElement.createDiv())
+    def paneTitleEl:EVGElement (EVGElement.createSpan())
+    def paneHead:RibbonCtl (new RibbonCtl)
+    def paneSearch:InputCtl (new InputCtl)
+    def paneList:RibbonCtl (new RibbonCtl)
+    def paneBuilt:string ""
+    def paneW:int 280
     ; The dialogs the app draws with EVGUI controllers instead of leaving them
     ; to the core's EVGWindow, moved over one at a time.
     def find:FindDialog (new FindDialog)
@@ -204,10 +243,12 @@ class SheetsApp {
     }
 
     fn addFont:boolean (family:string data:buffer) {
+        grid.app.addScriptFont(family data)
         return (grid.addFont(family data))
     }
 
     fn addFace:boolean (data:buffer) {
+        grid.app.addScriptFont("" data)
         return (grid.addFace(data))
     }
 
@@ -506,7 +547,14 @@ class SheetsApp {
         this.kid(textSub "fsmaller" "Smaller text" "format.size.down" "")
         fm.addSeparator()
         def numSub:UiItem (fm.addSub("number" "Number" false))
+        this.kid(numSub "nf-general" "General" "format.numfmt" "general")
+        this.kid(numSub "nf-number" "Number" "format.numfmt" "number")
         this.kid(numSub "nf-currency" "Currency" "format.numfmt" "currency")
+        this.kid(numSub "nf-accounting" "Accounting" "format.numfmt" "accounting")
+        this.kid(numSub "nf-longdate" "Long Date" "format.numfmt" "longDate")
+        this.kid(numSub "nf-time" "Time" "format.numfmt" "time")
+        this.kid(numSub "nf-fraction" "Fraction" "format.numfmt" "fraction")
+        this.kid(numSub "nf-scientific" "Scientific" "format.numfmt" "scientific")
         this.kid(numSub "nf-percent" "Percent" "format.numfmt" "percent")
         this.kid(numSub "nf-comma" "Thousands separator" "format.numfmt" "comma")
         this.kid(numSub "nf-date" "Date" "format.numfmt" "date")
@@ -645,7 +693,15 @@ class SheetsApp {
         numMenu = (new MenuCtl)
         numMenu.tid = "sx-num"
         numMenu.name = "Number"
+        this.item(numMenu "num-general" "General" "format.numfmt" "general" "")
+        this.item(numMenu "num-number" "Number" "format.numfmt" "number" "")
         this.item(numMenu "num-currency" "Currency" "format.numfmt" "currency" "")
+        this.item(numMenu "num-accounting" "Accounting" "format.numfmt" "accounting" "")
+        this.item(numMenu "num-shortdate" "Short Date" "format.numfmt" "shortDate" "")
+        this.item(numMenu "num-longdate" "Long Date" "format.numfmt" "longDate" "")
+        this.item(numMenu "num-time" "Time" "format.numfmt" "time" "")
+        this.item(numMenu "num-fraction" "Fraction" "format.numfmt" "fraction" "")
+        this.item(numMenu "num-scientific" "Scientific" "format.numfmt" "scientific" "")
         this.item(numMenu "num-percent" "Percent" "format.numfmt" "percent" "")
         this.item(numMenu "num-comma" "Thousands separator" "format.numfmt" "comma" "")
         this.item(numMenu "num-date" "Date" "format.numfmt" "date" "")
@@ -659,6 +715,41 @@ class SheetsApp {
         this.item(borderMenu "b-none" "No borders" "format.border" "none" "")
         borderMenu.addSeparator()
         this.item(borderMenu "b-more" "More borders…" "format.border" "" "")
+
+        cfMenu = (new MenuCtl)
+        cfMenu.tid = "sx-cfgallery"
+        cfMenu.name = "Conditional Formatting"
+        this.item(cfMenu "cf-gt" "Highlight Cells: Greater Than 0" "home.conditionalFormat" "greaterThan:0" "")
+        this.item(cfMenu "cf-lt" "Highlight Cells: Less Than 0" "home.conditionalFormat" "lessThan:0" "")
+        this.item(cfMenu "cf-scale" "Color Scales: Green - Yellow - Red" "home.conditionalFormat" "colorScale" "")
+        this.item(cfMenu "cf-bars" "Data Bars: Blue" "home.conditionalFormat" "dataBars" "")
+        this.item(cfMenu "cf-icons" "Icon Sets: 3 Arrows" "home.conditionalFormat" "iconSet" "")
+        cfMenu.addSeparator()
+        this.item(cfMenu "cf-new" "New Rule…" "format.conditional" "" "")
+        this.item(cfMenu "cf-clear" "Clear Rules" "home.clearRules" "" "")
+
+        tableMenu = (new MenuCtl)
+        tableMenu.tid = "sx-tablegallery"
+        tableMenu.name = "Format as Table"
+        def tstyles:[string] ([] _:string ("TableStyleLight1" "TableStyleLight9" "TableStyleMedium2" "TableStyleMedium4" "TableStyleMedium7" "TableStyleDark1" "TableStyleDark9"))
+        def tnames:[string] ([] _:string ("Light 1" "Light 9" "Medium 2" "Medium 4" "Medium 7" "Dark 1" "Dark 9"))
+        def tsi:int 0
+        while (tsi < (array_length tstyles)) {
+            this.item(tableMenu ("ts-" + (to_string tsi)) (itemAt tnames tsi) "home.formatAsTable" (itemAt tstyles tsi) "")
+            tsi = (tsi + 1)
+        }
+
+        styleMenu = (new MenuCtl)
+        styleMenu.tid = "sx-stylegallery"
+        styleMenu.name = "Cell Styles"
+        def cstyles:[string] ([] _:string ("Normal" "Good" "Bad" "Neutral" "Title" "Heading 1" "Heading 2" "Total" "Note" "Input" "Output" "Calculation"))
+        def csi:int 0
+        while (csi < (array_length cstyles)) {
+            this.item(styleMenu ("cs-" + (to_string csi)) (itemAt cstyles csi) "home.cellStyle" (itemAt cstyles csi) "")
+            csi = (csi + 1)
+        }
+        styleMenu.addSeparator()
+        this.item(styleMenu "cs-new" "New Cell Style…" "home.newCellStyle" "" "")
 
         ; --- the context menu on the sheet ---------------------------------
         ctxMenu = (new MenuCtl)
@@ -706,7 +797,47 @@ class SheetsApp {
         return (r.add(value name icon))
     }
 
+    ; A group on one of the ribbon's tabs.
+    fn grp:RibbonCtl (tab:string tid:string name:string) {
+        def g:RibbonCtl (new RibbonCtl)
+        g.tid = tid
+        g.name = name
+        push tabGroups g
+        push tabOf tab
+        return g
+    }
+
+    ; A button labelled with a word instead of a glyph.
+    fn word:RibbonItem (r:RibbonCtl value:string name:string label:string command:string arg:string) {
+        def it:RibbonItem (this.tool(r value name "" command arg false))
+        it.text = label
+        return it
+    }
+
+    fn groupsOf:[RibbonCtl] (tab:string) {
+        def out:[RibbonCtl]
+        def i:int 0
+        while (i < (array_length tabGroups)) {
+            if ((itemAt tabOf i) == tab) {
+                push out (itemAt tabGroups i)
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
     fn buildRibbon:void () {
+        def noGroups:[RibbonCtl]
+        tabGroups = noGroups
+        def noTabs:[string]
+        tabOf = noTabs
+        qat = (new RibbonCtl)
+        qat.tid = "sx-qat"
+        qat.name = "Quick Access Toolbar"
+        this.tool(qat "qat-save" "Save" (SheetsApp.icon("save")) "file.saveAs" "" false)
+        this.tool(qat "qat-undo" "Undo" (SheetsApp.icon("undo")) "edit.undo" "" false)
+        this.tool(qat "qat-redo" "Redo" (SheetsApp.icon("redo")) "edit.redo" "" false)
+
         history = (new RibbonCtl)
         history.tid = "sx-rb-history"
         history.name = "History"
@@ -716,7 +847,7 @@ class SheetsApp {
 
         textTools = (new RibbonCtl)
         textTools.tid = "sx-rb-text"
-        textTools.name = "Text style"
+        textTools.name = "Font"
         def b:RibbonItem (this.tool(textTools "bold" "Bold" (SheetsApp.icon("bold")) "format.bold" "" true))
         b.shortcut = "Control+B"
         def it:RibbonItem (this.tool(textTools "italic" "Italic" (SheetsApp.icon("italic")) "format.italic" "" true))
@@ -742,7 +873,7 @@ class SheetsApp {
 
         numberTools = (new RibbonCtl)
         numberTools.tid = "sx-rb-number"
-        numberTools.name = "Number format"
+        numberTools.name = "Number"
         this.tool(numberTools "currency" "Currency" (SheetsApp.icon("currency")) "format.numfmt" "currency" true)
         this.tool(numberTools "percent" "Percent" (SheetsApp.icon("percent")) "format.numfmt" "percent" true)
         def dm:RibbonItem (this.tool(numberTools "decmore" "More decimals" "" "format.decimals" "more" false))
@@ -764,21 +895,358 @@ class SheetsApp {
         this.tool(insertTools "chart" "Insert chart" (SheetsApp.icon("chart")) "insert.chart" "" false)
         this.tool(insertTools "link" "Insert link" (SheetsApp.icon("link")) "insert.link" "" false)
         this.tool(insertTools "find" "Find and replace" (SheetsApp.icon("find")) "edit.find" "" false)
+
+        ; --- Home: the rest of Excel's groups --------------------------------
+        def clip:RibbonCtl (this.grp("home" "sx-rb-clip" "Clipboard"))
+        this.word(clip "h-paste" "Paste" "Paste" "sx:paste" "")
+        this.word(clip "h-cut" "Cut" "Cut" "edit.cut" "")
+        this.word(clip "h-copy" "Copy" "Copy" "edit.copy" "")
+        this.word(clip "h-pastesp" "Paste special" "Paste…" "edit.pasteSpecial" "")
+        def fontx:RibbonCtl (this.grp("home" "sx-rb-fontx" "Font size and effects"))
+        this.word(fontx "h-grow" "Increase font size" "A+" "format.size.up" "")
+        this.word(fontx "h-shrink" "Decrease font size" "A-" "format.size.down" "")
+        this.word(fontx "h-dunder" "Double underline" "UU" "home.doubleUnderline" "")
+        this.word(fontx "h-border" "Borders" "▦" "format.border" "")
+        this.word(fontx "h-clearfmt" "Clear formats" "Clr" "format.clear" "")
+        this.word(fontx "h-sup" "Superscript" "x²" "home.superscript" "")
+        this.word(fontx "h-sub" "Subscript" "x₂" "home.subscript" "")
+        def alignx:RibbonCtl (this.grp("home" "sx-rb-alignx" "Vertical alignment and indent"))
+        this.word(alignx "h-top" "Top align" "Top" "format.valign" "top")
+        this.word(alignx "h-middle" "Middle align" "Mid" "format.valign" "middle")
+        this.word(alignx "h-bottom" "Bottom align" "Bot" "format.valign" "bottom")
+        this.word(alignx "h-orient" "Orientation" "ab↗" "home.orientation" "")
+        this.word(alignx "h-indless" "Decrease indent" "⇤" "home.decreaseIndent" "")
+        this.word(alignx "h-indmore" "Increase indent" "⇥" "home.increaseIndent" "")
+        this.word(alignx "h-mergec" "Merge and center" "M&C" "home.mergeCenter" "")
+        this.word(alignx "h-unmerge" "Unmerge cells" "Unm" "home.unmergeCells" "")
+        def numx:RibbonCtl (this.grp("home" "sx-rb-numx" "More number formats"))
+        this.word(numx "h-comma" "Comma style" "," "format.numfmt" "comma")
+        this.word(numx "h-date" "Short date" "Date" "format.numfmt" "date")
+        this.word(numx "h-textfmt" "Text format" "Txt" "format.numfmt" "text")
+        def styles:RibbonCtl (this.grp("home" "sx-rb-styles" "Styles"))
+        this.word(styles "h-cond" "Conditional formatting" "Cond" "format.conditional" "")
+        this.word(styles "h-astable" "Format as table" "Table" "home.formatAsTable" "")
+        this.word(styles "h-cellstyle" "Cell styles" "Styles" "home.cellStyle" "")
+        this.word(styles "h-clearrules" "Clear rules" "NoCF" "home.clearRules" "")
+        this.word(styles "h-newstyle" "New cell style" "New Style" "home.newCellStyle" "")
+        def cells:RibbonCtl (this.grp("home" "sx-rb-cells" "Cells"))
+        this.word(cells "h-inscells" "Insert cells" "Ins" "home.insertCells" "")
+        this.word(cells "h-delcells" "Delete cells" "Del" "home.deleteCells" "")
+        this.word(cells "h-insrow" "Insert sheet rows" "+Row" "insert.row.above" "")
+        this.word(cells "h-delrow" "Delete sheet rows" "-Row" "delete.rows" "")
+        this.word(cells "h-inscol" "Insert sheet columns" "+Col" "insert.column.left" "")
+        this.word(cells "h-delcol" "Delete sheet columns" "-Col" "delete.columns" "")
+        this.word(cells "h-fitcol" "AutoFit column width" "Fit" "format.autofit.column" "")
+        this.word(cells "h-lock" "Lock cell" "Lock" "home.lockCell" "")
+        this.word(cells "h-fmtcells" "Format cells" "Format…" "home.formatCells" "")
+        def editx:RibbonCtl (this.grp("home" "sx-rb-editx" "Editing"))
+        this.word(editx "h-autosum" "AutoSum" "Σ" "formulas.autoSum" "")
+        this.word(editx "h-filldown" "Fill down" "Fill↓" "edit.fillDown" "")
+        this.word(editx "h-fillright" "Fill right" "Fill→" "edit.fillRight" "")
+        this.word(editx "h-series" "Fill series" "Series" "edit.fillSeries" "")
+        this.word(editx "h-clearall" "Clear all" "Clear" "edit.clearAll" "")
+        this.word(editx "h-goto" "Go to" "GoTo" "edit.goTo" "")
+        this.word(editx "h-special" "Go to special" "Special" "edit.goToSpecial" "")
+        this.word(editx "h-flash" "Flash fill" "Flash Fill" "edit.flashFill" "")
+        def addins:RibbonCtl (this.grp("home" "sx-rb-addins" "Add-ins"))
+        this.word(addins "h-addins" "Add-ins" "Add-ins" "home.addIns" "")
+
+        ; --- Insert ------------------------------------------------------------
+        def insTables:RibbonCtl (this.grp("insert" "sx-rb-instables" "Tables"))
+        this.word(insTables "i-table" "Table" "Table" "insert.table" "")
+        def insCharts:RibbonCtl (this.grp("insert" "sx-rb-inscharts" "Charts"))
+        this.word(insCharts "i-chart" "Insert chart" "Chart" "insert.chart" "")
+        def insLinks:RibbonCtl (this.grp("insert" "sx-rb-inslinks" "Links and comments"))
+        this.word(insLinks "i-link" "Link" "Link" "insert.link" "")
+        this.word(insLinks "i-note" "Note" "Note" "review.newNote" "")
+        this.word(insLinks "i-comment" "Comment" "Comment" "review.newComment" "")
+        def insIll:RibbonCtl (this.grp("insert" "sx-rb-insill" "Illustrations"))
+        this.word(insIll "i-picture" "Pictures" "Pictures" "insert.picture" "")
+        this.word(insIll "i-shape" "Shapes" "Shapes" "insert.shape" "rect")
+        this.word(insIll "i-icons" "Icons" "Icons" "insert.icons" "")
+        this.word(insIll "i-smartart" "SmartArt" "SmartArt" "insert.smartArt" "")
+        def insSpark:RibbonCtl (this.grp("insert" "sx-rb-insspark" "Sparklines"))
+        this.word(insSpark "i-spark" "Line sparkline" "Line" "insert.sparkline" "")
+        def insFilt:RibbonCtl (this.grp("insert" "sx-rb-insfilt" "Filters"))
+        this.word(insFilt "i-slicer" "Slicer" "Slicer" "insert.slicer" "")
+        this.word(insFilt "i-timeline" "Timeline" "Timeline" "insert.timeline" "")
+        def insText:RibbonCtl (this.grp("insert" "sx-rb-instext" "Text"))
+        this.word(insText "i-textbox" "Text box" "Text Box" "insert.textBox" "")
+        this.word(insText "i-wordart" "WordArt" "WordArt" "insert.wordArt" "WordArt")
+        this.word(insText "i-sig" "Signature line" "Signature Line" "insert.signatureLine" "")
+        this.word(insText "i-check" "Checkbox" "Checkbox" "insert.checkbox" "")
+        def insSym:RibbonCtl (this.grp("insert" "sx-rb-inssym" "Symbols"))
+        this.word(insSym "i-equation" "Equation" "Equation" "insert.equation" "x^2")
+        this.word(insSym "i-symbol" "Symbol" "Ω" "insert.symbol" "")
+
+        ; --- Draw --------------------------------------------------------------
+        def drTools:RibbonCtl (this.grp("draw" "sx-rb-drtools" "Drawing Tools"))
+        this.word(drTools "dr-pen" "Pen" "Pen" "draw.pen" "")
+        this.word(drTools "dr-eraser" "Eraser" "Eraser" "draw.eraser" "")
+        this.word(drTools "dr-lasso" "Lasso select" "Lasso" "draw.lasso" "")
+        def drConv:RibbonCtl (this.grp("draw" "sx-rb-drconv" "Convert"))
+        this.word(drConv "dr-ink" "Ink to shape" "Ink to Shape" "draw.inkToShape" "")
+
+        ; --- Page Layout -------------------------------------------------------
+        def pgTheme:RibbonCtl (this.grp("pagelayout" "sx-rb-pgtheme" "Themes"))
+        this.word(pgTheme "p-theme" "Themes" "Themes" "pageLayout.theme" "")
+        this.word(pgTheme "p-tcolors" "Theme colors" "Colors" "pageLayout.themeColors" "")
+        this.word(pgTheme "p-tfonts" "Theme fonts" "Fonts" "pageLayout.themeFonts" "")
+        this.word(pgTheme "p-teffects" "Theme effects" "Effects" "pageLayout.themeEffects" "")
+        def pgSetup:RibbonCtl (this.grp("pagelayout" "sx-rb-pgsetup" "Page Setup"))
+        this.word(pgSetup "p-margins" "Margins" "Margins" "pageLayout.margins" "")
+        this.word(pgSetup "p-orient" "Orientation" "Orientation" "pageLayout.orientation" "")
+        this.word(pgSetup "p-size" "Size" "Size" "pageLayout.size" "")
+        this.word(pgSetup "p-area" "Print area" "Print Area" "pageLayout.printArea" "")
+        this.word(pgSetup "p-breaks" "Breaks" "Breaks" "pageLayout.breaks" "")
+        this.word(pgSetup "p-titles" "Print titles" "Print Titles" "pageLayout.printTitles" "")
+        this.word(pgSetup "p-hf" "Header and footer" "Header & Footer" "pageLayout.headerFooter" "")
+        this.word(pgSetup "p-bg" "Background" "Background" "pageLayout.background" "")
+        this.word(pgSetup "p-setup" "Page setup" "Page Setup…" "pageLayout.pageSetup" "")
+        def pgFit:RibbonCtl (this.grp("pagelayout" "sx-rb-pgfit" "Scale to Fit"))
+        this.word(pgFit "p-fit" "Scale to fit" "Fit to Page" "pageLayout.scaleToFit" "")
+        def pgSheet:RibbonCtl (this.grp("pagelayout" "sx-rb-pgsheet" "Sheet Options"))
+        this.word(pgSheet "p-gridlines" "Print gridlines" "Print Gridlines" "pageLayout.printGridlines" "")
+        this.word(pgSheet "p-headings" "Print headings" "Print Headings" "pageLayout.printHeadings" "")
+        def pgArr:RibbonCtl (this.grp("pagelayout" "sx-rb-pgarr" "Arrange"))
+        this.word(pgArr "p-fwd" "Bring forward" "Bring Forward" "arrange.bringForward" "")
+        this.word(pgArr "p-back" "Send backward" "Send Backward" "arrange.sendBackward" "")
+        this.word(pgArr "p-selpane" "Selection pane" "Selection Pane" "arrange.selectionPane" "")
+        this.word(pgArr "p-align" "Align left" "Align" "arrange.align" "left")
+        this.word(pgArr "p-group" "Group" "Group" "arrange.group" "")
+        this.word(pgArr "p-rotate" "Rotate right" "Rotate" "arrange.rotate" "right")
+
+        ; --- Formulas ----------------------------------------------------------
+        def fLib:RibbonCtl (this.grp("formulas" "sx-rb-flib" "Function Library"))
+        this.word(fLib "f-insert" "Insert function" "fx" "formulas.insertFunction" "")
+        this.word(fLib "f-autosum" "AutoSum" "AutoSum" "formulas.autoSum" "")
+        this.word(fLib "f-recent" "Recently used" "Recent" "formulas.recentlyUsed" "")
+        this.word(fLib "f-fin" "Financial" "Financial" "formulas.financial" "")
+        this.word(fLib "f-logical" "Logical" "Logical" "formulas.logical" "")
+        this.word(fLib "f-text" "Text" "Text" "formulas.text" "")
+        this.word(fLib "f-date" "Date and time" "Date & Time" "formulas.dateTime" "")
+        this.word(fLib "f-lookup" "Lookup and reference" "Lookup" "formulas.lookupReference" "")
+        this.word(fLib "f-math" "Math and trig" "Math & Trig" "formulas.mathTrig" "")
+        this.word(fLib "f-more" "More functions" "More" "formulas.moreFunctions" "")
+        def fNames:RibbonCtl (this.grp("formulas" "sx-rb-fnames" "Defined Names"))
+        this.word(fNames "f-namemgr" "Name manager" "Name Manager" "formulas.nameManager" "")
+        this.word(fNames "f-define" "Define name" "Define Name" "formulas.defineName" "")
+        this.word(fNames "f-useinf" "Use in formula" "Use in Formula" "formulas.useInFormula" "")
+        this.word(fNames "f-fromsel" "Create from selection" "Create from Selection" "formulas.createFromSelection" "")
+        def fAudit:RibbonCtl (this.grp("formulas" "sx-rb-faudit" "Formula Auditing"))
+        this.word(fAudit "f-prec" "Trace precedents" "Precedents" "formulas.tracePrecedents" "")
+        this.word(fAudit "f-dep" "Trace dependents" "Dependents" "formulas.traceDependents" "")
+        this.word(fAudit "f-rmarrows" "Remove arrows" "Remove Arrows" "formulas.removeArrows" "")
+        this.word(fAudit "f-errchk" "Error checking" "Error Checking" "formulas.errorChecking" "")
+        this.word(fAudit "f-eval" "Evaluate formula" "Evaluate" "formulas.evaluateFormula" "")
+        this.word(fAudit "f-watch" "Watch window" "Watch Window" "formulas.watchWindow" "")
+        this.word(fAudit "f-show" "Show formulas" "Show Formulas" "formulas.showFormulas" "")
+        def fCalc:RibbonCtl (this.grp("formulas" "sx-rb-fcalc" "Calculation"))
+        this.word(fCalc "f-calcnow" "Calculate now" "Calc Now" "formulas.calculateNow" "")
+        this.word(fCalc "f-calcsheet" "Calculate sheet" "Calc Sheet" "formulas.calculateSheet" "")
+        this.word(fCalc "f-calcopt" "Calculation options" "Options" "formulas.calculationOptions" "")
+
+        ; --- Data --------------------------------------------------------------
+        def dGet:RibbonCtl (this.grp("data" "sx-rb-dget" "Get and Transform Data"))
+        this.word(dGet "d-getdata" "Get data" "Get Data" "data.getData" "")
+        this.word(dGet "d-csv" "From text or CSV" "From Text/CSV" "data.fromTextCsv" "")
+        this.word(dGet "d-web" "From web" "From Web" "data.fromWeb" "")
+        this.word(dGet "d-range" "From table or range" "From Table/Range" "data.fromTableRange" "")
+        def dQry:RibbonCtl (this.grp("data" "sx-rb-dqry" "Queries and Connections"))
+        this.word(dQry "d-refall" "Refresh all" "Refresh All" "data.refreshAll" "")
+        this.word(dQry "d-qc" "Queries and connections" "Queries" "data.queriesConnections" "")
+        def dSort:RibbonCtl (this.grp("data" "sx-rb-dsort" "Sort and Filter"))
+        this.word(dSort "d-asc" "Sort smallest to largest" "A→Z" "data.sort.asc" "")
+        this.word(dSort "d-desc" "Sort largest to smallest" "Z→A" "data.sort.desc" "")
+        this.word(dSort "d-sort" "Sort" "Sort…" "data.sort" "")
+        this.word(dSort "d-clear" "Clear filter" "Clear" "data.filter.clear" "")
+        this.word(dSort "d-filter" "Filter" "Filter" "data.filter" "")
+        this.word(dSort "d-reapply" "Reapply" "Reapply" "data.reapply" "")
+        this.word(dSort "d-adv" "Advanced filter" "Advanced" "data.advancedFilter" "")
+        def dTools:RibbonCtl (this.grp("data" "sx-rb-dtools" "Data Tools"))
+        this.word(dTools "d-t2c" "Text to columns" "Text to Columns" "data.textToColumns" "")
+        this.word(dTools "d-dups" "Remove duplicates" "Remove Duplicates" "data.removeDuplicates" "")
+        this.word(dTools "d-valid" "Data validation" "Validation" "data.validation" "")
+        this.word(dTools "d-flash" "Flash fill" "Flash Fill" "data.flashFill" "")
+        this.word(dTools "d-circle" "Circle invalid data" "Circle Invalid" "data.circleInvalid" "")
+        this.word(dTools "d-consol" "Consolidate" "Consolidate" "data.consolidate" "")
+        this.word(dTools "d-rel" "Relationships" "Relationships" "data.relationships" "")
+        def dFc:RibbonCtl (this.grp("data" "sx-rb-dfc" "Forecast"))
+        this.word(dFc "d-scen" "Scenario manager" "Scenarios" "data.scenarioManager" "")
+        this.word(dFc "d-goal" "Goal seek" "Goal Seek" "data.goalSeek" "")
+        this.word(dFc "d-dtable" "Data table" "Data Table" "data.dataTable" "")
+        this.word(dFc "d-fsheet" "Forecast sheet" "Forecast Sheet" "data.forecastSheet" "")
+        def dOut:RibbonCtl (this.grp("data" "sx-rb-dout" "Outline"))
+        this.word(dOut "d-group" "Group" "Group" "data.group" "")
+        this.word(dOut "d-ungroup" "Ungroup" "Ungroup" "data.ungroup" "")
+        this.word(dOut "d-subtotal" "Subtotal" "Subtotal" "data.subtotal" "")
+        def dAn:RibbonCtl (this.grp("data" "sx-rb-dan" "Analysis"))
+        this.word(dAn "d-atp" "Data analysis" "Data Analysis" "data.analysisToolPak" "")
+        this.word(dAn "d-solver" "Solver" "Solver" "data.solver" "")
+        this.word(dAn "d-analyze" "Analyze data" "Analyze Data" "data.analyzeData" "")
+        def dDb:RibbonCtl (this.grp("data" "sx-rb-ddb" "Queries and Connections"))
+        this.word(dDb "d-refresh" "Refresh" "Refresh" "db.refresh" "")
+        this.word(dDb "d-sql" "SQL query" "SQL…" "db.sql.dialog" "")
+        this.word(dDb "d-conn" "Connection" "Connection…" "db.connection" "")
+
+        ; --- Review ------------------------------------------------------------
+        def rNotes:RibbonCtl (this.grp("review" "sx-rb-rnotes" "Comments and Notes"))
+        this.word(rNotes "r-comment" "New comment" "New Comment" "review.newComment" "")
+        this.word(rNotes "r-note" "New note" "New Note" "review.newNote" "")
+        this.word(rNotes "r-delete" "Delete comment" "Delete" "review.deleteComment" "")
+        this.word(rNotes "r-prev" "Previous comment" "Previous" "review.previousComment" "")
+        this.word(rNotes "r-next" "Next comment" "Next" "review.nextComment" "")
+        def rProtect:RibbonCtl (this.grp("review" "sx-rb-rprotect" "Protect"))
+        this.word(rProtect "r-psheet" "Protect sheet" "Protect Sheet" "review.protectSheet" "")
+        this.word(rProtect "r-unsheet" "Unprotect sheet" "Unprotect Sheet" "review.unprotectSheet" "")
+        this.word(rProtect "r-pbook" "Protect workbook" "Protect Workbook" "review.protectWorkbook" "")
+        def rProof:RibbonCtl (this.grp("review" "sx-rb-rproof" "Proofing"))
+        this.word(rProof "r-spell" "Spelling" "Spelling" "review.spelling" "")
+        this.word(rProof "r-thes" "Thesaurus" "Thesaurus" "review.thesaurus" "")
+        this.word(rProof "r-stats" "Workbook statistics" "Statistics" "review.workbookStatistics" "")
+        def rAcc:RibbonCtl (this.grp("review" "sx-rb-racc" "Accessibility"))
+        this.word(rAcc "r-access" "Check accessibility" "Check Accessibility" "review.checkAccessibility" "")
+        def rShow:RibbonCtl (this.grp("review" "sx-rb-rshow" "Show"))
+        this.word(rShow "r-showc" "Show comments" "Show Comments" "review.showComments" "")
+        this.word(rShow "r-shownotes" "Show all notes" "Show Notes" "review.showAllNotes" "")
+        this.word(rShow "r-conv" "Convert to comments" "Convert" "review.convertToComments" "")
+        this.word(rShow "r-changes" "Show changes" "Show Changes" "review.showChanges" "")
+        this.word(rShow "r-ranges" "Allow edit ranges" "Allow Edit Ranges" "review.allowEditRanges" "")
+
+        ; --- View --------------------------------------------------------------
+        def vViews:RibbonCtl (this.grp("view" "sx-rb-vviews" "Workbook Views"))
+        this.word(vViews "v-normal" "Normal view" "Normal" "view.normal" "")
+        this.word(vViews "v-pagelayout" "Page layout view" "Page Layout" "view.pageLayout" "")
+        this.word(vViews "v-pagebreak" "Page break preview" "Page Break" "view.pageBreakPreview" "")
+        this.word(vViews "v-custom" "Custom views" "Custom Views" "view.customViews" "")
+        def vShow:RibbonCtl (this.grp("view" "sx-rb-vshow" "Show"))
+        this.word(vShow "v-grid" "Gridlines" "Gridlines" "view.gridlines" "")
+        this.word(vShow "v-head" "Headings" "Headings" "view.headings" "")
+        this.word(vShow "v-fbar" "Formula bar" "Formula Bar" "sx:formulaBar" "")
+        this.word(vShow "v-ruler" "Ruler" "Ruler" "view.ruler" "")
+        this.word(vShow "v-expand" "Expand formula bar" "Expand Bar" "view.expandFormulaBar" "")
+        def vZoom:RibbonCtl (this.grp("view" "sx-rb-vzoom" "Zoom"))
+        this.word(vZoom "v-zoom" "Zoom" "Zoom" "view.zoom" "")
+        this.word(vZoom "v-zoom100" "Zoom to 100%" "100%" "view.zoom100" "")
+        this.word(vZoom "v-zoomsel" "Zoom to selection" "Zoom to Selection" "view.zoomToSelection" "")
+        def vWin:RibbonCtl (this.grp("view" "sx-rb-vwin" "Window"))
+        this.word(vWin "v-freeze" "Freeze panes" "Freeze Panes" "view.freeze.here" "")
+        this.word(vWin "v-unfreeze" "Unfreeze panes" "Unfreeze" "view.freeze.none" "")
+        this.word(vWin "v-toprow" "Freeze top row" "Freeze Top Row" "view.freezeTopRow" "")
+        this.word(vWin "v-firstcol" "Freeze first column" "Freeze First Column" "view.freezeFirstColumn" "")
+        this.word(vWin "v-newwin" "New window" "New Window" "view.newWindow" "")
+        this.word(vWin "v-arrange" "Arrange all" "Arrange All" "view.arrangeAll" "")
+        this.word(vWin "v-split" "Split" "Split" "view.split" "")
+        this.word(vWin "v-hide" "Hide window" "Hide" "view.hideWindow" "")
+        this.word(vWin "v-unhide" "Unhide window" "Unhide" "view.unhideWindow" "")
+        this.word(vWin "v-switch" "Switch windows" "Switch Windows" "view.switchWindows" "")
+        def vMac:RibbonCtl (this.grp("view" "sx-rb-vmac" "Macros"))
+        this.word(vMac "v-macros" "Macros" "Macros" "view.macros" "")
+
+        ; --- Automate ----------------------------------------------------------
+        def aScripts:RibbonCtl (this.grp("automate" "sx-rb-ascripts" "Scripts"))
+        this.word(aScripts "a-new" "New script" "New Script" "script.new" "")
+        this.word(aScripts "a-run" "Run script" "Run" "script.run" "")
+        this.word(aScripts "a-next" "Next script" "Next Script" "script.next" "")
+        this.word(aScripts "a-all" "All scripts" "All Scripts" "automate.allScripts" "")
+        this.word(aScripts "a-record" "Record actions" "Record Actions" "automate.recordActions" "")
+
+        ; --- Contextual tabs: shown while a table or a chart is selected --------
+        def tdOpts:RibbonCtl (this.grp("tabledesign" "sx-rb-tdopts" "Table Style Options"))
+        this.word(tdOpts "td-header" "Header row" "Header Row" "table.headerRow" "")
+        this.word(tdOpts "td-total" "Total row" "Total Row" "table.totalRow" "")
+        this.word(tdOpts "td-bandr" "Banded rows" "Banded Rows" "table.bandedRows" "")
+        this.word(tdOpts "td-bandc" "Banded columns" "Banded Columns" "table.bandedColumns" "")
+        this.word(tdOpts "td-first" "First column" "First Column" "table.firstColumn" "")
+        this.word(tdOpts "td-last" "Last column" "Last Column" "table.lastColumn" "")
+        def tdTools:RibbonCtl (this.grp("tabledesign" "sx-rb-tdtools" "Tools"))
+        this.word(tdTools "td-pivot" "Summarize with PivotTable" "PivotTable" "table.summarizePivot" "")
+        this.word(tdTools "td-dups" "Remove duplicates" "Remove Duplicates" "table.removeDuplicates" "")
+        this.word(tdTools "td-range" "Convert to range" "Convert to Range" "table.convertToRange" "")
+        this.word(tdTools "td-slicer" "Insert slicer" "Insert Slicer" "table.insertSlicer" "")
+        def tdStyle:RibbonCtl (this.grp("tabledesign" "sx-rb-tdstyle" "Table Styles"))
+        this.word(tdStyle "td-light" "Light style" "Light 9" "table.style" "TableStyleLight9")
+        this.word(tdStyle "td-medium" "Medium style" "Medium 2" "table.style" "TableStyleMedium2")
+        this.word(tdStyle "td-dark" "Dark style" "Dark 1" "table.style" "TableStyleDark1")
+        def cdLay:RibbonCtl (this.grp("chartdesign" "sx-rb-cdlay" "Chart Layouts"))
+        this.word(cdLay "cd-elem" "Add chart element" "Add Element" "chart.addElement" "legend")
+        this.word(cdLay "cd-quick" "Quick layout" "Quick Layout" "chart.quickLayout" "1")
+        def cdSty:RibbonCtl (this.grp("chartdesign" "sx-rb-cdsty" "Chart Styles"))
+        this.word(cdSty "cd-colors" "Change colors" "Colors" "chart.changeColors" "colorful")
+        def cdData:RibbonCtl (this.grp("chartdesign" "sx-rb-cddata" "Data"))
+        this.word(cdData "cd-switch" "Switch row and column" "Switch Row/Column" "chart.switchRowColumn" "")
+        this.word(cdData "cd-select" "Select data" "Select Data" "chart.selectData" "")
+        def cdLoc:RibbonCtl (this.grp("chartdesign" "sx-rb-cdloc" "Location"))
+        this.word(cdLoc "cd-move" "Move chart" "Move Chart" "chart.move" "")
+        this.word(cdLoc "cd-format" "Format selection" "Format" "chart.formatSelection" "")
+
+        ribTabs = (new TabsCtl)
+        ribTabs.tid = "sx-ribtabs"
+        ribTabs.name = "Ribbon tabs"
+        ribTabs.addItem("file" "File" "" false)
+        ribTabs.addItem("home" "Home" "" false)
+        ribTabs.addItem("insert" "Insert" "" false)
+        ribTabs.addItem("draw" "Draw" "" false)
+        ribTabs.addItem("pagelayout" "Page Layout" "" false)
+        ribTabs.addItem("formulas" "Formulas" "" false)
+        ribTabs.addItem("data" "Data" "" false)
+        ribTabs.addItem("review" "Review" "" false)
+        ribTabs.addItem("view" "View" "" false)
+        ribTabs.addItem("automate" "Automate" "" false)
+        ribTabs.value = ribbonTab
+        ribTabs.rovingValue = ribbonTab
+
+        tabNav = (new RibbonCtl)
+        tabNav.tid = "sx-tabnav"
+        tabNav.name = "Sheet navigation"
+        this.tool(tabNav "tab-prev" "Previous sheet" (SheetsApp.icon("chevronLeft")) "view.sheet.prev" "" false)
+        this.tool(tabNav "tab-next" "Next sheet" (SheetsApp.icon("chevronRight")) "view.sheet.next" "" false)
+
+        viewTools = (new RibbonCtl)
+        viewTools.tid = "sx-viewtools"
+        viewTools.name = "View and zoom"
+        this.word(viewTools "sv-normal" "Normal" "▤" "view.normal" "")
+        this.word(viewTools "sv-layout" "Page Layout" "▭" "view.pageLayout" "")
+        this.word(viewTools "sv-break" "Page Break Preview" "▥" "view.pageBreakPreview" "")
+        this.word(viewTools "sv-zoomout" "Zoom out" "−" "view.zoomOut" "")
+        this.word(viewTools "sv-zoom" "Zoom" "100%" "view.zoom" "")
+        this.word(viewTools "sv-zoomin" "Zoom in" "+" "view.zoomIn" "")
+
+        zoomSlider = (new SliderCtl)
+        zoomSlider.tid = "sx-zoomslider"
+        zoomSlider.name = "Zoom"
+        zoomSlider.minValue = 10
+        zoomSlider.maxValue = 400
+        zoomSlider.step = 5
     }
 
+    ; The groups of the tab that is showing, in the order they are mounted.
     fn ribbonGroups:[RibbonCtl] () {
+        if (ribbonTab != "home") {
+            return (this.groupsOf(ribbonTab))
+        }
+        def h:[RibbonCtl] (this.groupsOf("home"))
         def a:[RibbonCtl]
         push a history
+        push a (itemAt h 0)
         push a textTools
+        push a (itemAt h 1)
         push a alignTools
+        push a (itemAt h 2)
         push a numberTools
+        push a (itemAt h 3)
+        push a (itemAt h 4)
+        push a (itemAt h 5)
         push a dataTools
+        push a (itemAt h 6)
         push a insertTools
+        push a (itemAt h 7)
         return a
     }
 
     ; Lucide's icons (ISC licence), 24×24, stroked.
     sfn icon:string (name:string) {
+        if (name == "save") { return "M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7 M7 3v4a1 1 0 0 0 1 1h7" }
         if (name == "undo") { return "M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" }
         if (name == "redo") { return "m15 14 5-5-5-5 M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" }
         if (name == "painter") { return "M18 4H6a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z M20 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-8.5 M12 12v3 M11 15h2v6h-2z" }
@@ -805,6 +1273,7 @@ class SheetsApp {
         if (name == "plus") { return "M12 5v14 M5 12h14" }
         if (name == "chevron") { return "m6 9 6 6 6-6" }
         if (name == "chevronRight") { return "m9 18 6-6-6-6" }
+        if (name == "chevronLeft") { return "m15 18-6-6 6-6" }
         if (name == "check") { return "M20 6 9 17l-5-5" }
         if (name == "dot") { return "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z" }
         if (name == "logo") { return "M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M3 9h18 M3 15h18 M9 9v12 M15 9v12" }
@@ -855,6 +1324,9 @@ class SheetsApp {
                 titleEl.textContent = title
                 brand.addChild(titleEl)
                 headerEl.addChild(brand)
+                if (readOnly == false) {
+                    this.mount(headerEl qat)
+                }
             }
             if showMenubar {
                 this.mount(headerEl menubar)
@@ -876,27 +1348,60 @@ class SheetsApp {
 
         ; --- ribbon ----------------------------------------------------------
         if (showRibbon && (readOnly == false)) {
+            ; The tab row only on the full ribbon: a tool list chosen by the
+            ; host is one toolbar, not Excel's.
+            if ((array_length tools) == 0) {
+                ribTabRow.id = "sx-ribtabrow"
+                ribTabRow.className = "sx-ribtabrow"
+                UiTree.clearChildren(ribTabRow)
+                ribTabs.value = ribbonTab
+                this.mount(ribTabRow ribTabs)
+                root.addChild(ribTabRow)
+            }
             ribbonEl.id = "sx-ribbonbar"
             ribbonEl.className = "sx-ribbonbar"
             UiTree.clearChildren(ribbonEl)
-            this.mountGroup(history)
-            if (this.wantsTool("font")) {
-                this.mount(ribbonEl fontMenu)
+            if (ribbonTab == "home") {
+                def h:[RibbonCtl] (this.groupsOf("home"))
+                this.mountGroup(history)
+                this.mountGroup((itemAt h 0))
+                if (this.wantsTool("font")) {
+                    this.mount(ribbonEl fontMenu)
+                }
+                if (this.wantsTool("size")) {
+                    this.mount(ribbonEl sizeMenu)
+                }
+                this.mountGroup(textTools)
+                this.mountGroup((itemAt h 1))
+                this.mountGroup(alignTools)
+                this.mountGroup((itemAt h 2))
+                if (this.wantsTool("numfmt")) {
+                    this.mount(ribbonEl numMenu)
+                }
+                this.mountGroup(numberTools)
+                this.mountGroup((itemAt h 3))
+                if (this.wantsTool("borders")) {
+                    this.mount(ribbonEl borderMenu)
+                }
+                this.mountGroup((itemAt h 4))
+                if (this.wantsTool("galleries")) {
+                    this.mount(ribbonEl cfMenu)
+                    this.mount(ribbonEl tableMenu)
+                    this.mount(ribbonEl styleMenu)
+                }
+                this.mountGroup((itemAt h 5))
+                this.mountGroup(dataTools)
+                this.mountGroup((itemAt h 6))
+                this.mountGroup(insertTools)
+                this.mountGroup((itemAt h 7))
+            } {
+                def tg:[RibbonCtl] (this.groupsOf(ribbonTab))
+                def ti:int 0
+                while (ti < (array_length tg)) {
+                    this.mountGroup((itemAt tg ti))
+                    ti = (ti + 1)
+                }
             }
-            if (this.wantsTool("size")) {
-                this.mount(ribbonEl sizeMenu)
-            }
-            this.mountGroup(textTools)
-            this.mountGroup(alignTools)
-            if (this.wantsTool("numfmt")) {
-                this.mount(ribbonEl numMenu)
-            }
-            this.mountGroup(numberTools)
-            if (this.wantsTool("borders")) {
-                this.mount(ribbonEl borderMenu)
-            }
-            this.mountGroup(dataTools)
-            this.mountGroup(insertTools)
             root.addChild(ribbonEl)
         }
 
@@ -911,6 +1416,7 @@ class SheetsApp {
             footerEl.className = "sx-footer"
             UiTree.clearChildren(footerEl)
             if showTabs {
+                this.mount(footerEl tabNav)
                 this.mount(footerEl tabs)
                 if (readOnly == false) {
                     this.mount(footerEl sheetTools)
@@ -926,8 +1432,45 @@ class SheetsApp {
                 statsEl.className = "sx-stats"
                 statsEl.elementType = 1
                 footerEl.addChild(statsEl)
+                this.mount(footerEl viewTools)
+                this.mount(footerEl zoomSlider)
             }
             root.addChild(footerEl)
+        }
+
+        ; --- the task pane (absolutely placed at the grid's right) --------
+        paneBuilt = grid.app.paneKind
+        if ((strlen paneBuilt) > 0) {
+            paneHolder.id = "sx-pane"
+            paneHolder.className = "sx-pane"
+            UiTree.clearChildren(paneHolder)
+            def phead:EVGElement (EVGElement.createDiv())
+            phead.className = "sx-pane-head"
+            paneTitleEl.className = "sx-pane-title"
+            paneTitleEl.elementType = 1
+            phead.addChild(paneTitleEl)
+            paneHead.tid = "sx-pane-head"
+            paneHead.name = "Task pane"
+            if ((array_length paneHead.items) == 0) {
+                this.word(paneHead "pane-close" "Close pane" "✕" "" "")
+            }
+            this.mount(phead paneHead)
+            paneHolder.addChild(phead)
+            if (grid.app.paneSearches()) {
+                paneSearch.tid = "sx-pane-search"
+                paneSearch.name = "Search for a function"
+                paneSearch.placeholder = "Search for a function"
+                paneSearch.boxWidth = ((to_double paneW) - 24.0)
+                paneSearch.fontFamily = "Open Sans"
+                paneSearch.fontSize = 13.0
+                paneSearch.value = grid.app.paneFilter
+                this.mount(paneHolder paneSearch)
+            }
+            paneList.tid = "sx-pane-list"
+            paneList.rootClass = "sx-pane-list"
+            paneList.toolClass = "sx-pane-row"
+            this.mount(paneHolder paneList)
+            root.addChild(paneHolder)
         }
 
         ; --- the context menu holder (absolutely placed at the pointer) ----
@@ -994,6 +1537,26 @@ class SheetsApp {
 
     fn sync:void () {
         this.adoptCoreDialogs()
+        if (grid.app.paneKind != paneBuilt) {
+            def opened:boolean ((strlen grid.app.paneKind) > 0)
+            def hadPane:boolean ((strlen paneBuilt) > 0)
+            this.buildChrome()
+            ; The rows of the pane just mounted, in this frame.
+            this.syncPane()
+            ; A pane with a search field takes the keys when it opens, as
+            ; Insert Function's does; a pane closing gives them back.
+            if (opened && (grid.app.paneSearches())) {
+                gridFocused = false
+                ui.focus(paneSearch.tid)
+                this.sync()
+            }
+            if ((opened == false) && hadPane) {
+                gridFocused = true
+                ui.blur()
+            }
+            return
+        }
+        this.syncPane()
         def app:GridApp grid.app
         def model:SpreadsheetModel app.model
         def sel:GridSelection app.sel
@@ -1063,14 +1626,36 @@ class SheetsApp {
         sizeMenu.build()
         numMenu.build()
         borderMenu.build()
+        cfMenu.build()
+        tableMenu.build()
+        styleMenu.build()
         ctxMenu.build()
+        qat.setDisabled("qat-undo" ((model.history.canUndo()) == false))
+        qat.setDisabled("qat-redo" ((model.history.canRedo()) == false))
+        qat.build()
         tabs.build()
+        this.colourTabs()
         ; The grid is what a tab shows, and it is drawn beside the tabs, not in
         ; them: the controller's panel leaves the tree.
         def troot:EVGElement (unwrap tabs.rootEl)
         def onlyList:[EVGElement]
         push onlyList (unwrap tabs.listEl)
         troot.children = onlyList
+        tabNav.build()
+        viewTools.setText("sv-zoom" ((to_string (to_int ((grid.app.model.zoom * 100.0) + 0.5))) + "%"))
+        viewTools.build()
+        def zpct:int (to_int ((grid.app.model.zoom * 100.0) + 0.5))
+        if (sliderDrag == false) {
+            zoomSlider.setValue(zpct)
+        }
+        zoomSlider.build()
+        this.syncContextTab()
+        ribTabs.value = ribbonTab
+        ribTabs.build()
+        def rroot:EVGElement (unwrap ribTabs.rootEl)
+        def onlyRibList:[EVGElement]
+        push onlyRibList (unwrap ribTabs.listEl)
+        rroot.children = onlyRibList
         def sd:[SxDialog] (this.dialogs())
         def si:int 0
         while (si < (array_length sd)) {
@@ -1126,10 +1711,85 @@ class SheetsApp {
 
     ; The tabs are the workbook's sheets, by index. Rebuilt only when the
     ; names changed, so a reader's place in the list survives an edit.
+    ; The tabs that fit: a window of the strip around the active sheet, so a
+    ; workbook of many sheets scrolls its tabs instead of pushing the status
+    ; line and the zoom off the page. The arrows move the active sheet, and
+    ; the window follows it.
+    fn tabWindow:[int] (all:[int]) {
+        def book:WorkbookModel grid.app.book
+        def n:int (array_length all)
+        if (n == 0) {
+            return all
+        }
+        ; The room is what the last layout left the tabs: the footer less
+        ; everything else in it but the stats, which give way first.
+        if (footerEl.calculatedWidth <= 0.0) {
+            return all
+        }
+        def others:double 0.0
+        def fi:int 0
+        while (fi < (array_length footerEl.children)) {
+            def kid:EVGElement (itemAt footerEl.children fi)
+            if ((kid.id != "sx-tabs") && (kid.className != "sx-stats") && (kid.className != "sx-spacer")) {
+                others = (others + kid.calculatedWidth + 6.0)
+            }
+            fi = (fi + 1)
+        }
+        def budget:int (to_int ((footerEl.calculatedWidth - others) - 40.0))
+        if (budget < 120) {
+            budget = 120
+        }
+        def widths:[int]
+        def pos:int 0
+        def i:int 0
+        while (i < n) {
+            def at:int (itemAt all i)
+            def sh:SpreadsheetModel (book.sheetAt(at))
+            push widths (((strlen sh.name) * 7) + 30)
+            if (at == book.activeIndex) {
+                pos = i
+            }
+            i = (i + 1)
+        }
+        if (tabFirst > pos) {
+            tabFirst = pos
+        }
+        if (tabFirst >= n) {
+            tabFirst = 0
+        }
+        def used:int 0
+        def k:int tabFirst
+        while (k <= pos) {
+            used = (used + (itemAt widths k))
+            k = (k + 1)
+        }
+        while ((used > budget) && (tabFirst < pos)) {
+            used = (used - (itemAt widths tabFirst))
+            tabFirst = (tabFirst + 1)
+        }
+        ; Fill the room left: after the active tab, then back before it.
+        def last:int pos
+        while (((last + 1) < n) && ((used + (itemAt widths (last + 1))) <= budget)) {
+            last = (last + 1)
+            used = (used + (itemAt widths last))
+        }
+        while ((tabFirst > 0) && ((used + (itemAt widths (tabFirst - 1))) <= budget)) {
+            tabFirst = (tabFirst - 1)
+            used = (used + (itemAt widths tabFirst))
+        }
+        def out:[int]
+        def j:int tabFirst
+        while (j <= last) {
+            push out (itemAt all j)
+            j = (j + 1)
+        }
+        return out
+    }
+
     fn syncTabs:void () {
         def book:WorkbookModel grid.app.book
-        def n:int (book.sheetCount())
-        def order:[int] (this.tabOrder())
+        def order:[int] (this.tabWindow((this.tabOrder())))
+        def n:int (array_length order)
         def same:boolean ((array_length tabs.items) == n)
         if same {
             def i:int 0
@@ -1163,6 +1823,96 @@ class SheetsApp {
         }
     }
 
+    ; A sheet's tab colour as CSS: "FF4472C4", "4472C4" and "#4472C4" are
+    ; all "#4472C4"; no colour is "".
+    sfn cssColour:string (c:string) {
+        def t:string (trim c)
+        if ((strlen t) == 0) {
+            return ""
+        }
+        if ((charAt t 0) == 35) {
+            t = (substring t 1 (strlen t))
+        }
+        if ((strlen t) == 8) {
+            t = (substring t 2 8)
+        }
+        if ((strlen t) != 6) {
+            return ""
+        }
+        return ("#" + t)
+    }
+
+    ; Each tab shows its sheet's colour as an edge, as Excel's do.
+    fn colourTabs:void () {
+        def none:[string:string]
+        tabColours = none
+        def book:WorkbookModel grid.app.book
+        def i:int 0
+        while (i < (array_length tabs.items)) {
+            def it:UiItem (itemAt tabs.items i)
+            def at:int (GridApp.intOf(it.value))
+            if ((at >= 0) && (at < (book.sheetCount())) && (!null? it.el)) {
+                def sh:SpreadsheetModel (book.sheetAt(at))
+                def c:string (SheetsApp.cssColour(sh.tabColor))
+                if ((strlen c) > 0) {
+                    def el:EVGElement (unwrap it.el)
+                    UiTree.inline(el "border" ("2px solid " + c))
+                    set tabColours it.value c
+                }
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; The colour the tab of sheet `at` is drawn with, "" for none.
+    fn tabColourShown:string (at:int) {
+        def k:string (to_string at)
+        if (has tabColours k) {
+            return (unwrap (get tabColours k))
+        }
+        return ""
+    }
+
+    ; Table Design while the active cell is in a table, Chart Design while a
+    ; chart has the focus: the tab appears, and goes when the selection leaves.
+    fn syncContextTab:void () {
+        def app:GridApp grid.app
+        def want:string ""
+        if ((app.model.tableIndexAt(app.sel.active.row app.sel.active.col)) >= 0) {
+            want = "tabledesign"
+        }
+        if ((app.activeChartId()) > 0) {
+            want = "chartdesign"
+        }
+        if (want == ctxTab) {
+            return
+        }
+        def was:string ctxTab
+        ctxTab = want
+        def kept:[UiItem]
+        def i:int 0
+        while (i < (array_length ribTabs.items)) {
+            def it:UiItem (itemAt ribTabs.items i)
+            if ((it.value != "tabledesign") && (it.value != "chartdesign")) {
+                push kept it
+            }
+            i = (i + 1)
+        }
+        ribTabs.items = kept
+        if (want == "tabledesign") {
+            ribTabs.addItem("tabledesign" "Table Design" "" false)
+        }
+        if (want == "chartdesign") {
+            ribTabs.addItem("chartdesign" "Chart Design" "" false)
+        }
+        if ((strlen was) > 0) {
+            if (ribbonTab == was) {
+                ribbonTab = "home"
+                this.buildChrome()
+            }
+        }
+    }
+
     ; The sheets in the order the strip draws them: the workbook's, except
     ; while a tab is carried, when the carried one sits where it would land.
     fn tabOrder:[int] () {
@@ -1171,7 +1921,8 @@ class SheetsApp {
         def carrying:boolean ((tabDrag >= 0) && (tabDrag < n) && (tabDropAt >= 0) && (tabDropAt < n))
         def i:int 0
         while (i < n) {
-            if ((carrying == false) || (i != tabDrag)) {
+            def shw:SpreadsheetModel (grid.app.book.sheetAt(i))
+            if (((carrying == false) || (i != tabDrag)) && (shw.sheetHidden == false)) {
                 push out i
             }
             i = (i + 1)
@@ -1466,8 +2217,12 @@ class SheetsApp {
             }
             ; A submenu surface hangs off its row: keep it after the label.
             def k:int 0
+            ; Decorated in the same pass: left for the next frame, the
+            ; submenu's rows drew one frame bare on every rebuild.
             while (k < (array_length kids)) {
-                el.addChild((itemAt kids k))
+                def sub:EVGElement (itemAt kids k)
+                el.addChild(sub)
+                this.decorate(sub)
                 k = (k + 1)
             }
             return
@@ -1517,6 +2272,9 @@ class SheetsApp {
         push a sizeMenu
         push a numMenu
         push a borderMenu
+        push a cfMenu
+        push a tableMenu
+        push a styleMenu
         push a ctxMenu
         return a
     }
@@ -1528,6 +2286,12 @@ class SheetsApp {
         if ctxOpen {
             UiTree.inline(ctxHolder "left" ((to_string ctxX) + "px"))
             UiTree.inline(ctxHolder "top" ((to_string ctxY) + "px"))
+        }
+        ; An open task pane takes the grid's right edge.
+        if ((strlen paneBuilt) > 0) {
+            UiTree.inline(gridEl "width" ((to_string ((to_int pageW) - paneW)) + "px"))
+        } {
+            UiTree.inline(gridEl "width" "100%")
         }
         def page:EVGElement (ui.layout())
         if ctxOpen {
@@ -1542,7 +2306,7 @@ class SheetsApp {
         def ki:int 0
         while (ki < (array_length root.children)) {
             def kid:EVGElement (itemAt root.children ki)
-            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder") && (kid.id != "sx-dlg-holder")) {
+            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder") && (kid.id != "sx-dlg-holder") && (kid.id != "sx-pane")) {
                 used = (used + kid.calculatedHeight + 1.0)
             }
             ki = (ki + 1)
@@ -1567,6 +2331,18 @@ class SheetsApp {
         }
         gx = nx
         gy = ny
+        if ((strlen paneBuilt) > 0) {
+            def ph:int nh
+            UiTree.inline(paneHolder "left" ((to_string (nx + nw)) + "px"))
+            UiTree.inline(paneHolder "top" ((to_string ny) + "px"))
+            UiTree.inline(paneHolder "width" ((to_string paneW) + "px"))
+            UiTree.inline(paneHolder "height" ((to_string ph) + "px"))
+            ; A pane just mounted was laid out before it had a place; lay out
+            ; again so its rows are in this frame, not the next one.
+            if (((to_int paneHolder.calculatedY) != ny) || ((to_int paneHolder.calculatedX) != (nx + nw)) || ((to_int paneHolder.calculatedWidth) != paneW) || ((to_int paneHolder.calculatedHeight) != ph)) {
+                page = (ui.layout())
+            }
+        }
         if ((nw != gw) || (nh != gh)) {
             gw = nw
             gh = nh
@@ -1707,7 +2483,7 @@ class SheetsApp {
         if ((strlen menubar.openValue) > 0) {
             return true
         }
-        if (fontMenu.open || sizeMenu.open || numMenu.open || borderMenu.open || ctxMenu.open) {
+        if (fontMenu.open || sizeMenu.open || numMenu.open || borderMenu.open || ctxMenu.open || cfMenu.open || tableMenu.open || styleMenu.open) {
             return true
         }
         return false
@@ -1777,6 +2553,12 @@ class SheetsApp {
         ; A press is an edge: the button held over the chrome is not pressed
         ; again on every move — unless it is carrying a tab.
         if (down && held) {
+            if sliderDrag {
+                ui.pointerMove((to_double x) (to_double y))
+                this.zoomFromSlider()
+                this.sync()
+                return
+            }
             if (tabDrag >= 0) {
                 this.dragTabTo(x)
                 this.sync()
@@ -1784,6 +2566,9 @@ class SheetsApp {
             return
         }
         held = down
+        if ((down == false) && sliderDrag) {
+            sliderDrag = false
+        }
         if ((down == false) && (tabDrag >= 0)) {
             this.dropTab()
         }
@@ -1792,8 +2577,23 @@ class SheetsApp {
             ui.pointerUp()
             def over:string (ui.hitTest((to_double x) (to_double y)))
             if ((strlen over) > 0) {
-                ui.hover(over)
+                ; On its way to an open submenu the pointer crosses the rows
+                ; below it: those wait a moment instead of closing it at once.
+                if (this.hoverHeld(over)) {
+                    if (over != holdHover) {
+                        holdHover = over
+                        holdMs = 0.0
+                    }
+                    return
+                }
+                holdHover = ""
+                ; Back on the row whose submenu is open: nothing to do. Hovered
+                ; again, the menu shut that submenu and reopened it a moment later.
+                if ((this.openSubTrigger(over)) == false) {
+                    ui.hover(over)
+                }
             } {
+                holdHover = ""
                 ui.unhover()
                 if (this.insideGrid(x y)) {
                     grid.pointer((x - gx) (y - gy) false shift ctrl)
@@ -1802,6 +2602,16 @@ class SheetsApp {
             return
         }
         def target:string (ui.hitTest((to_double x) (to_double y)))
+        ; The zoom slider is dragged, not clicked.
+        if ((strlen target) > 0) {
+            if ((zoomSlider.owns(target)) && ((strlen (ui.dragBoundsFor(target))) > 0)) {
+                def pressed:string (ui.pressAt((to_double x) (to_double y)))
+                sliderDrag = true
+                this.zoomFromSlider()
+                this.sync()
+                return
+            }
+        }
         if ((strlen target) > 0) {
             this.pressChrome(target shift ctrl)
             ; A press on a tab may become a carry, if it travels.
@@ -1839,6 +2649,14 @@ class SheetsApp {
         }
     }
 
+    fn zoomFromSlider:void () {
+        def pct:int zoomSlider.value
+        def cur:int (to_int ((grid.app.model.zoom * 100.0) + 0.5))
+        if (pct != cur) {
+            def ok:boolean (grid.run("view.zoom" (to_string pct)))
+        }
+    }
+
     fn pressChrome:void (target:string shift:boolean ctrl:boolean) {
         def choice:string (this.choiceOf(target))
         ; A press on a trigger of another menu closes the open one first.
@@ -1848,7 +2666,7 @@ class SheetsApp {
                 ctxOpen = false
             }
         }
-        def menus:[MenuCtl] ([] _:MenuCtl (fontMenu sizeMenu numMenu borderMenu))
+        def menus:[MenuCtl] ([] _:MenuCtl (fontMenu sizeMenu numMenu borderMenu cfMenu tableMenu styleMenu))
         def i:int 0
         while (i < (array_length menus)) {
             def mc:MenuCtl (itemAt menus i)
@@ -2016,8 +2834,14 @@ class SheetsApp {
             ran = (this.runAction(choice))
             this.closeMenus()
         }
+        if (this.paneAction()) {
+            ran = true
+        }
         def groups:[RibbonCtl] (this.ribbonGroups())
         push groups sheetTools
+        push groups tabNav
+        push groups viewTools
+        push groups qat
         def i:int 0
         while (i < (array_length groups)) {
             def g:RibbonCtl (itemAt groups i)
@@ -2026,6 +2850,22 @@ class SheetsApp {
                 ran = (this.runAction(v))
             }
             i = (i + 1)
+        }
+        ; A ribbon tab chosen is that tab's groups shown.
+        if (ribTabs.owns(target)) {
+            ; File is not a ribbon: it opens the File view and the ribbon stays.
+            if (ribTabs.value == "file") {
+                ribTabs.value = ribbonTab
+                ribTabs.rovingValue = ribbonTab
+                def bs:boolean (grid.run("file.backstage" ""))
+                this.sync()
+                return
+            }
+            if (((strlen ribTabs.value) > 0) && (ribTabs.value != ribbonTab)) {
+                ribbonTab = ribTabs.value
+                this.buildChrome()
+                return
+            }
         }
         ; A tab chosen is a sheet shown.
         def want:int (?? (to_int tabs.value) 0)
@@ -2041,6 +2881,52 @@ class SheetsApp {
             }
         }
         this.sync()
+    }
+
+    ; The pane's title and rows, from the core, after every input.
+    fn syncPane:void () {
+        if ((strlen paneBuilt) == 0) {
+            return
+        }
+        def app:GridApp grid.app
+        if (app.paneSearches()) {
+            if (paneSearch.value != app.paneFilter) {
+                app.paneFilter = paneSearch.value
+            }
+        }
+        paneTitleEl.textContent = (app.paneTitle())
+        def rows:[string] (app.paneRows())
+        def empty:[RibbonItem]
+        paneList.items = empty
+        paneList.name = (app.paneTitle())
+        def i:int 0
+        while ((i < (array_length rows)) && (i < 200)) {
+            def it:RibbonItem (paneList.add(("pane-row-" + (to_string i)) (itemAt rows i) ""))
+            it.text = (itemAt rows i)
+            i = (i + 1)
+        }
+        paneList.build()
+        paneHead.build()
+        if (app.paneSearches()) {
+            paneSearch.build()
+        }
+    }
+
+    ; A press in the pane: a row is the core's to act on; ✕ closes it.
+    fn paneAction:boolean () {
+        def h:string (paneHead.takePressed())
+        if (h == "pane-close") {
+            grid.app.closePane()
+            return true
+        }
+        def v:string (paneList.takePressed())
+        if ((indexOf v "pane-row-") == 0) {
+            def idx:int (?? (to_int (substring v 9 (strlen v))) -1)
+            def ok:boolean (grid.app.paneChoose(idx))
+            grid.app.refreshAll()
+            return true
+        }
+        return false
     }
 
     fn runAction:boolean (value:string) {
@@ -2285,6 +3171,27 @@ class SheetsApp {
             t.addSeparator()
             this.act("t-delete" "sheet.delete" "" "")
             t.addItem("t-delete" "Delete…" (n <= 1))
+            t.addSeparator()
+            def tcSub:UiItem (t.addSub("t-color" "Tab Color" false))
+            this.kid(tcSub "t-c-red" "Red" "sheet.tabColor" "FF0000")
+            this.kid(tcSub "t-c-orange" "Orange" "sheet.tabColor" "FFC000")
+            this.kid(tcSub "t-c-green" "Green" "sheet.tabColor" "00B050")
+            this.kid(tcSub "t-c-blue" "Blue" "sheet.tabColor" "0070C0")
+            this.kid(tcSub "t-c-purple" "Purple" "sheet.tabColor" "7030A0")
+            this.kid(tcSub "t-c-none" "No Color" "sheet.tabColor" "")
+            this.act("t-hide" "sheet.hide" "" "")
+            t.addItem("t-hide" "Hide" (n <= 1))
+            def anyHidden:boolean false
+            def hi:int 0
+            while (hi < n) {
+                def hs:SpreadsheetModel (book.sheetAt(hi))
+                if hs.sheetHidden {
+                    anyHidden = true
+                }
+                hi = (hi + 1)
+            }
+            this.act("t-unhide" "sheet.unhide" "" "")
+            t.addItem("t-unhide" "Unhide…" (anyHidden == false))
             return
         }
         def a:CellPos (new CellPos)
@@ -2427,12 +3334,38 @@ class SheetsApp {
                 return
             }
             def target:string ui.focusId
+            ; A menu opened with the pointer holds no focus for Escape to
+            ; reach: Escape closes it here.
+            if ((name == "Escape") && (this.anyMenuOpen()) && ((strlen target) == 0)) {
+                this.closeMenus()
+                gridFocused = true
+                this.sync()
+                return
+            }
+            ; Enter in the pane's search takes the first match.
+            if ((name == "Enter") && (target == paneSearch.tid) && ((strlen paneBuilt) > 0)) {
+                def took:boolean (grid.app.paneChoose(0))
+                gridFocused = true
+                ui.blur()
+                this.sync()
+                return
+            }
             def choice:string ""
             if ((name == "Enter") || (name == " ")) {
                 choice = (this.choiceOf(target))
             }
             def wasCtx:boolean ctxMenu.open
+            def menuWas:boolean (this.anyMenuOpen())
             ui.keyWith(name shift ctrl)
+            ; Escape always closes an open menu, wherever focus sits in it
+            ; (a gallery's content panel does not handle keys itself).
+            if ((name == "Escape") && menuWas && (this.anyMenuOpen())) {
+                this.closeMenus()
+                ui.blur()
+                gridFocused = true
+                this.sync()
+                return
+            }
             if (wasCtx && (ctxMenu.open == false)) {
                 ctxOpen = false
                 gridFocused = true
@@ -2542,8 +3475,52 @@ class SheetsApp {
     }
 
     ; One tick for the controllers: a submenu opens on a delay.
+    ; A row of a menu whose submenu is open, outside that submenu: the hover
+    ; it means is held for `holdDelayMs`.
+    fn hoverHeld:boolean (over:string) {
+        def menus:[MenuCtl] (this.allMenus())
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            def depth:int (array_length mc.openPath)
+            if (mc.open && (depth > 0) && ((mc.rowIndexOf(over)) >= 0)) {
+                def deepest:string (itemAt mc.openPath (depth - 1))
+                if ((indexOf over deepest) == 0) {
+                    return false
+                }
+                if (mc.isOpenSub(over)) {
+                    return false
+                }
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    fn openSubTrigger:boolean (over:string) {
+        def menus:[MenuCtl] (this.allMenus())
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            if (mc.open && (mc.isOpenSub(over))) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
     fn tick:boolean (dtMs:double) {
-        def busy:boolean (ui.tick(dtMs))
+        if ((strlen holdHover) > 0) {
+            holdMs = (holdMs + dtMs)
+            if (holdMs >= holdDelayMs) {
+                def h:string holdHover
+                holdHover = ""
+                ui.hover(h)
+            }
+        }
+        def busy:boolean ((ui.tick(dtMs)) || ((strlen holdHover) > 0))
         return (busy || (menubar.pendingSub()))
     }
 

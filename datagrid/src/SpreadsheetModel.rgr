@@ -16,14 +16,34 @@ Import "CellStyle.rgr"
 Import "DataValidation.rgr"
 Import "RichText.rgr"
 Import "SheetImage.rgr"
+Import "SheetShape.rgr"
 Import "SheetTable.rgr"
 Import "XlsxNumberFormat.rgr"
 Import "../../office/editor/OfficeHistory.rgr"
 
 ; Conditional formatting rule (parsed from xlsx cfRule).
+; One sparkline from the worksheet's x14 extension: a tiny chart of `src`
+; (a range on this sheet) drawn inside cell (row, col).
+class Sparkline {
+    def row:int 0
+    def col:int 0
+    def r1:int 0
+    def c1:int 0
+    def r2:int 0
+    def c2:int 0
+    ; "line" (default), "column" or "stacked"
+    def kind:string "line"
+    def color:string "#1F4E79"
+}
+
 class CfRule {
-    ; 0 colorScale | 1 cellIs
+    ; 0 colorScale | 1 cellIs | 2 dataBar | 3 iconSet
     def kind:int 0
+    ; Icon sets: the set's name ("3Arrows", "3TrafficLights1", "5Rating"…)
+    ; and the lower bound of each level above the first, in percent of the
+    ; range (Excel's default cfvo type).
+    def iconSet:string ""
+    def thresholds:[double]
     def r0:int 0
     def c0:int 0
     def r1:int 0
@@ -53,6 +73,12 @@ class CfRule {
         r.color0 = color0
         r.color1 = color1
         r.color2 = color2
+        r.iconSet = iconSet
+        def i:int 0
+        while (i < (array_length thresholds)) {
+            push r.thresholds (itemAt thresholds i)
+            i = (i + 1)
+        }
         return r
     }
 }
@@ -318,6 +344,9 @@ class SpreadsheetModel {
     ; sheet a tenth too large, and — since a row is as tall as the type in it
     ; — a tenth too tall as well.
     def defaultFontPt:double 11.0
+    ; The theme's body font (Page Layout › Fonts), for cells with no font of
+    ; their own; "" keeps the view's.
+    def defaultFontName:string ""
     def freezeRows:int 0
     def freezeCols:int 0
     ; Cell values, sparse by row then column. Was a flat `"row,col"` string map:
@@ -344,6 +373,7 @@ class SpreadsheetModel {
     def sortCol:int -1
     def sortAsc:boolean true
     def cfRules:[CfRule]
+    def sparklines:[Sparkline]
     ; Cell annotations that are not the cell's value: a link to somewhere, a
     ; note about it, and a rule about what may be typed into it. All three are
     ; keyed the same way as a cell, and all three are METADATA — they survive
@@ -360,6 +390,8 @@ class SpreadsheetModel {
     ; beside the value rather than inside it — see RichText.
     ; Pictures floating over this sheet, in the order the drawing listed them.
     def images:[SheetImage]
+    ; Charts the .xlsx carried (anchor + series refs); GridApp opens them.
+    def fileCharts:[SheetImage]
     ; Tables (ListObjects) on this sheet. A table's NAME is workbook-wide, so
     ; the lookup that formulas use lives on WorkbookModel; this is only where
     ; the ones belonging to this sheet are kept.
@@ -370,10 +402,43 @@ class SpreadsheetModel {
     def linkKeys:[string]
     def notes:[string:string]
     def noteKeys:[string]
+    ; Threaded comments (Review › New Comment): a cell's thread is one
+    ; "Author: text" line per reply. Notes are the older single-text kind.
+    def threads:[string:string]
+    def threadKeys:[string]
+    ; Notes kept open (Show/Hide Note, Show All Notes) instead of only on the
+    ; selected cell.
+    def shownNotes:[string:boolean]
+    def showAllNotes:boolean false
+    ; Allow Edit Ranges: "A1:B4" ranges a protected sheet still lets you type in.
+    def editRanges:[string]
+    ; Circle Invalid Data: row, col pairs drawn with a red ring.
+    def invalidCircles:[int]
+    ; Data › Group: each row's and column's outline level (0 = none), and
+    ; whether a group's detail is hidden.
+    def rowLevels:[int:int]
+    def colLevels:[int:int]
+    ; Drawing objects over the sheet (shapes, text boxes, ink, slicers),
+    ; bottom of the z-order first.
+    def shapes:[SheetShape]
+    ; In-cell checkboxes, by cell key.
+    def checkboxes:[string:boolean]
+    ; Page Layout › Background: a picture tiled under the cells.
+    def backgroundSrc:string ""
+    def backgroundBytes:buffer (buffer_alloc 0)
+    def bgWidth:int 0
+    def bgHeight:int 0
+    ; View › Ruler, shown in Page Layout view.
+    def showRuler:boolean true
     def sheetHidden:boolean false
     ; The sheet view's switches (View tab) and the tab's colour. Written to the
     ; file as `sheetView` attributes and `sheetPr/tabColor`.
     def showGridlines:boolean true
+    ; View > Zoom (sheetView zoomScale / 100). Sizes are stored at 100 %;
+    ; colWidth / rowHeight and the geometry hand out zoomed pixels.
+    def zoom:double 1.0
+    ; "normal" | "pageLayout" | "pageBreak" — the status bar's view buttons.
+    def viewMode:string "normal"
     def showHeadings:boolean true
     def showFormulas:boolean false
     def tabColor:string ""
@@ -485,6 +550,7 @@ class SpreadsheetModel {
         c.defaultRowH = defaultRowH
         c.defaultColW = defaultColW
         c.defaultFontPt = defaultFontPt
+        c.defaultFontName = defaultFontName
         c.freezeRows = freezeRows
         c.freezeCols = freezeCols
         c.filterCol = filterCol
@@ -606,6 +672,13 @@ class SpreadsheetModel {
             push c.images pc
             im = (im + 1)
         }
+        def shi:int 0
+        while (shi < (array_length shapes)) {
+            def shp (new SheetShape)
+            shp.copyFrom((itemAt shapes shi))
+            push c.shapes shp
+            shi = (shi + 1)
+        }
         def rk:int 0
         while (rk < (array_length richKeys)) {
             def k5:string (itemAt richKeys rk)
@@ -723,7 +796,7 @@ class SpreadsheetModel {
             push rowOffsets 0
             def r:int 0
             while (r < rowCount) {
-                def rh:int (itemAt rowHeights r)
+                def rh:int (this.zoomed((itemAt rowHeights r)))
                 if ((r < (array_length rowHidden)) && (itemAt rowHidden r)) {
                     rh = 0
                 }
@@ -742,7 +815,7 @@ class SpreadsheetModel {
             push colOffsets 0
             def c:int 0
             while (c < colCount) {
-                def cw:int (itemAt colWidths c)
+                def cw:int (this.zoomed((itemAt colWidths c)))
                 if ((c < (array_length colHidden)) && (itemAt colHidden c)) {
                     cw = 0
                 }
@@ -1553,6 +1626,9 @@ class SpreadsheetModel {
         }
         def plain:CellStyle (CellStyle.createDefault())
         plain.fontSizePt = defaultFontPt
+        if ((strlen defaultFontName) > 0) {
+            plain.fontName = defaultFontName
+        }
         return plain
     }
 
@@ -1571,6 +1647,41 @@ class SpreadsheetModel {
 
     fn imageCount:int () {
         return (array_length images)
+    }
+
+    fn isCheckbox:boolean (row:int col:int) {
+        def k:string (this.cellKey(row col))
+        if (has checkboxes k) {
+            return (unwrap (get checkboxes k))
+        }
+        return false
+    }
+
+    ; A slicer's filter: rows r0.. take the flags given (true = hidden).
+    fn setRowsSuppressed:void (r0:int flags:[boolean]) {
+        this.ensureGeometry()
+        if ((array_length rowSuppressed) != rowCount) {
+            clear rowSuppressed
+            def hi:int 0
+            while (hi < rowCount) {
+                push rowSuppressed false
+                hi = (hi + 1)
+            }
+        }
+        def i:int 0
+        while (i < (array_length flags)) {
+            def r:int (r0 + i)
+            if ((r >= 0) && (r < rowCount)) {
+                set_at rowSuppressed r (itemAt flags i)
+            }
+            i = (i + 1)
+        }
+        rowGeomDirty = true
+        version = (version + 1)
+    }
+
+    fn shapeCount:int () {
+        return (array_length shapes)
     }
 
     ; --- tables ---------------------------------------------------------------
@@ -1865,6 +1976,61 @@ class SpreadsheetModel {
             i = (i + 1)
         }
         return n
+    }
+
+    ; --- threaded comments --------------------------------------------------------
+    fn threadAt:string (row:int col:int) {
+        def k:string (this.cellKey(row col))
+        if (has threads k) {
+            return (unwrap (get threads k))
+        }
+        return ""
+    }
+
+    fn hasThread:boolean (row:int col:int) {
+        return ((strlen (this.threadAt(row col))) > 0)
+    }
+
+    fn addReply:void (row:int col:int author:string text:string) {
+        def k:string (this.cellKey(row col))
+        def was:string (this.threadAt(row col))
+        if ((has threads k) == false) {
+            push threadKeys k
+        }
+        def line:string (author + ": " + text)
+        if ((strlen was) > 0) {
+            set threads k (was + "\n" + line)
+        } {
+            set threads k line
+        }
+        version = (version + 1)
+    }
+
+    fn clearThread:void (row:int col:int) {
+        def k:string (this.cellKey(row col))
+        if (has threads k) {
+            set threads k ""
+        }
+        version = (version + 1)
+    }
+
+    fn noteShown:boolean (row:int col:int) {
+        if ((this.hasNote(row col)) == false) {
+            return false
+        }
+        if showAllNotes {
+            return true
+        }
+        def k:string (this.cellKey(row col))
+        if (has shownNotes k) {
+            return (unwrap (get shownNotes k))
+        }
+        return false
+    }
+
+    fn setNoteShown:void (row:int col:int on:boolean) {
+        set shownNotes (this.cellKey(row col)) on
+        version = (version + 1)
     }
 
     ; --- data validation ------------------------------------------------------
@@ -2397,6 +2563,88 @@ class SpreadsheetModel {
         return c
     }
 
+    ; --- pages -----------------------------------------------------------------
+    ; The printable area of one page in CSS pixels (96 per inch): the paper,
+    ; turned for landscape, less the margins. Fit-to-width / height makes that
+    ; direction one page.
+    fn pagePrintable:[double] () {
+        def pw:double 8.5
+        def ph:double 11.0
+        if (paperSize == 9) {
+            pw = 8.27
+            ph = 11.69
+        }
+        if (paperSize == 5) {
+            ph = 14.0
+        }
+        if (paperSize == 8) {
+            pw = 11.69
+            ph = 16.54
+        }
+        if (pageOrientation == "landscape") {
+            def t:double pw
+            pw = ph
+            ph = t
+        }
+        def out:[double]
+        def w:double (((pw - marginLeft) - marginRight) * 96.0)
+        def h:double (((ph - marginTop) - marginBottom) * 96.0)
+        if (fitToWidth > 0) {
+            w = 1000000.0
+        }
+        if (fitToHeight > 0) {
+            h = 1000000.0
+        }
+        push out w
+        push out h
+        return out
+    }
+
+    ; Where each page after the first starts: rows (or columns) of the used
+    ; range filled at 100 % until the next would not fit, plus manual breaks.
+    fn pageBreaks:[int] (cols:boolean) {
+        def room:[double] (this.pagePrintable())
+        def cap:double (itemAt room 1)
+        def last:int (this.usedRow())
+        if cols {
+            cap = (itemAt room 0)
+            last = (this.usedCol())
+        }
+        def out:[int]
+        def acc:double 0.0
+        def i:int 0
+        while (i <= last) {
+            def sz:double (to_double (this.rawRowHeight(i)))
+            if cols {
+                sz = (to_double (this.rawColWidth(i)))
+                if (this.isColHidden(i)) {
+                    sz = 0.0
+                }
+            } {
+                if (this.isRowHidden(i)) {
+                    sz = 0.0
+                }
+            }
+            def manual:boolean false
+            if (cols == false) {
+                def k:int 0
+                while (k < (array_length rowBreaks)) {
+                    if ((itemAt rowBreaks k) == i) {
+                        manual = true
+                    }
+                    k = (k + 1)
+                }
+            }
+            if ((i > 0) && (manual || ((acc + sz) > cap))) {
+                push out i
+                acc = 0.0
+            }
+            acc = (acc + sz)
+            i = (i + 1)
+        }
+        return out
+    }
+
     ; --- transactions -------------------------------------------------------
     ; Ops recorded between beginTx / endTx undo as one Excel-style action.
     ; Nesting is counted so a paste inside a larger op stays one transaction.
@@ -2663,6 +2911,15 @@ class SpreadsheetModel {
     }
 
     fn rowHeight:int (row:int) {
+        return (this.zoomed((this.rawRowHeight(row))))
+    }
+
+    fn colWidth:int (col:int) {
+        return (this.zoomed((this.rawColWidth(col))))
+    }
+
+    ; At 100 %: what the file stores and the writer writes.
+    fn rawRowHeight:int (row:int) {
         this.ensureSizeArrays()
         if (row < 0) {
             return defaultRowH
@@ -2673,7 +2930,7 @@ class SpreadsheetModel {
         return (itemAt rowHeights row)
     }
 
-    fn colWidth:int (col:int) {
+    fn rawColWidth:int (col:int) {
         this.ensureSizeArrays()
         if (col < 0) {
             return defaultColW
@@ -2682,6 +2939,35 @@ class SpreadsheetModel {
             return defaultColW
         }
         return (itemAt colWidths col)
+    }
+
+    fn zoomed:int (v:int) {
+        if (zoom == 1.0) {
+            return v
+        }
+        return (to_int (((to_double v) * zoom) + 0.5))
+    }
+
+    fn unzoomed:int (v:int) {
+        if (zoom == 1.0) {
+            return v
+        }
+        return (to_int (((to_double v) / zoom) + 0.5))
+    }
+
+    ; 10 % .. 400 %, as Excel allows.
+    fn setZoom:void (z:double) {
+        def v:double z
+        if (v < 0.1) {
+            v = 0.1
+        }
+        if (v > 4.0) {
+            v = 4.0
+        }
+        zoom = v
+        rowGeomDirty = true
+        colGeomDirty = true
+        version = (version + 1)
     }
 
     ; The default row height and column width the FILE states, in pixels, as
@@ -2728,6 +3014,7 @@ class SpreadsheetModel {
         if (row >= rowCount) {
             return
         }
+        h = (this.unzoomed(h))
         if (h < 8) {
             h = 8
         }
@@ -2749,6 +3036,7 @@ class SpreadsheetModel {
         if (col >= colCount) {
             return
         }
+        w = (this.unzoomed(w))
         if (w < 24) {
             w = 24
         }

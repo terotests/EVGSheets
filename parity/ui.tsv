@@ -1,61 +1,61 @@
 id	area	element	weight	gridcraft	evgsheets	test	note
 W1	Window	Title bar with the workbook name	1	yes	yes	probe:ui.titleBar	
-W2	Window	Quick Access Toolbar (save, undo, redo)	2	yes	partial	-	undo and redo sit in the ribbon; no QAT
+W2	Window	Quick Access Toolbar (save, undo, redo)	2	yes	yes	probe:ui.qat	
 W3	Window	Dark mode following the system	1	yes	yes	-	theme=dark and the system setting; no smoke check yet
-W4	Window	File view (Backstage: Info, New, Open, Save As, Print, Export)	2	yes	no	-	File is a 3-item menu
-R1	Ribbon	Ribbon tabs: Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Automate	3	yes	no	probe:ui.ribbonTabs	a menubar (6 menus) and one toolbar row
-R2	Ribbon	Home tab groups: Clipboard, Font, Alignment, Number, Styles, Cells, Editing	2	yes	partial	probe:ui.ribbonGroups	7 groups, but no Styles, Cells or Editing group
-R3	Ribbon	Home tab controls (Excel ~60)	3	yes	no	probe:ui.homeControls	the count is U3
+W4	Window	File view (Backstage: Info, New, Open, Save As, Print, Export)	2	yes	yes	probe:ui.backstage	
+R1	Ribbon	Ribbon tabs: Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Automate	3	yes	yes	probe:ui.ribbonTabs	
+R2	Ribbon	Home tab groups: Clipboard, Font, Alignment, Number, Styles, Cells, Editing	2	yes	yes	probe:ui.homeGroups	
+R3	Ribbon	Home tab controls (Excel ~60)	3	yes	yes	probe:ui.homeControls	
 R4	Ribbon	Font and size drop-downs	1	yes	yes	smoke:choosing 14 sets the size	
 R5	Ribbon	Toggles show the active cell's state (Bold pressed)	1	yes	yes	smoke:the reader is told Bold is pressed	
-R6	Ribbon	Galleries: Conditional Formatting, Format as Table, Cell Styles	2	yes	no	-	
-R7	Ribbon	Contextual tabs (Table Design, Chart Design)	2	yes	no	-	
+R6	Ribbon	Galleries: Conditional Formatting, Format as Table, Cell Styles	2	yes	yes	probe:ui.galleries	
+R7	Ribbon	Contextual tabs (Table Design, Chart Design)	2	yes	yes	probe:ui.contextTabs	
 R8	Ribbon	Key tips (Alt or F10, then letters)	1	partial	partial	smoke:F6 leaves the sheet for the chrome	F6/F10 reach the menubar and ribbon; no key tips
 R9	Ribbon	Collapse the ribbon	1	partial	yes	-	View › Toolbar
 F1	Formula bar	Name Box	1	yes	yes	probe:ui.nameBox	
-F2	Formula bar	Cancel, Enter and Insert Function (fx) buttons	3	yes	no	probe:ui.fxButtons	
-F3	Formula bar	Expand the formula bar	2	yes	no	-	
-F4	Formula bar	Function autocomplete and argument tips	2	yes	no	-	only in the script editor
-F5	Formula bar	Point mode and reference colouring	1	yes	partial	-	references are highlighted; no point mode check
+F2	Formula bar	Cancel, Enter and Insert Function (fx) buttons	3	yes	yes	probe:ui.fxButtons	
+F3	Formula bar	Expand the formula bar	2	yes	yes	probe:ui.expandFormulaBar	
+F4	Formula bar	Function autocomplete and argument tips	2	yes	yes	probe:ui.autocomplete	
+F5	Formula bar	Point mode and reference colouring	1	yes	yes	probe:ui.pointMode	
 G1	Grid	Grid fills the window to the right edge	3	yes	yes	probe:ui.gridFillsWindow	
 G2	Grid	Rows fill the window to the bottom	3	yes	yes	probe:ui.rowsFillWindow	
 G3	Grid	Numbers right-aligned by default	3	yes	yes	probe:wb.numbersRight	
 G4	Grid	Typing into a cell, Enter/Tab movement	1	yes	yes	smoke:typing goes into the cell	
 G5	Grid	Context menu on cells	1	yes	yes	smoke:right click opens the context menu	
 G6	Grid	Context menus on row and column headers	1	yes	yes	smoke:right click on a column header opens the column menu	
-G7	Grid	Multi-area selection (Ctrl+click)	1	partial	partial	smoke:Ctrl+click on headers selects B and D	headers only
+G7	Grid	Multi-area selection (Ctrl+click)	1	partial	yes	probe:ui.multiArea	
 G8	Grid	Freeze panes	1	yes	yes	probe:cmd.view.freezePanes	
-G9	Grid	Fill handle drag	2	yes	partial	-	the core has a fill handle; no check
-G10	Grid	Column resize and double-click AutoFit	1	yes	partial	probe:cmd.home.autofitColumnWidth	AutoFit by command; header drag not checked
+G9	Grid	Fill handle drag	2	yes	yes	probe:ui.fillHandle	
+G10	Grid	Column resize and double-click AutoFit	1	yes	yes	probe:ui.columnResize	
 T1	Target workbook	Opens the dashboard workbook	1	yes	yes	probe:wb.opens	
 T2	Target workbook	Currency formats ($48,200)	1	yes	yes	probe:wb.values	
 T3	Target workbook	Percent formats (28.4%)	1	yes	yes	probe:wb.percent	
 T4	Target workbook	Formatted table read from the file	1	yes	yes	probe:wb.table	
 T5	Target workbook	Table style drawn (header fill)	3	yes	yes	probe:wb.tableStyle	
 T6	Target workbook	Banded rows	3	yes	yes	probe:wb.banding	
-T7	Target workbook	Filter buttons in the table header	3	yes	partial	probe:wb.tableFilters	drawn; a click does not open the filter yet
+T7	Target workbook	Filter buttons in the table header	3	yes	yes	probe:ui.tableFilterButton	
 T8	Target workbook	Table total row computes (SUBTOTAL over table columns)	3	yes	yes	probe:wb.totalRow	
 T9	Target workbook	Structured references in formulas over the table	2	yes	yes	probe:wb.structuredRefs	
-T10	Target workbook	Data bars	3	yes	no	probe:wb.dataBars	only cellIs and colour-scale rules are read
-T11	Target workbook	Icon sets	3	yes	no	probe:wb.iconSets	
-T12	Target workbook	Sparklines	3	no	no	probe:wb.sparklines	GridCraft has no sparkline contextual tab either
-T13	Target workbook	Charts in the file (column, pie)	3	yes	no	probe:wb.charts	charts are not read from xlsx
+T10	Target workbook	Data bars	3	yes	yes	probe:wb.dataBars	
+T11	Target workbook	Icon sets	3	yes	yes	probe:wb.iconSets	
+T12	Target workbook	Sparklines	3	no	yes	probe:wb.sparklines	GridCraft has no sparkline contextual tab either
+T13	Target workbook	Charts in the file (column, pie)	3	yes	yes	probe:wb.charts	read from the drawing; opened as chart windows
 T14	Target workbook	Cell borders	1	yes	yes	probe:wb.border	
 S1	Sheet tabs	Tabs for the workbook's sheets	1	yes	yes	probe:ui.sheetTabs	
 S2	Sheet tabs	Add sheet (+)	1	yes	yes	probe:ui.addSheet	
 S3	Sheet tabs	Rename, reorder by drag, tab menu	1	yes	yes	smoke:dragging a tab reorders the sheets	
-S4	Sheet tabs	Scroll arrows for many sheets	2	yes	no	probe:ui.tabScroll	
-S5	Sheet tabs	Tab colour, hide and unhide	2	yes	no	-	
+S4	Sheet tabs	Scroll arrows for many sheets	2	yes	yes	probe:ui.tabScroll	
+S5	Sheet tabs	Tab colour, hide and unhide	2	yes	yes	probe:ui.sheetTabs	
 B1	Status bar	Mode indicator (Ready, Enter, Edit)	2	yes	yes	probe:ui.statusReady	
 B2	Status bar	Sum, Average and Count of the selection	1	yes	yes	probe:ui.statusStats	
-B3	Status bar	Zoom slider and percentage	3	yes	no	probe:ui.zoom	
-B4	Status bar	View buttons (Normal, Page Layout, Page Break Preview)	3	yes	no	probe:ui.viewButtons	
+B3	Status bar	Zoom slider and percentage	3	yes	yes	probe:ui.zoomSlider	
+B4	Status bar	View buttons (Normal, Page Layout, Page Break Preview)	3	yes	yes	probe:ui.viewButtons	
 D1	Dialogs and panes	Find and Replace	1	yes	yes	smoke:Enter finds the next match	
 D2	Dialogs and panes	Paste Special	1	yes	yes	smoke:Paste pastes the value and closes	
-D3	Dialogs and panes	Format Cells (Number, Alignment, Font, Border, Fill, Protection)	2	yes	partial	smoke:Apply draws them	separate colour and border dialogs
+D3	Dialogs and panes	Format Cells (Number, Alignment, Font, Border, Fill, Protection)	2	yes	yes	probe:ui.formatCellsPane	
 D4	Dialogs and panes	Conditional Formatting Rules Manager	1	yes	yes	smoke:Delete rule removes it	
 D5	Dialogs and panes	Data Validation	1	yes	yes	smoke:Add rule puts a list rule on the cell	
 D6	Dialogs and panes	Insert Chart and a chart format pane	1	yes	partial	smoke:a type chosen redraws the chart on the sheet	type, series and title editor; no element formatting
-D7	Dialogs and panes	Task panes (Comments, Watch Window, Selection)	2	yes	no	-	
+D7	Dialogs and panes	Task panes (Comments, Watch Window, Selection)	2	yes	yes	probe:ui.taskPanes	
 A1	Accessibility	Accessible tree with cells for screen readers	1	no	yes	smoke:the tree has a menubar, toolbars, a grid and tabs	GridCraft's grid is not exposed
 A2	Accessibility	Keyboard reaches every part (F6 cycle)	1	yes	yes	smoke:F6 leaves the sheet for the chrome	

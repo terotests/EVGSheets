@@ -289,6 +289,19 @@
 
 /* --- the ribbon ------------------------------------------------------------ */
 
+/* Excel's ribbon tabs, above the groups. */
+.sx-ribtabrow {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  background-color: var(--surface);
+  flex-shrink: 0;
+}
+
 .sx-ribbonbar {
   display: flex;
   flex-direction: row;
@@ -335,7 +348,8 @@
 .sx-tool:active { background-color: var(--pressed); }
 .sx-tool-state-on { background-color: var(--accent-soft); }
 .sx-tool-disabled { opacity: 0.35; }
-.sx-tool-text { width: 34px; }
+.sx-tool-text { width: fit-content; min-width: 28px; padding: 0 5px; }
+.sx-tool-text .sx-tool-word { font-weight: normal; }
 
 .sx-glyph {
   width: 16px;
@@ -454,8 +468,8 @@
 }
 .ui-tabpanel { display: none; }
 
-.sx-status { color: var(--muted); font-size: 12px; line-height: 16px; padding: 0 6px; }
-.sx-stats { color: var(--text); font-size: 12px; line-height: 16px; padding: 0 6px; }
+.sx-status { color: var(--muted); font-size: 12px; line-height: 16px; padding: 0 6px; flex-shrink: 0; white-space: nowrap; }
+.sx-stats { color: var(--text); font-size: 12px; line-height: 16px; height: 16px; padding: 0 6px; overflow: hidden; white-space: nowrap; }
 
 /* --- the context menu's holder ----------------------------------------------------- */
 
@@ -720,3 +734,62 @@
   .ui-menubar-trigger { padding: 4px 6px; }
   .sx-ribbonbar { padding: 4px 6px; column-gap: 4px; }
 }
+
+/* --- the task pane: Excel's panes at the right of the grid ----------------------- */
+
+.sx-pane {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 280px;
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 8px;
+  background-color: var(--surface);
+  overflow: hidden;
+}
+.sx-pane-head {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 32px;
+}
+.sx-pane-title { color: var(--text); font-size: 14px; font-weight: bold; line-height: 20px; }
+.sx-pane-list {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 1px;
+  width: 100%;
+  height: fit-content;
+  background-color: var(--surface);
+}
+.sx-pane-row { width: 100%; height: 24px; align-items: flex-start; padding: 0 6px; }
+
+/* The status bar's zoom slider, between − and +. */
+.ui-slider { width: 110px; height: 18px; margin: 0 4px; flex-shrink: 0; }
+.ui-slider-track {
+  background-color: var(--pressed);
+  border-radius: 999px;
+  width: 110px;
+  height: 4px;
+  margin-top: 7px;
+}
+.ui-slider-range { background-color: var(--accent); height: 4px; border-radius: 999px; }
+.ui-slider-thumb {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background-color: var(--surface);
+  width: 12px;
+  height: 12px;
+  top: 3px;
+  margin-left: -6px;
+}
+
