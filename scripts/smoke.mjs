@@ -310,6 +310,25 @@ try {
   await page.waitForTimeout(80);
   ok("…and undo puts it back", (await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 2))) === c1);
 
+  // Typing in a cell: the caret stands in that cell, not in whichever filled
+  // cell was painted after it.
+  const ed = await page.evaluate(() => {
+    const v = window.sheet.app.grid.app.grid;
+    const m = window.sheet.app.grid.app.model;
+    return { x: v.x + v.rowHeaderW + m.colToX(1) + 10, y: v.headerTop() + v.colHeaderH + m.rowToY(2) + 6 };
+  });
+  await page.mouse.click(canvasBox.x + g.x + ed.x, canvasBox.y + g.y + ed.y);
+  await page.keyboard.type("xy");
+  await page.waitForTimeout(80);
+  const caret = await page.evaluate(() => {
+    const a = window.sheet.app.grid.app;
+    const r = a.grid.cellRect(a.model, a.sel.active.row, a.sel.active.col);
+    return { ok: a.editing && a.view.editTextX === r.x + 4 && a.view.editTextY > r.y - r.h / 2 && a.view.editTextY < r.y + r.h, at: a.view.editTextX + "," + a.view.editTextY, cell: r.x + "," + r.y };
+  });
+  ok("the in-cell caret stands in the cell being edited", caret.ok, caret.at + " cell " + caret.cell);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+
   // …and on a row header.
   await page.mouse.click(canvasBox.x + g.x + hdr.rowX, canvasBox.y + g.y + hdr.rowY, { button: "right" });
   await page.waitForTimeout(100);
