@@ -68,11 +68,11 @@
   },
   "ui.ribbonGroups": {
    "pass": true,
-   "value": "14 toolbar groups"
+   "value": "15 toolbar groups"
   },
   "ui.homeControls": {
    "pass": true,
-   "value": "144 commands reachable from Home: 49 controls on show, the rest in their drop-downs (Excel: ~60); 43 buttons inside toolbars"
+   "value": "144 commands reachable from Home: 49 controls on show, the rest in their drop-downs (Excel: ~60); 44 buttons inside toolbars"
   },
   "ui.homeClarity": {
    "pass": true,
@@ -1200,7 +1200,7 @@
   },
   "ui.homeGroups": {
    "pass": true,
-   "value": "quarterly-sales-dashboard.xlsx, Quick Access Toolbar, Undo, Undo, Clipboard, Clipboard, Font, Font size, Font, Colour and script, Alignment, Vertical alignment, Alignment, Number, Number, Styles, Cells, Editing, Editing, Add-ins, Add-ins, Sheet navigation, Sheet actions, View and zoom, Spreadsheet, Sales, Formula bar"
+   "value": "quarterly-sales-dashboard.xlsx, Quick Access Toolbar, Theme, Undo, Undo, Clipboard, Clipboard, Font, Font size, Font, Colour and script, Alignment, Vertical alignment, Alignment, Number, Number, Styles, Cells, Editing, Editing, Add-ins, Add-ins, Sheet navigation, Sheet actions, View and zoom, Spreadsheet, Sales, Formula bar"
   },
   "ui.tableFilterButton": {
    "pass": true,
@@ -1208,7 +1208,7 @@
   },
   "ui.contextTabs": {
    "pass": true,
-   "value": "in table: true, groups Table Style Options/Table Styles, outside: false, chart: true"
+   "value": "in table: true, groups Table Style Options/Table Style Options/Table Style Options/Table Style Options/Table Style Options/Table Style Options, outside: false, chart: true"
   },
   "ui.qat": {
    "pass": true,
@@ -1815,6 +1815,7 @@
   "sheet.add",
   "sheet.duplicate",
   "sx:formulaBar",
+  "sx:menubar",
   "sx:paste",
   "sx:pasteValues",
   "sx:ribbon",

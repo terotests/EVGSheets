@@ -243,6 +243,31 @@ try {
   await page.keyboard.press("Control+z");
   await page.waitForTimeout(60);
 
+  // The tabs past Home are laid out as Home is: labelled groups on one row
+  // that shrink to glyphs and fold rather than wrap.
+  const tabRows = await page.evaluate(async () => {
+    const a = window.sheet.app; const out = {};
+    for (const t of ["insert", "draw", "pagelayout", "formulas", "data", "review", "view", "automate"]) {
+      a.ribbonTab = t; a.buildChrome(); a.sync(); window.sheet.redraw();
+      await new Promise((r) => setTimeout(r, 30));
+      out[t] = +a.rectOf("sx-ribbonbar").split(",")[3];
+    }
+    a.ribbonTab = "home"; a.buildChrome(); a.sync(); window.sheet.redraw();
+    return out;
+  });
+  ok("every ribbon tab fits one row of groups at 1280 px", Object.values(tabRows).every((h) => h > 40 && h < 110), JSON.stringify(tabRows));
+  // View › Appearance: dark mode and the menu bar, and the title bar's switch.
+  await click(page, "sx-ribtabs-tab-view");
+  await click(page, "sx-rb-vlook-0-v-dark");
+  ok("View › Dark Mode turns the dark theme on", (await page.evaluate(() => window.sheet.app.theme)) === "dark");
+  await click(page, "sx-themebar-hdr-theme");
+  ok("…and the title bar's switch turns it off again", (await page.evaluate(() => window.sheet.app.theme)) === "light");
+  await click(page, "sx-rb-vlook-2-v-menubar");
+  ok("View › Menu Bar brings the classic menus back", (await page.evaluate(() => window.sheet.app.rectOf("sx-mb-format-trigger"))) !== "");
+  await click(page, "sx-rb-vlook-2-v-menubar");
+  ok("…and takes them away", (await page.evaluate(() => window.sheet.app.rectOf("sx-mb-format-trigger"))) === "");
+  await click(page, "sx-ribtabs-tab-home");
+
   // The classic menu bar is an option: open File with the pointer, then Format › Number.
   await page.evaluate(() => window.sheet.setOption("menubar", true));
   await page.waitForTimeout(80);

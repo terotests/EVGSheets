@@ -1,5 +1,5 @@
 {
- "passed": 118,
+ "passed": 123,
  "checks": [
   {
    "name": "a plain visit opens an empty workbook",
@@ -79,6 +79,26 @@
   },
   {
    "name": "…and Insert sheet rows moves the row down",
+   "ok": true
+  },
+  {
+   "name": "every ribbon tab fits one row of groups at 1280 px",
+   "ok": true
+  },
+  {
+   "name": "View › Dark Mode turns the dark theme on",
+   "ok": true
+  },
+  {
+   "name": "…and the title bar's switch turns it off again",
+   "ok": true
+  },
+  {
+   "name": "View › Menu Bar brings the classic menus back",
+   "ok": true
+  },
+  {
+   "name": "…and takes them away",
    "ok": true
   },
   {
