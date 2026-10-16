@@ -9,7 +9,8 @@
     "build": "node scripts/build.mjs",
     "smoke": "node scripts/smoke.mjs",
     "serve": "node scripts/build.mjs && python3 -m http.server -d dist 8000",
-    "check": "node scripts/build.mjs && node scripts/smoke.mjs"
+    "check": "node scripts/build.mjs && node scripts/smoke.mjs",
+    "parity": "node scripts/smoke.mjs --json parity/smoke.json && node tools/parity/probe.mjs && node tools/parity/report.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
