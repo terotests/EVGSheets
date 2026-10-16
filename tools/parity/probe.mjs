@@ -1109,6 +1109,49 @@ try {
       return [seen.join(",") === "comments:comments,watch:watch,selection:selection", seen.join(",")];
     });
   };
+  // Number formats beyond the presets (PROBE_NF=1 runs only these).
+  const nfChecks = async () => {
+    // A custom code, as typed in Format Cells › Custom.
+    await run("format.numfmt", "0.000");
+    const nfc = await S();
+    ok("cmd.home.numberFormat.custom", nfc.numFmt === "0.000" && nfc.display === "45000.000", nfc.numFmt + " → " + nfc.display);
+    // Accounting: the currency symbol against the left edge, the amount against the right.
+    await M("(M.setColWidth(0, 140), G.redraw && G.redraw(), 0)");
+    await put("A5", "1234.5");
+    await at("A5");
+    await run("format.numfmt", "accounting");
+    const acc = await S();
+    await page.evaluate(() => window.sheet.app.redraw && window.sheet.app.redraw());
+    await page.waitForTimeout(80);
+    const ar = await M("(() => { const q = G.grid.cellRect(M, 4, 0); return [q.x, q.y, q.w, q.h]; })()");
+    const ap = await toPage(ar[0], ar[1]);
+    const shot = await page.screenshot({ clip: { x: ap.x, y: ap.y, width: ar[2], height: ar[3] } });
+    const ink = await page.evaluate(async ([b64, w, h]) => {
+      const img = new Image();
+      img.src = "data:image/png;base64," + b64;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = img.width; c.height = img.height;
+      const g = c.getContext("2d");
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      const cols = [];
+      for (let x = 0; x < c.width; x++) {
+        let on = false;
+        for (let y = 2; y < c.height - 2; y++) { const i = (y * c.width + x) * 4; if (d[i] < 160 && d[i + 1] < 160 && d[i + 2] < 160) on = true; }
+        cols.push(on ? 1 : 0);
+      }
+      return cols.join("");
+    }, [shot.toString("base64"), ar[2], ar[3]]);
+    const runs = ink.replace(/^0+|0+$/g, "").split(/0{12,}/).filter(Boolean).length;
+    ok("cmd.home.accounting.align", /\* /.test(acc.numFmt) && ink.indexOf("1") >= 0 && ink.indexOf("1") < 12 && ink.lastIndexOf("1") > ink.length - 20 && runs === 2, acc.display + " ink " + ink);
+  };
+  if (process.env.PROBE_NF) {
+    await put("A5", "45000");
+    await at("A5");
+    await nfChecks();
+    throw new Error("PROBE_NF: only the number format checks ran");
+  }
   if (process.env.PROBE_UI) {
     await uiChecks2();
     throw new Error("PROBE_UI: only the UI checks ran");
@@ -1585,6 +1628,7 @@ try {
   await run("format.numfmt", "date");
   const nf = await S();
   ok("cmd.home.numberFormat", /20\d\d|\d+\/\d+\/\d+/.test(nf.display) && nf.numFmt !== "General", nf.numFmt + " → " + nf.display);
+  await nfChecks();
   await run("file.close");
   const closed = await S();
   ok("cmd.file.close", closed.sheets.length === 1 && closed.source === "" && (await get(0, 0)) === "", closed.sheets.length + " sheet(s), source '" + closed.source + "'");
@@ -1604,6 +1648,6 @@ const out = {
   commands: [...new Set(commands)].sort(),
   actions: [...new Set(actions)].sort(),
 };
-if (!process.env.PROBE_NEW && !process.env.PROBE_NEW2 && !process.env.PROBE_UI) fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
+if (!process.env.PROBE_NEW && !process.env.PROBE_NEW2 && !process.env.PROBE_UI && !process.env.PROBE_NF) fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
 const passed = Object.values(results).filter((r) => r.pass).length;
 console.log(`\n${passed}/${Object.keys(results).length} probe checks pass (a failure is a measured gap, not a broken run)`);

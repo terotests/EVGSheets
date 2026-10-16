@@ -738,6 +738,54 @@ class GridView {
         return fallback
     }
 
+    ; Accounting formats (`_($* #,##0.00_)`): the `* ` fill puts the currency
+    ; symbol against the left edge and the amount against the right, as Excel
+    ; does. accountingSplit gives the index after the symbol, or -1.
+    sfn accountingSplit:int (txt:string numFmt:string) {
+        if ((indexOf numFmt "* ") < 0) {
+            return -1
+        }
+        def n:int (strlen txt)
+        def i:int 0
+        while (i < n) {
+            def ch:int (charAt txt i)
+            if ((ch == 36) || (ch == 8364) || (ch == 163) || (ch == 165)) {
+                return (i + 1)
+            }
+            if ((ch != 32) && (ch != 40)) {
+                return -1
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
+    fn paintAccounting:boolean (dl:EVGDisplayList rect:GridRect st:CellStyle cellPx:double col:EVGColor txt:string) {
+        def cut:int (GridView.accountingSplit(txt st.numFmt))
+        if (cut < 0) {
+            return false
+        }
+        def head:string (trim (substring txt 0 cut))
+        def tail:string (trim (substring txt cut (strlen txt)))
+        def headW:int (to_int (ctx.tr.measureWidth(head cellPx)))
+        def tailW:int (to_int (ctx.tr.measureWidth(tail cellPx)))
+        if ((headW + tailW + 14) > rect.w) {
+            return false
+        }
+        def lineH:int (to_int (ctx.tr.lineHeight(cellPx)))
+        if (lineH < 8) {
+            lineH = 8
+        }
+        def top:int (this.textTopFor(rect st lineH 1 cellPx))
+        def rx:double (to_double ((rect.x + rect.w) - tailW - 10))
+        this.pushClip(dl (to_double rect.x) (to_double rect.y) (to_double rect.w) (to_double rect.h))
+        textDir = (st.textDirection())
+        this.pushStyledText(dl head (to_double (rect.x + 4)) (to_double top) cellPx col st.fontName st.bold st.italic)
+        this.pushStyledText(dl tail rx (to_double top) cellPx col st.fontName st.bold st.italic)
+        this.popClip(dl)
+        return true
+    }
+
     fn paintSingleLine:void (dl:EVGDisplayList model:SpreadsheetModel rect:GridRect st:CellStyle cellPx:double col:EVGColor txt:string r:int c:int) {
         if (model.hasRichText(r c)) {
             def rt:RichText (model.richTextAt(r c))
@@ -767,6 +815,9 @@ class GridView {
     }
 
     fn paintFlatLine:void (dl:EVGDisplayList model:SpreadsheetModel rect:GridRect st:CellStyle cellPx:double col:EVGColor txt:string r:int c:int) {
+        if (this.paintAccounting(dl rect st cellPx col txt)) {
+            return
+        }
         def textW:int (to_int (ctx.tr.measureWidth(txt cellPx)))
         def lineH:int (to_int (ctx.tr.lineHeight(cellPx)))
         if (lineH < 8) {
