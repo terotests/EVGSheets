@@ -8,7 +8,8 @@
  *     tools: "bold,italic,sortasc", // ribbon tools to keep ("" = all)
  *     theme: "light",             // "light" | "dark"
  *     readOnly: false,
- *     formulaBar: true, tabs: true, status: true, menubar: true, ribbon: true,
+ *     formulaBar: true, tabs: true, status: true, ribbon: true,
+ *     menubar: false,             // the classic menu bar over the ribbon
  *     xlsx: "book.xlsx",          // a URL, an ArrayBuffer, or nothing (demo sheet)
  *     blank: false,               // true: one empty sheet instead of the demo sheet
  *     name: "book.xlsx",

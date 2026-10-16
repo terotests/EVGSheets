@@ -228,7 +228,24 @@ try {
   ok("the reader is told Bold is pressed", pressed === String(!wasBold), String(pressed));
   await click(page, "sx-rb-text-bold");
 
-  // The menubar: open File with the pointer, then Format › Number.
+  // The ribbon is Excel's: no menu bar over it, its groups named under them.
+  const clar = JSON.parse(await page.evaluate(() => window.sheet.app.ribbonClarity()));
+  ok("the full editor has no menu bar over the ribbon", (await page.evaluate(() => window.sheet.app.rectOf("sx-mb-format-trigger"))) === "");
+  ok("every Home toolbar sits in a labelled group", clar.toolbars > 0 && clar.labelled === clar.toolbars, JSON.stringify(clar));
+  ok("no abbreviations or doubled commands on Home", clar.abbreviations.length === 0 && clar.duplicates.length === 0, JSON.stringify(clar));
+  // A Home drop-down: Cells › Insert › Insert sheet rows moves row 1 down.
+  await page.evaluate(() => window.sheet.run("nav.goto", "A1"));
+  const homeA1 = await page.evaluate(() => window.sheet.app.grid.app.model.getCell(0, 0));
+  await click(page, "sx-cellins-trigger");
+  ok("the Insert drop-down opens", (await state(page)).menuOpen);
+  await click(page, "sx-cellins-item-hm-insrow");
+  ok("…and Insert sheet rows moves the row down", (await page.evaluate(() => window.sheet.app.grid.app.model.getCell(1, 0))) === homeA1 && !(await state(page)).menuOpen, homeA1);
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(60);
+
+  // The classic menu bar is an option: open File with the pointer, then Format › Number.
+  await page.evaluate(() => window.sheet.setOption("menubar", true));
+  await page.waitForTimeout(80);
   await click(page, "sx-mb-format-trigger");
   s = await state(page);
   ok("a menubar menu opens", s.menuOpen);
@@ -248,6 +265,8 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
   ok("Escape closes it", !(await state(page)).menuOpen);
+  await page.evaluate(() => window.sheet.setOption("menubar", false));
+  await page.waitForTimeout(80);
 
   // A dropdown on the ribbon: the font size.
   await click(page, "sx-size-trigger");

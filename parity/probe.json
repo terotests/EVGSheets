@@ -64,15 +64,19 @@
   },
   "ui.ribbonTabs": {
    "pass": true,
-   "value": "9 of 9 Excel ribbon tabs; menubar menus: 9"
+   "value": "9 of 9 Excel ribbon tabs; menubar menus: 0"
   },
   "ui.ribbonGroups": {
    "pass": true,
-   "value": "18 toolbar groups"
+   "value": "14 toolbar groups"
   },
   "ui.homeControls": {
    "pass": true,
-   "value": "78 ribbon controls (Excel's Home tab: ~60)"
+   "value": "144 commands reachable from Home: 49 controls on show, the rest in their drop-downs (Excel: ~60); 43 buttons inside toolbars"
+  },
+  "ui.homeClarity": {
+   "pass": true,
+   "value": "49 controls on show, 10/10 toolbars in labelled groups, abbreviations [], doubled []"
   },
   "ui.nameBox": {
    "pass": true,
@@ -88,7 +92,7 @@
   },
   "ui.rowsFillWindow": {
    "pass": true,
-   "value": "38 row headers"
+   "value": "37 row headers"
   },
   "ui.sheetTabs": {
    "pass": true,
@@ -124,7 +128,7 @@
   },
   "ui.menubar": {
    "pass": true,
-   "value": ""
+   "value": "by default: false, with menubar=true: true"
   },
   "cmd.home.italic": {
    "pass": true,
@@ -1196,7 +1200,7 @@
   },
   "ui.homeGroups": {
    "pass": true,
-   "value": "Quick Access Toolbar, History, Clipboard, Font, Font size and effects, Alignment, Vertical alignment and indent, Number, More number formats, Styles, Cells, Data, Editing, Insert, Add-ins, Sheet navigation, Sheet actions, View and zoom"
+   "value": "quarterly-sales-dashboard.xlsx, Quick Access Toolbar, Undo, Undo, Clipboard, Clipboard, Font, Font size, Font, Colour and script, Alignment, Vertical alignment, Alignment, Number, Number, Styles, Cells, Editing, Editing, Add-ins, Add-ins, Sheet navigation, Sheet actions, View and zoom, Spreadsheet, Sales, Formula bar"
   },
   "ui.tableFilterButton": {
    "pass": true,
@@ -1220,7 +1224,7 @@
   },
   "ui.expandFormulaBar": {
    "pass": true,
-   "value": "86 → 32 (Collapse Formula Bar) {\"x\":1622,\"y\":185,\"w\":20,\"h\":26} fb 158,1484,false"
+   "value": "86 → 32 (Collapse Formula Bar) {\"x\":1622,\"y\":198,\"w\":20,\"h\":26} fb 158,1484,false"
   },
   "ui.autocomplete": {
    "pass": true,

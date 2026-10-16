@@ -460,10 +460,10 @@ class GridView {
             return (rect.y + (idiv (((rect.h - total) + topLine) - botLine) 2))
         }
         ; Excel's default is bottom. Room under the baseline is a descender's
-        ; worth of the type size — the letters that actually hang, not the
+        ; worth of the type size (Open Sans hangs g and p 0.24 em) — not the
         ; face's full declared descent, which no Latin glyph reaches.
         def asc:double (ctx.tr.ascent(cellPx))
-        def drop:double (cellPx * 0.21)
+        def drop:double (cellPx * 0.24)
         def baseline:double (((((to_double rect.y) + (to_double rect.h)) - 2.0) - drop) - (to_double botLine))
         def first:double ((baseline - asc) - (to_double (lineH * (lines - 1))))
         return (to_int first)
@@ -2838,6 +2838,26 @@ class GridView {
         ; as the face's line box, which is a fifth taller than the letters in
         ; it and would grow every row in the sheet on the first edit.
         def one:int (CellStyle.rowHeightForPt(st.fontSizePt))
+        ; Excel's rule is tuned for Calibri, whose letters are small for their
+        ; point size. Larger type in a face with bigger letters (Open Sans is a
+        ; tenth bigger) fills that row to the gridlines, so above the default
+        ; size the rule is scaled by how much taller this face's line is than
+        ; Calibri's (1.22 em). The default size keeps the default row: growing
+        ; every row on its first edit is worse than a snug 11 pt line.
+        if (st.fontSizePt > 11.0) {
+            def faceLine:double ((ctx.tr.lineHeight(cellPx)) / cellPx)
+            if (faceLine > 1.22) {
+                def scaled:int (to_int ((((to_double one) * faceLine) / 1.22) + 0.999))
+                if (scaled > one) {
+                    one = scaled
+                }
+            }
+        }
+        ; A heavy bottom border takes its width out of the row, so the row
+        ; gives it back rather than pushing the letters into the cell above.
+        if (st.borderBottom.has()) {
+            one = (one + ((st.borderBottom.width()) - 1))
+        }
         if (st.wrapText == false) {
             return one
         }
