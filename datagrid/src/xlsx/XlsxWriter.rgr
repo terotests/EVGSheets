@@ -641,6 +641,15 @@ class XlsxWriter {
         if (m.showGridlines == false) {
             str_append out " showGridLines=\"0\""
         }
+        if (m.viewMode == "pageBreak") {
+            str_append out " view=\"pageBreakPreview\""
+        }
+        if (m.viewMode == "pageLayout") {
+            str_append out " view=\"pageLayout\""
+        }
+        if (m.zoom != 1.0) {
+            str_append out (" zoomScale=\"" + (to_string (to_int ((m.zoom * 100.0) + 0.5))) + "\"")
+        }
         if (m.showHeadings == false) {
             str_append out " showRowColHeaders=\"0\""
         }
@@ -668,7 +677,7 @@ class XlsxWriter {
         def lastGeomC:int (m.colCount - 1)
         def c:int 0
         while (c <= lastGeomC) {
-            def w:int (m.colWidth(c))
+            def w:int (m.rawColWidth(c))
             def hidden:boolean (m.isColHidden(c))
             if ((w != m.defaultColW) || hidden) {
                 str_append cols ("<col min=\"" + (to_string (c + 1)) + "\" max=\"" + (to_string (c + 1)) + "\" width=\"" + (XlsxWriter.numText((XlsxWriter.pxToColWidth(w)))) + "\" customWidth=\"1\"")
@@ -753,7 +762,7 @@ class XlsxWriter {
                 cc = (cc + 1)
             }
             def rowAttrs:string ""
-            def h:int (m.rowHeight(r))
+            def h:int (m.rawRowHeight(r))
             if (h != m.defaultRowH) {
                 str_append rowAttrs (" ht=\"" + (XlsxWriter.numText((XlsxWriter.pxToRowPoints(h)))) + "\" customHeight=\"1\"")
             }

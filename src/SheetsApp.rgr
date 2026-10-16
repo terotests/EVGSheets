@@ -94,6 +94,16 @@ class SheetsApp {
     def insertTools:RibbonCtl (new RibbonCtl)
     def tabs:TabsCtl (new TabsCtl)
     def sheetTools:RibbonCtl (new RibbonCtl)
+    ; Excel's ribbon: a row of tabs, each with its own groups. Home keeps the
+    ; groups above; the rest are listed in `tabGroups`, `tabOf` naming the tab.
+    def ribTabs:TabsCtl (new TabsCtl)
+    def ribbonTab:string "home"
+    def tabGroups:[RibbonCtl]
+    def tabOf:[string]
+    def ribTabRow:EVGElement (EVGElement.createDiv())
+    ; Footer: scroll through the sheets, and the status bar's view and zoom.
+    def tabNav:RibbonCtl (new RibbonCtl)
+    def viewTools:RibbonCtl (new RibbonCtl)
 
     ; The page's own elements (not controllers).
     def headerEl:EVGElement (EVGElement.createDiv())
@@ -706,7 +716,40 @@ class SheetsApp {
         return (r.add(value name icon))
     }
 
+    ; A group on one of the ribbon's tabs.
+    fn grp:RibbonCtl (tab:string tid:string name:string) {
+        def g:RibbonCtl (new RibbonCtl)
+        g.tid = tid
+        g.name = name
+        push tabGroups g
+        push tabOf tab
+        return g
+    }
+
+    ; A button labelled with a word instead of a glyph.
+    fn word:RibbonItem (r:RibbonCtl value:string name:string label:string command:string arg:string) {
+        def it:RibbonItem (this.tool(r value name "" command arg false))
+        it.text = label
+        return it
+    }
+
+    fn groupsOf:[RibbonCtl] (tab:string) {
+        def out:[RibbonCtl]
+        def i:int 0
+        while (i < (array_length tabGroups)) {
+            if ((itemAt tabOf i) == tab) {
+                push out (itemAt tabGroups i)
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
     fn buildRibbon:void () {
+        def noGroups:[RibbonCtl]
+        tabGroups = noGroups
+        def noTabs:[string]
+        tabOf = noTabs
         history = (new RibbonCtl)
         history.tid = "sx-rb-history"
         history.name = "History"
@@ -764,15 +807,204 @@ class SheetsApp {
         this.tool(insertTools "chart" "Insert chart" (SheetsApp.icon("chart")) "insert.chart" "" false)
         this.tool(insertTools "link" "Insert link" (SheetsApp.icon("link")) "insert.link" "" false)
         this.tool(insertTools "find" "Find and replace" (SheetsApp.icon("find")) "edit.find" "" false)
+
+        ; --- Home: the rest of Excel's groups --------------------------------
+        def clip:RibbonCtl (this.grp("home" "sx-rb-clip" "Clipboard"))
+        this.word(clip "h-paste" "Paste" "Paste" "sx:paste" "")
+        this.word(clip "h-cut" "Cut" "Cut" "edit.cut" "")
+        this.word(clip "h-copy" "Copy" "Copy" "edit.copy" "")
+        this.word(clip "h-pastesp" "Paste special" "Paste…" "edit.pasteSpecial" "")
+        def fontx:RibbonCtl (this.grp("home" "sx-rb-fontx" "Font size and effects"))
+        this.word(fontx "h-grow" "Increase font size" "A+" "format.size.up" "")
+        this.word(fontx "h-shrink" "Decrease font size" "A-" "format.size.down" "")
+        this.word(fontx "h-dunder" "Double underline" "UU" "home.doubleUnderline" "")
+        this.word(fontx "h-border" "Borders" "▦" "format.border" "")
+        this.word(fontx "h-clearfmt" "Clear formats" "Clr" "format.clear" "")
+        def alignx:RibbonCtl (this.grp("home" "sx-rb-alignx" "Vertical alignment and indent"))
+        this.word(alignx "h-top" "Top align" "Top" "format.valign" "top")
+        this.word(alignx "h-middle" "Middle align" "Mid" "format.valign" "middle")
+        this.word(alignx "h-bottom" "Bottom align" "Bot" "format.valign" "bottom")
+        this.word(alignx "h-orient" "Orientation" "ab↗" "home.orientation" "")
+        this.word(alignx "h-indless" "Decrease indent" "⇤" "home.decreaseIndent" "")
+        this.word(alignx "h-indmore" "Increase indent" "⇥" "home.increaseIndent" "")
+        this.word(alignx "h-mergec" "Merge and center" "M&C" "home.mergeCenter" "")
+        this.word(alignx "h-unmerge" "Unmerge cells" "Unm" "home.unmergeCells" "")
+        def numx:RibbonCtl (this.grp("home" "sx-rb-numx" "More number formats"))
+        this.word(numx "h-comma" "Comma style" "," "format.numfmt" "comma")
+        this.word(numx "h-date" "Short date" "Date" "format.numfmt" "date")
+        this.word(numx "h-textfmt" "Text format" "Txt" "format.numfmt" "text")
+        def styles:RibbonCtl (this.grp("home" "sx-rb-styles" "Styles"))
+        this.word(styles "h-cond" "Conditional formatting" "Cond" "format.conditional" "")
+        this.word(styles "h-astable" "Format as table" "Table" "home.formatAsTable" "")
+        this.word(styles "h-cellstyle" "Cell styles" "Styles" "home.cellStyle" "")
+        this.word(styles "h-clearrules" "Clear rules" "NoCF" "home.clearRules" "")
+        def cells:RibbonCtl (this.grp("home" "sx-rb-cells" "Cells"))
+        this.word(cells "h-inscells" "Insert cells" "Ins" "home.insertCells" "")
+        this.word(cells "h-delcells" "Delete cells" "Del" "home.deleteCells" "")
+        this.word(cells "h-insrow" "Insert sheet rows" "+Row" "insert.row.above" "")
+        this.word(cells "h-delrow" "Delete sheet rows" "-Row" "delete.rows" "")
+        this.word(cells "h-inscol" "Insert sheet columns" "+Col" "insert.column.left" "")
+        this.word(cells "h-delcol" "Delete sheet columns" "-Col" "delete.columns" "")
+        this.word(cells "h-fitcol" "AutoFit column width" "Fit" "format.autofit.column" "")
+        this.word(cells "h-lock" "Lock cell" "Lock" "home.lockCell" "")
+        def editx:RibbonCtl (this.grp("home" "sx-rb-editx" "Editing"))
+        this.word(editx "h-autosum" "AutoSum" "Σ" "formulas.autoSum" "")
+        this.word(editx "h-filldown" "Fill down" "Fill↓" "edit.fillDown" "")
+        this.word(editx "h-fillright" "Fill right" "Fill→" "edit.fillRight" "")
+        this.word(editx "h-series" "Fill series" "Series" "edit.fillSeries" "")
+        this.word(editx "h-clearall" "Clear all" "Clear" "edit.clearAll" "")
+        this.word(editx "h-goto" "Go to" "GoTo" "edit.goTo" "")
+        this.word(editx "h-special" "Go to special" "Special" "edit.goToSpecial" "")
+
+        ; --- Insert ------------------------------------------------------------
+        def insTables:RibbonCtl (this.grp("insert" "sx-rb-instables" "Tables"))
+        this.word(insTables "i-table" "Table" "Table" "insert.table" "")
+        def insCharts:RibbonCtl (this.grp("insert" "sx-rb-inscharts" "Charts"))
+        this.word(insCharts "i-chart" "Insert chart" "Chart" "insert.chart" "")
+        def insLinks:RibbonCtl (this.grp("insert" "sx-rb-inslinks" "Links and comments"))
+        this.word(insLinks "i-link" "Link" "Link" "insert.link" "")
+        this.word(insLinks "i-note" "Note" "Note" "review.newNote" "")
+        this.word(insLinks "i-comment" "Comment" "Comment" "review.newComment" "")
+        def insSym:RibbonCtl (this.grp("insert" "sx-rb-inssym" "Symbols"))
+        this.word(insSym "i-symbol" "Symbol" "Ω" "insert.symbol" "")
+
+        ; --- Page Layout -------------------------------------------------------
+        def pgSetup:RibbonCtl (this.grp("pagelayout" "sx-rb-pgsetup" "Page Setup"))
+        this.word(pgSetup "p-margins" "Margins" "Margins" "pageLayout.margins" "")
+        this.word(pgSetup "p-orient" "Orientation" "Orientation" "pageLayout.orientation" "")
+        this.word(pgSetup "p-size" "Size" "Size" "pageLayout.size" "")
+        this.word(pgSetup "p-area" "Print area" "Print Area" "pageLayout.printArea" "")
+        this.word(pgSetup "p-breaks" "Breaks" "Breaks" "pageLayout.breaks" "")
+        this.word(pgSetup "p-titles" "Print titles" "Print Titles" "pageLayout.printTitles" "")
+        this.word(pgSetup "p-hf" "Header and footer" "Header & Footer" "pageLayout.headerFooter" "")
+        def pgFit:RibbonCtl (this.grp("pagelayout" "sx-rb-pgfit" "Scale to Fit"))
+        this.word(pgFit "p-fit" "Scale to fit" "Fit to Page" "pageLayout.scaleToFit" "")
+        def pgSheet:RibbonCtl (this.grp("pagelayout" "sx-rb-pgsheet" "Sheet Options"))
+        this.word(pgSheet "p-gridlines" "Print gridlines" "Print Gridlines" "pageLayout.printGridlines" "")
+        this.word(pgSheet "p-headings" "Print headings" "Print Headings" "pageLayout.printHeadings" "")
+
+        ; --- Formulas ----------------------------------------------------------
+        def fLib:RibbonCtl (this.grp("formulas" "sx-rb-flib" "Function Library"))
+        this.word(fLib "f-insert" "Insert function" "fx" "formulas.insertFunction" "")
+        this.word(fLib "f-autosum" "AutoSum" "AutoSum" "formulas.autoSum" "")
+        this.word(fLib "f-recent" "Recently used" "Recent" "formulas.recentlyUsed" "")
+        this.word(fLib "f-fin" "Financial" "Financial" "formulas.financial" "")
+        this.word(fLib "f-logical" "Logical" "Logical" "formulas.logical" "")
+        this.word(fLib "f-text" "Text" "Text" "formulas.text" "")
+        this.word(fLib "f-date" "Date and time" "Date & Time" "formulas.dateTime" "")
+        this.word(fLib "f-lookup" "Lookup and reference" "Lookup" "formulas.lookupReference" "")
+        this.word(fLib "f-math" "Math and trig" "Math & Trig" "formulas.mathTrig" "")
+        this.word(fLib "f-more" "More functions" "More" "formulas.moreFunctions" "")
+        def fAudit:RibbonCtl (this.grp("formulas" "sx-rb-faudit" "Formula Auditing"))
+        this.word(fAudit "f-prec" "Trace precedents" "Precedents" "formulas.tracePrecedents" "")
+        this.word(fAudit "f-show" "Show formulas" "Show Formulas" "formulas.showFormulas" "")
+        def fCalc:RibbonCtl (this.grp("formulas" "sx-rb-fcalc" "Calculation"))
+        this.word(fCalc "f-calcnow" "Calculate now" "Calc Now" "formulas.calculateNow" "")
+        this.word(fCalc "f-calcsheet" "Calculate sheet" "Calc Sheet" "formulas.calculateSheet" "")
+
+        ; --- Data --------------------------------------------------------------
+        def dSort:RibbonCtl (this.grp("data" "sx-rb-dsort" "Sort and Filter"))
+        this.word(dSort "d-asc" "Sort smallest to largest" "A→Z" "data.sort.asc" "")
+        this.word(dSort "d-desc" "Sort largest to smallest" "Z→A" "data.sort.desc" "")
+        this.word(dSort "d-sort" "Sort" "Sort…" "data.sort" "")
+        this.word(dSort "d-clear" "Clear filter" "Clear" "data.filter.clear" "")
+        def dTools:RibbonCtl (this.grp("data" "sx-rb-dtools" "Data Tools"))
+        this.word(dTools "d-t2c" "Text to columns" "Text to Columns" "data.textToColumns" "")
+        this.word(dTools "d-dups" "Remove duplicates" "Remove Duplicates" "data.removeDuplicates" "")
+        this.word(dTools "d-valid" "Data validation" "Validation" "data.validation" "")
+        def dDb:RibbonCtl (this.grp("data" "sx-rb-ddb" "Queries and Connections"))
+        this.word(dDb "d-refresh" "Refresh" "Refresh" "db.refresh" "")
+        this.word(dDb "d-sql" "SQL query" "SQL…" "db.sql.dialog" "")
+        this.word(dDb "d-conn" "Connection" "Connection…" "db.connection" "")
+
+        ; --- Review ------------------------------------------------------------
+        def rNotes:RibbonCtl (this.grp("review" "sx-rb-rnotes" "Comments and Notes"))
+        this.word(rNotes "r-comment" "New comment" "New Comment" "review.newComment" "")
+        this.word(rNotes "r-note" "New note" "New Note" "review.newNote" "")
+        this.word(rNotes "r-delete" "Delete comment" "Delete" "review.deleteComment" "")
+        this.word(rNotes "r-prev" "Previous comment" "Previous" "review.previousComment" "")
+        this.word(rNotes "r-next" "Next comment" "Next" "review.nextComment" "")
+        def rProtect:RibbonCtl (this.grp("review" "sx-rb-rprotect" "Protect"))
+        this.word(rProtect "r-psheet" "Protect sheet" "Protect Sheet" "review.protectSheet" "")
+        this.word(rProtect "r-unsheet" "Unprotect sheet" "Unprotect Sheet" "review.unprotectSheet" "")
+        this.word(rProtect "r-pbook" "Protect workbook" "Protect Workbook" "review.protectWorkbook" "")
+        def rProof:RibbonCtl (this.grp("review" "sx-rb-rproof" "Proofing"))
+        this.word(rProof "r-stats" "Workbook statistics" "Statistics" "review.workbookStatistics" "")
+
+        ; --- View --------------------------------------------------------------
+        def vViews:RibbonCtl (this.grp("view" "sx-rb-vviews" "Workbook Views"))
+        this.word(vViews "v-normal" "Normal view" "Normal" "view.normal" "")
+        def vShow:RibbonCtl (this.grp("view" "sx-rb-vshow" "Show"))
+        this.word(vShow "v-grid" "Gridlines" "Gridlines" "view.gridlines" "")
+        this.word(vShow "v-head" "Headings" "Headings" "view.headings" "")
+        this.word(vShow "v-fbar" "Formula bar" "Formula Bar" "sx:formulaBar" "")
+        def vZoom:RibbonCtl (this.grp("view" "sx-rb-vzoom" "Zoom"))
+        this.word(vZoom "v-zoom" "Zoom" "Zoom" "view.zoom" "")
+        this.word(vZoom "v-zoom100" "Zoom to 100%" "100%" "view.zoom100" "")
+        this.word(vZoom "v-zoomsel" "Zoom to selection" "Zoom to Selection" "view.zoomToSelection" "")
+        def vWin:RibbonCtl (this.grp("view" "sx-rb-vwin" "Window"))
+        this.word(vWin "v-freeze" "Freeze panes" "Freeze Panes" "view.freeze.here" "")
+        this.word(vWin "v-unfreeze" "Unfreeze panes" "Unfreeze" "view.freeze.none" "")
+        this.word(vWin "v-toprow" "Freeze top row" "Freeze Top Row" "view.freezeTopRow" "")
+        this.word(vWin "v-firstcol" "Freeze first column" "Freeze First Column" "view.freezeFirstColumn" "")
+
+        ; --- Automate ----------------------------------------------------------
+        def aScripts:RibbonCtl (this.grp("automate" "sx-rb-ascripts" "Scripts"))
+        this.word(aScripts "a-new" "New script" "New Script" "script.new" "")
+        this.word(aScripts "a-run" "Run script" "Run" "script.run" "")
+        this.word(aScripts "a-next" "Next script" "Next Script" "script.next" "")
+
+        ribTabs = (new TabsCtl)
+        ribTabs.tid = "sx-ribtabs"
+        ribTabs.name = "Ribbon tabs"
+        ribTabs.addItem("home" "Home" "" false)
+        ribTabs.addItem("insert" "Insert" "" false)
+        ribTabs.addItem("draw" "Draw" "" false)
+        ribTabs.addItem("pagelayout" "Page Layout" "" false)
+        ribTabs.addItem("formulas" "Formulas" "" false)
+        ribTabs.addItem("data" "Data" "" false)
+        ribTabs.addItem("review" "Review" "" false)
+        ribTabs.addItem("view" "View" "" false)
+        ribTabs.addItem("automate" "Automate" "" false)
+        ribTabs.value = ribbonTab
+        ribTabs.rovingValue = ribbonTab
+
+        tabNav = (new RibbonCtl)
+        tabNav.tid = "sx-tabnav"
+        tabNav.name = "Sheet navigation"
+        this.tool(tabNav "tab-prev" "Previous sheet" (SheetsApp.icon("chevronLeft")) "view.sheet.prev" "" false)
+        this.tool(tabNav "tab-next" "Next sheet" (SheetsApp.icon("chevronRight")) "view.sheet.next" "" false)
+
+        viewTools = (new RibbonCtl)
+        viewTools.tid = "sx-viewtools"
+        viewTools.name = "View and zoom"
+        this.word(viewTools "sv-normal" "Normal" "▤" "view.normal" "")
+        this.word(viewTools "sv-layout" "Page Layout" "▭" "view.pageLayout" "")
+        this.word(viewTools "sv-break" "Page Break Preview" "▥" "view.pageBreakPreview" "")
+        this.word(viewTools "sv-zoomout" "Zoom out" "−" "view.zoomOut" "")
+        this.word(viewTools "sv-zoom" "Zoom" "100%" "view.zoom" "")
+        this.word(viewTools "sv-zoomin" "Zoom in" "+" "view.zoomIn" "")
     }
 
+    ; The groups of the tab that is showing, in the order they are mounted.
     fn ribbonGroups:[RibbonCtl] () {
+        if (ribbonTab != "home") {
+            return (this.groupsOf(ribbonTab))
+        }
+        def h:[RibbonCtl] (this.groupsOf("home"))
         def a:[RibbonCtl]
         push a history
+        push a (itemAt h 0)
         push a textTools
+        push a (itemAt h 1)
         push a alignTools
+        push a (itemAt h 2)
         push a numberTools
+        push a (itemAt h 3)
+        push a (itemAt h 4)
+        push a (itemAt h 5)
         push a dataTools
+        push a (itemAt h 6)
         push a insertTools
         return a
     }
@@ -805,6 +1037,7 @@ class SheetsApp {
         if (name == "plus") { return "M12 5v14 M5 12h14" }
         if (name == "chevron") { return "m6 9 6 6 6-6" }
         if (name == "chevronRight") { return "m9 18 6-6-6-6" }
+        if (name == "chevronLeft") { return "m15 18-6-6 6-6" }
         if (name == "check") { return "M20 6 9 17l-5-5" }
         if (name == "dot") { return "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z" }
         if (name == "logo") { return "M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M3 9h18 M3 15h18 M9 9v12 M15 9v12" }
@@ -876,27 +1109,54 @@ class SheetsApp {
 
         ; --- ribbon ----------------------------------------------------------
         if (showRibbon && (readOnly == false)) {
+            ; The tab row only on the full ribbon: a tool list chosen by the
+            ; host is one toolbar, not Excel's.
+            if ((array_length tools) == 0) {
+                ribTabRow.id = "sx-ribtabrow"
+                ribTabRow.className = "sx-ribtabrow"
+                UiTree.clearChildren(ribTabRow)
+                ribTabs.value = ribbonTab
+                this.mount(ribTabRow ribTabs)
+                root.addChild(ribTabRow)
+            }
             ribbonEl.id = "sx-ribbonbar"
             ribbonEl.className = "sx-ribbonbar"
             UiTree.clearChildren(ribbonEl)
-            this.mountGroup(history)
-            if (this.wantsTool("font")) {
-                this.mount(ribbonEl fontMenu)
+            if (ribbonTab == "home") {
+                def h:[RibbonCtl] (this.groupsOf("home"))
+                this.mountGroup(history)
+                this.mountGroup((itemAt h 0))
+                if (this.wantsTool("font")) {
+                    this.mount(ribbonEl fontMenu)
+                }
+                if (this.wantsTool("size")) {
+                    this.mount(ribbonEl sizeMenu)
+                }
+                this.mountGroup(textTools)
+                this.mountGroup((itemAt h 1))
+                this.mountGroup(alignTools)
+                this.mountGroup((itemAt h 2))
+                if (this.wantsTool("numfmt")) {
+                    this.mount(ribbonEl numMenu)
+                }
+                this.mountGroup(numberTools)
+                this.mountGroup((itemAt h 3))
+                if (this.wantsTool("borders")) {
+                    this.mount(ribbonEl borderMenu)
+                }
+                this.mountGroup((itemAt h 4))
+                this.mountGroup((itemAt h 5))
+                this.mountGroup(dataTools)
+                this.mountGroup((itemAt h 6))
+                this.mountGroup(insertTools)
+            } {
+                def tg:[RibbonCtl] (this.groupsOf(ribbonTab))
+                def ti:int 0
+                while (ti < (array_length tg)) {
+                    this.mountGroup((itemAt tg ti))
+                    ti = (ti + 1)
+                }
             }
-            if (this.wantsTool("size")) {
-                this.mount(ribbonEl sizeMenu)
-            }
-            this.mountGroup(textTools)
-            this.mountGroup(alignTools)
-            if (this.wantsTool("numfmt")) {
-                this.mount(ribbonEl numMenu)
-            }
-            this.mountGroup(numberTools)
-            if (this.wantsTool("borders")) {
-                this.mount(ribbonEl borderMenu)
-            }
-            this.mountGroup(dataTools)
-            this.mountGroup(insertTools)
             root.addChild(ribbonEl)
         }
 
@@ -911,6 +1171,7 @@ class SheetsApp {
             footerEl.className = "sx-footer"
             UiTree.clearChildren(footerEl)
             if showTabs {
+                this.mount(footerEl tabNav)
                 this.mount(footerEl tabs)
                 if (readOnly == false) {
                     this.mount(footerEl sheetTools)
@@ -926,6 +1187,7 @@ class SheetsApp {
                 statsEl.className = "sx-stats"
                 statsEl.elementType = 1
                 footerEl.addChild(statsEl)
+                this.mount(footerEl viewTools)
             }
             root.addChild(footerEl)
         }
@@ -1071,6 +1333,15 @@ class SheetsApp {
         def onlyList:[EVGElement]
         push onlyList (unwrap tabs.listEl)
         troot.children = onlyList
+        tabNav.build()
+        viewTools.setText("sv-zoom" ((to_string (to_int ((grid.app.model.zoom * 100.0) + 0.5))) + "%"))
+        viewTools.build()
+        ribTabs.value = ribbonTab
+        ribTabs.build()
+        def rroot:EVGElement (unwrap ribTabs.rootEl)
+        def onlyRibList:[EVGElement]
+        push onlyRibList (unwrap ribTabs.listEl)
+        rroot.children = onlyRibList
         def sd:[SxDialog] (this.dialogs())
         def si:int 0
         while (si < (array_length sd)) {
@@ -2018,6 +2289,8 @@ class SheetsApp {
         }
         def groups:[RibbonCtl] (this.ribbonGroups())
         push groups sheetTools
+        push groups tabNav
+        push groups viewTools
         def i:int 0
         while (i < (array_length groups)) {
             def g:RibbonCtl (itemAt groups i)
@@ -2026,6 +2299,14 @@ class SheetsApp {
                 ran = (this.runAction(v))
             }
             i = (i + 1)
+        }
+        ; A ribbon tab chosen is that tab's groups shown.
+        if (ribTabs.owns(target)) {
+            if (((strlen ribTabs.value) > 0) && (ribTabs.value != ribbonTab)) {
+                ribbonTab = ribTabs.value
+                this.buildChrome()
+                return
+            }
         }
         ; A tab chosen is a sheet shown.
         def want:int (?? (to_int tabs.value) 0)

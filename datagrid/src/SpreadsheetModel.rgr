@@ -402,6 +402,11 @@ class SpreadsheetModel {
     ; The sheet view's switches (View tab) and the tab's colour. Written to the
     ; file as `sheetView` attributes and `sheetPr/tabColor`.
     def showGridlines:boolean true
+    ; View > Zoom (sheetView zoomScale / 100). Sizes are stored at 100 %;
+    ; colWidth / rowHeight and the geometry hand out zoomed pixels.
+    def zoom:double 1.0
+    ; "normal" | "pageLayout" | "pageBreak" — the status bar's view buttons.
+    def viewMode:string "normal"
     def showHeadings:boolean true
     def showFormulas:boolean false
     def tabColor:string ""
@@ -751,7 +756,7 @@ class SpreadsheetModel {
             push rowOffsets 0
             def r:int 0
             while (r < rowCount) {
-                def rh:int (itemAt rowHeights r)
+                def rh:int (this.zoomed((itemAt rowHeights r)))
                 if ((r < (array_length rowHidden)) && (itemAt rowHidden r)) {
                     rh = 0
                 }
@@ -770,7 +775,7 @@ class SpreadsheetModel {
             push colOffsets 0
             def c:int 0
             while (c < colCount) {
-                def cw:int (itemAt colWidths c)
+                def cw:int (this.zoomed((itemAt colWidths c)))
                 if ((c < (array_length colHidden)) && (itemAt colHidden c)) {
                     cw = 0
                 }
@@ -2425,6 +2430,88 @@ class SpreadsheetModel {
         return c
     }
 
+    ; --- pages -----------------------------------------------------------------
+    ; The printable area of one page in CSS pixels (96 per inch): the paper,
+    ; turned for landscape, less the margins. Fit-to-width / height makes that
+    ; direction one page.
+    fn pagePrintable:[double] () {
+        def pw:double 8.5
+        def ph:double 11.0
+        if (paperSize == 9) {
+            pw = 8.27
+            ph = 11.69
+        }
+        if (paperSize == 5) {
+            ph = 14.0
+        }
+        if (paperSize == 8) {
+            pw = 11.69
+            ph = 16.54
+        }
+        if (pageOrientation == "landscape") {
+            def t:double pw
+            pw = ph
+            ph = t
+        }
+        def out:[double]
+        def w:double (((pw - marginLeft) - marginRight) * 96.0)
+        def h:double (((ph - marginTop) - marginBottom) * 96.0)
+        if (fitToWidth > 0) {
+            w = 1000000.0
+        }
+        if (fitToHeight > 0) {
+            h = 1000000.0
+        }
+        push out w
+        push out h
+        return out
+    }
+
+    ; Where each page after the first starts: rows (or columns) of the used
+    ; range filled at 100 % until the next would not fit, plus manual breaks.
+    fn pageBreaks:[int] (cols:boolean) {
+        def room:[double] (this.pagePrintable())
+        def cap:double (itemAt room 1)
+        def last:int (this.usedRow())
+        if cols {
+            cap = (itemAt room 0)
+            last = (this.usedCol())
+        }
+        def out:[int]
+        def acc:double 0.0
+        def i:int 0
+        while (i <= last) {
+            def sz:double (to_double (this.rawRowHeight(i)))
+            if cols {
+                sz = (to_double (this.rawColWidth(i)))
+                if (this.isColHidden(i)) {
+                    sz = 0.0
+                }
+            } {
+                if (this.isRowHidden(i)) {
+                    sz = 0.0
+                }
+            }
+            def manual:boolean false
+            if (cols == false) {
+                def k:int 0
+                while (k < (array_length rowBreaks)) {
+                    if ((itemAt rowBreaks k) == i) {
+                        manual = true
+                    }
+                    k = (k + 1)
+                }
+            }
+            if ((i > 0) && (manual || ((acc + sz) > cap))) {
+                push out i
+                acc = 0.0
+            }
+            acc = (acc + sz)
+            i = (i + 1)
+        }
+        return out
+    }
+
     ; --- transactions -------------------------------------------------------
     ; Ops recorded between beginTx / endTx undo as one Excel-style action.
     ; Nesting is counted so a paste inside a larger op stays one transaction.
@@ -2691,6 +2778,15 @@ class SpreadsheetModel {
     }
 
     fn rowHeight:int (row:int) {
+        return (this.zoomed((this.rawRowHeight(row))))
+    }
+
+    fn colWidth:int (col:int) {
+        return (this.zoomed((this.rawColWidth(col))))
+    }
+
+    ; At 100 %: what the file stores and the writer writes.
+    fn rawRowHeight:int (row:int) {
         this.ensureSizeArrays()
         if (row < 0) {
             return defaultRowH
@@ -2701,7 +2797,7 @@ class SpreadsheetModel {
         return (itemAt rowHeights row)
     }
 
-    fn colWidth:int (col:int) {
+    fn rawColWidth:int (col:int) {
         this.ensureSizeArrays()
         if (col < 0) {
             return defaultColW
@@ -2710,6 +2806,35 @@ class SpreadsheetModel {
             return defaultColW
         }
         return (itemAt colWidths col)
+    }
+
+    fn zoomed:int (v:int) {
+        if (zoom == 1.0) {
+            return v
+        }
+        return (to_int (((to_double v) * zoom) + 0.5))
+    }
+
+    fn unzoomed:int (v:int) {
+        if (zoom == 1.0) {
+            return v
+        }
+        return (to_int (((to_double v) / zoom) + 0.5))
+    }
+
+    ; 10 % .. 400 %, as Excel allows.
+    fn setZoom:void (z:double) {
+        def v:double z
+        if (v < 0.1) {
+            v = 0.1
+        }
+        if (v > 4.0) {
+            v = 4.0
+        }
+        zoom = v
+        rowGeomDirty = true
+        colGeomDirty = true
+        version = (version + 1)
     }
 
     ; The default row height and column width the FILE states, in pixels, as
@@ -2756,6 +2881,7 @@ class SpreadsheetModel {
         if (row >= rowCount) {
             return
         }
+        h = (this.unzoomed(h))
         if (h < 8) {
             h = 8
         }
@@ -2777,6 +2903,7 @@ class SpreadsheetModel {
         if (col >= colCount) {
             return
         }
+        w = (this.unzoomed(w))
         if (w < 24) {
             w = 24
         }

@@ -112,6 +112,14 @@ class RibbonCtl extends UiCtl {
         it.disabled = off
     }
 
+    fn setText:void (value:string word:string) {
+        def it@(optional):RibbonItem (this.find(value))
+        if (null? it) {
+            return
+        }
+        it.text = word
+    }
+
     fn setSwatch:void (value:string hex:string) {
         def it@(optional):RibbonItem (this.find(value))
         if (null? it) {

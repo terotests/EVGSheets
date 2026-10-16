@@ -104,8 +104,8 @@ Home	Editing	Replace	edit.replace	live	edit.find	yes	smoke:Ctrl+F opens Find and
 Home	Editing	Go To	edit.goTo	live	edit.goTo	yes	probe:cmd.edit.goTo	
 Home	Editing	Go To Special	edit.goToSpecial	live	edit.goToSpecial	yes	probe:cmd.edit.goToSpecial	
 Home	Add-ins	Add-ins	home.addIns	live	-	no	-	
-Insert	Tables	PivotTable	insert.pivotTable	live	-	no	-	
-Insert	Tables	Recommended PivotTables	insert.recommendedPivotTables	live	-	no	-	
+Insert	Tables	PivotTable	insert.pivotTable	live	insert.pivotTable	yes	probe:cmd.insert.pivotTable	
+Insert	Tables	Recommended PivotTables	insert.recommendedPivotTables	live	insert.recommendedPivotTables	yes	probe:cmd.insert.recommendedPivotTables	
 Insert	Tables	Table	insert.table	live	insert.table	yes	probe:cmd.insert.table	
 Insert	Illustrations	Pictures	insert.picture	live	-	no	-	
 Insert	Illustrations	Shapes	insert.shape	live	-	no	-	
@@ -114,7 +114,7 @@ Insert	Illustrations	SmartArt	insert.smartArt	missing	-	no	-
 Insert	Illustrations	Screenshot	insert.screenshot	missing	-	no	-	
 Insert	Charts	Recommended Charts	insert.recommendedCharts	live	insert.chart	partial	smoke:…offering only the types the data suits	the chart picker offers types that suit the data
 Insert	Charts	Charts	insert.chart	live	insert.chart	yes	smoke:Insert chart makes the chart and opens its editor	
-Insert	Charts	PivotChart	insert.pivotChart	live	-	no	-	
+Insert	Charts	PivotChart	insert.pivotChart	live	insert.pivotChart	yes	probe:cmd.insert.pivotChart	
 Insert	Charts	Maps	insert.map	missing	-	no	-	
 Insert	Sparklines	Sparklines	insert.sparkline	live	-	no	-	
 Insert	Filters	Slicer	insert.slicer	live	-	no	-	
@@ -233,17 +233,17 @@ Review	Protect	Unprotect Sheet	review.unprotectSheet	live	review.unprotectSheet	
 Review	Protect	Protect Workbook	review.protectWorkbook	live	review.protectWorkbook	yes	probe:cmd.review.protectWorkbook	structure lock; no password
 Review	Protect	Allow Edit Ranges	review.allowEditRanges	live	-	no	-	
 Review	Changes	Show Changes	review.showChanges	missing	-	no	-	
-View	Workbook Views	Normal	view.normal	live	view.normal	partial	probe:cmd.view.normal	the only view there is
-View	Workbook Views	Page Break Preview	view.pageBreakPreview	live	-	no	-	
-View	Workbook Views	Page Layout	view.pageLayout	live	-	no	-	
+View	Workbook Views	Normal	view.normal	live	view.normal	yes	probe:cmd.view.normal	
+View	Workbook Views	Page Break Preview	view.pageBreakPreview	live	view.pageBreakPreview	yes	probe:cmd.view.pageBreakPreview	
+View	Workbook Views	Page Layout	view.pageLayout	live	view.pageLayout	yes	probe:cmd.view.pageLayout	pages outlined with header and footer
 View	Workbook Views	Custom Views	view.customViews	live	-	no	-	
 View	Show	Ruler	view.ruler	live	-	no	-	
 View	Show	Formula Bar	view.formulaBar	live	sx:formulaBar	yes	-	
 View	Show	Gridlines	view.gridlines	live	view.gridlines	yes	probe:cmd.view.gridlines	
 View	Show	Headings	view.headings	live	view.headings	yes	probe:cmd.view.headings	
-View	Zoom	Zoom	view.zoom	live	-	no	-	
-View	Zoom	100%	view.zoom100	live	-	no	-	
-View	Zoom	Zoom to Selection	view.zoomToSelection	live	-	no	-	
+View	Zoom	Zoom	view.zoom	live	view.zoom	yes	probe:cmd.view.zoom	
+View	Zoom	100%	view.zoom100	live	view.zoom100	yes	probe:cmd.view.zoom100	
+View	Zoom	Zoom to Selection	view.zoomToSelection	live	view.zoomToSelection	yes	probe:cmd.view.zoomToSelection	
 View	Window	New Window	view.newWindow	live	-	no	-	
 View	Window	Arrange All	view.arrangeAll	live	-	no	-	
 View	Window	Freeze Panes	view.freezePanes	live	view.freeze.here	yes	probe:cmd.view.freezePanes	
@@ -260,7 +260,7 @@ Automate	Scripting Tools	All Scripts	automate.allScripts	live	script.open	partia
 Automate	Scripting Tools	Record Actions	automate.recordActions	live	-	no	-	
 Table Design	Properties	Table Name	table.rename	live	table.rename	yes	probe:cmd.table.rename	
 Table Design	Properties	Resize Table	table.resize	live	table.resize	yes	probe:cmd.table.resize	
-Table Design	Tools	Summarize with PivotTable	table.summarizePivot	live	-	no	-	
+Table Design	Tools	Summarize with PivotTable	table.summarizePivot	live	table.summarizePivot	yes	probe:cmd.table.summarizePivot	
 Table Design	Tools	Remove Duplicates	table.removeDuplicates	live	table.removeDuplicates	yes	probe:cmd.table.removeDuplicates	
 Table Design	Tools	Convert to Range	table.convertToRange	live	table.convertToRange	yes	probe:cmd.table.convertToRange	
 Table Design	Tools	Insert Slicer	table.insertSlicer	live	-	no	-	
@@ -282,20 +282,20 @@ Chart Design	Location	Move Chart	chart.move	live	-	no	-
 Format	Current Selection	Format Selection	chart.formatSelection	live	-	no	-	
 Format	Shape Styles	Shape Fill	chart.shapeFill	live	-	no	-	
 Format	Shape Styles	Shape Outline	chart.shapeOutline	live	-	no	-	
-PivotTable Analyze	Show	Field List	pivot.fieldList	live	-	no	-	
-PivotTable Analyze	Data	Refresh	pivot.refresh	live	-	no	-	
-PivotTable Analyze	Data	Change Data Source	pivot.changeSource	live	-	no	-	
-PivotTable Analyze	Calculations	Fields, Items & Sets	pivot.calculatedField	live	-	no	-	
-PivotTable Design	Layout	Grand Totals	pivot.grandTotals	live	-	no	-	
-PivotTable Design	Layout	Subtotals	pivot.subtotals	live	-	no	-	
-PivotTable Design	Layout	Report Layout	pivot.reportLayout	live	-	no	-	
-PivotTable Design	PivotTable Styles	PivotTable Styles	pivot.style	live	-	no	-	
-PivotTable Analyze	Fields	Add Field	pivot.addField	live	-	no	-	
-PivotTable Analyze	Fields	Remove Field	pivot.removeField	live	-	no	-	
-PivotTable Analyze	Fields	Move Field	pivot.moveField	live	-	no	-	
-PivotTable Analyze	Active Field	Value Field Settings	pivot.valueSettings	live	-	no	-	
-PivotTable Analyze	Filter	Filter	pivot.filter	live	-	no	-	
-PivotTable Analyze	Sort	Sort	pivot.sort	live	-	no	-	
-PivotTable Analyze	Group	Group Field	pivot.group	live	-	no	-	
-PivotTable Analyze	Active Field	Collapse Field	pivot.collapse	live	-	no	-	
-PivotTable Analyze	Actions	Clear All	pivot.delete	live	-	no	-	
+PivotTable Analyze	Show	Field List	pivot.fieldList	live	pivot.fieldList	yes	probe:cmd.pivot.fieldList	
+PivotTable Analyze	Data	Refresh	pivot.refresh	live	pivot.refresh	yes	probe:cmd.pivot.refresh	
+PivotTable Analyze	Data	Change Data Source	pivot.changeSource	live	pivot.changeSource	yes	probe:cmd.pivot.changeSource	
+PivotTable Analyze	Calculations	Fields, Items & Sets	pivot.calculatedField	live	pivot.calculatedField	yes	probe:cmd.pivot.calculatedField	
+PivotTable Design	Layout	Grand Totals	pivot.grandTotals	live	pivot.grandTotals	yes	probe:cmd.pivot.grandTotals	
+PivotTable Design	Layout	Subtotals	pivot.subtotals	live	pivot.subtotals	yes	probe:cmd.pivot.subtotals	
+PivotTable Design	Layout	Report Layout	pivot.reportLayout	live	pivot.reportLayout	yes	probe:cmd.pivot.reportLayout	
+PivotTable Design	PivotTable Styles	PivotTable Styles	pivot.style	live	pivot.style	yes	probe:cmd.pivot.style	
+PivotTable Analyze	Fields	Add Field	pivot.addField	live	pivot.addField	yes	probe:cmd.pivot.addField	
+PivotTable Analyze	Fields	Remove Field	pivot.removeField	live	pivot.removeField	yes	probe:cmd.pivot.removeField	
+PivotTable Analyze	Fields	Move Field	pivot.moveField	live	pivot.moveField	yes	probe:cmd.pivot.moveField	
+PivotTable Analyze	Active Field	Value Field Settings	pivot.valueSettings	live	pivot.valueSettings	yes	probe:cmd.pivot.valueSettings	
+PivotTable Analyze	Filter	Filter	pivot.filter	live	pivot.filter	yes	probe:cmd.pivot.filter	
+PivotTable Analyze	Sort	Sort	pivot.sort	live	pivot.sort	yes	probe:cmd.pivot.sort	
+PivotTable Analyze	Group	Group Field	pivot.group	live	pivot.group	yes	probe:cmd.pivot.group	
+PivotTable Analyze	Active Field	Collapse Field	pivot.collapse	live	pivot.collapse	yes	probe:cmd.pivot.collapse	
+PivotTable Analyze	Actions	Clear All	pivot.delete	live	pivot.delete	yes	probe:cmd.pivot.delete	

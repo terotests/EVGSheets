@@ -194,6 +194,9 @@ class XlsxLoader {
             ; Only now can a row be measured: until the style table is on the
             ; sheet, every cell reports the default size rather than its own.
             parser.autoFitRows(sheet)
+            if (parser.fileZoom != 1.0) {
+                sheet.setZoom(parser.fileZoom)
+            }
             sheet.quietWrites = false
             sheet.version = (sheet.version + 1)
             book.addSheet(sheet)

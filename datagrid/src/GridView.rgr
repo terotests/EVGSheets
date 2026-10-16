@@ -106,6 +106,8 @@ class GridView {
     def formulaHiliteC1:[int]
     ; Last-painted formula-bar field geometry, so a click can place the caret.
     def fbFieldX:int 0
+    ; Cancel, Enter and Insert Function, between the name box and the field.
+    def fxAreaW:int 84
     def fbFieldY:int 0
     def fbFieldW:int 0
     def fbFieldH:int 0
@@ -1044,6 +1046,7 @@ class GridView {
             if (st.fontSizePt > 0.0) {
                 cellPx = ((st.fontSizePt * 96.0) / 72.0)
             }
+            cellPx = (cellPx * model.zoom)
             if (cellPx < 6.0) {
                 cellPx = 6.0
             }
@@ -1706,10 +1709,11 @@ class GridView {
             }
             def addrBoxW:int 64
             def addrX:int (grid.x + 4)
-            def fieldX:int ((grid.x + addrBoxW) + 10)
-            def fieldW:int ((grid.w - addrBoxW) - 18)
+            def fieldX:int (((grid.x + addrBoxW) + 10) + fxAreaW)
+            def fieldW:int (((grid.w - addrBoxW) - 18) - fxAreaW)
             def fieldY:int (fbY + 3)
             def fieldH:int (grid.formulaBarH - 6)
+            this.paintFxButtons(dl ((grid.x + addrBoxW) + 10) fieldY fieldH editing)
             def nameEdge:EVGColor theme.gridLine
             def fieldEdge:EVGColor (EVGColor.rgb(160 170 185))
             if editing {
@@ -1852,6 +1856,9 @@ class GridView {
 
         ; Cell borders go OVER the gridlines they replace.
         this.paintBordersBands(dl model grid fzR fzC)
+        if (model.viewMode != "normal") {
+            this.paintPages(dl model grid bodyLeft bodyTop vw vh)
+        }
 
         ; freeze separators
         if (fzC > 0) {
@@ -2657,6 +2664,144 @@ class GridView {
         return t
     }
 
+    ; Page Break Preview and Page Layout: the pages the sheet prints on.
+    ; Break preview draws Excel's blue page edges, greys what does not print
+    ; and numbers the pages; page layout outlines each page and shows its
+    ; header and footer.
+    fn paintPages:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid bodyLeft:int bodyTop:int vw:int vh:int) {
+        def rowsAt:[int] (model.pageBreaks(false))
+        def colsAt:[int] (model.pageBreaks(true))
+        def lastR:int ((model.usedRow()) + 1)
+        def lastC:int ((model.usedCol()) + 1)
+        def blue:EVGColor (EVGColor.rgb(36 92 196))
+        def edge:EVGColor blue
+        def thick:double 3.0
+        if (model.viewMode == "pageLayout") {
+            edge = (EVGColor.rgb(150 150 150))
+            thick = 2.0
+        }
+        def end:GridRect (grid.cellRect(model lastR lastC))
+        def x0:double (to_double bodyLeft)
+        def y0:double (to_double bodyTop)
+        def x1:double (to_double end.x)
+        def y1:double (to_double end.y)
+        if ((end.x < -50000) || (x1 > (to_double (bodyLeft + vw)))) {
+            x1 = (to_double (bodyLeft + vw))
+        }
+        if ((end.y < -50000) || (y1 > (to_double (bodyTop + vh)))) {
+            y1 = (to_double (bodyTop + vh))
+        }
+        this.pushClip(dl x0 y0 (to_double vw) (to_double vh))
+        if (model.viewMode == "pageBreak") {
+            def grey:EVGColor (EVGColor.rgba(120 120 120 0.25))
+            if (x1 < (to_double (bodyLeft + vw))) {
+                this.pushRect(dl x1 y0 ((to_double (bodyLeft + vw)) - x1) (to_double vh) grey)
+            }
+            if (y1 < (to_double (bodyTop + vh))) {
+                this.pushRect(dl x0 y1 (x1 - x0) ((to_double (bodyTop + vh)) - y1) grey)
+            }
+        }
+        ; The outer edge of what prints, then each break inside it.
+        this.pushRect(dl x0 (y1 - 1.0) (x1 - x0) thick edge)
+        this.pushRect(dl (x1 - 1.0) y0 thick (y1 - y0) edge)
+        def i:int 0
+        while (i < (array_length rowsAt)) {
+            def rr:GridRect (grid.cellRect(model (itemAt rowsAt i) 0))
+            if (rr.y > -50000) {
+                this.pushRect(dl x0 ((to_double rr.y) - 1.0) (x1 - x0) thick edge)
+            }
+            i = (i + 1)
+        }
+        i = 0
+        while (i < (array_length colsAt)) {
+            def cr:GridRect (grid.cellRect(model 0 (itemAt colsAt i)))
+            if (cr.x > -50000) {
+                this.pushRect(dl ((to_double cr.x) - 1.0) y0 thick (y1 - y0) edge)
+            }
+            i = (i + 1)
+        }
+        ; "Page N" in each page, or the header and footer.
+        def pageNo:int 1
+        def pr:int 0
+        while (pr <= (array_length rowsAt)) {
+            def rStart:int 0
+            if (pr > 0) {
+                rStart = (itemAt rowsAt (pr - 1))
+            }
+            def rEnd:int lastR
+            if (pr < (array_length rowsAt)) {
+                rEnd = (itemAt rowsAt pr)
+            }
+            def pc:int 0
+            while (pc <= (array_length colsAt)) {
+                def cStart:int 0
+                if (pc > 0) {
+                    cStart = (itemAt colsAt (pc - 1))
+                }
+                def cEnd:int lastC
+                if (pc < (array_length colsAt)) {
+                    cEnd = (itemAt colsAt pc)
+                }
+                def a:GridRect (grid.cellRect(model rStart cStart))
+                def b:GridRect (grid.cellRect(model rEnd cEnd))
+                if ((a.x > -50000) && (a.y > -50000)) {
+                    def bx:double (to_double b.x)
+                    def by:double (to_double b.y)
+                    if (b.x < -50000) {
+                        bx = x1
+                    }
+                    if (b.y < -50000) {
+                        by = y1
+                    }
+                    if (model.viewMode == "pageBreak") {
+                        def label:string ("Page " + (to_string pageNo))
+                        def lw:double (ctx.tr.measureWidth(label 28.0))
+                        this.pushText(dl label ((((to_double a.x) + bx) / 2.0) - (lw / 2.0)) ((((to_double a.y) + by) / 2.0) - 14.0) 28.0 (EVGColor.rgba(120 120 120 0.55)))
+                    } {
+                        def hdr:string model.pageHeader
+                        if ((strlen hdr) == 0) {
+                            hdr = "Add header"
+                        }
+                        this.pushText(dl hdr ((to_double a.x) + 6.0) ((to_double a.y) + 2.0) 10.0 (EVGColor.rgb(140 140 140)))
+                        def ftr:string model.pageFooter
+                        if ((strlen ftr) == 0) {
+                            ftr = ("Page " + (to_string pageNo))
+                        }
+                        this.pushText(dl ftr ((to_double a.x) + 6.0) (by - 14.0) 10.0 (EVGColor.rgb(140 140 140)))
+                    }
+                }
+                pageNo = (pageNo + 1)
+                pc = (pc + 1)
+            }
+            pr = (pr + 1)
+        }
+        this.popClip(dl)
+    }
+
+    ; ✕ (cancel) and ✓ (enter) are live while editing; fx always is.
+    fn paintFxButtons:void (dl:EVGDisplayList x0:int y:int h:int editing:boolean) {
+        def ink:EVGColor theme.headerText
+        def off:EVGColor theme.gridLine
+        def cy:double ((to_double y) + ((to_double h) / 2.0))
+        def bx:double ((to_double x0) + 14.0)
+        def col:EVGColor off
+        if editing {
+            col = (EVGColor.rgb(196 43 28))
+        }
+        def c1:[double] ([] _:double ((bx - 5.0) (cy - 5.0) (bx + 5.0) (cy + 5.0)))
+        def c2:[double] ([] _:double ((bx - 5.0) (cy + 5.0) (bx + 5.0) (cy - 5.0)))
+        dl.addPolyline(c1 1.6 col)
+        dl.addPolyline(c2 1.6 col)
+        def ex:double (bx + 26.0)
+        def col2:EVGColor off
+        if editing {
+            col2 = (EVGColor.rgb(16 124 65))
+        }
+        def ck:[double] ([] _:double ((ex - 6.0) cy (ex - 2.0) (cy + 4.0) (ex + 6.0) (cy - 5.0)))
+        dl.addPolyline(ck 1.6 col2)
+        this.pushStyledText(dl "fx" ((to_double x0) + 56.0) ((to_double y) + 4.0) 13.0 ink "" false true)
+    }
+
     fn a11yFormulaBar:void (t:EVGA11yTree model:SpreadsheetModel sel:GridSelection grid:DataGrid editing:boolean editBuf:string) {
         def fbY:int (grid.formulaBarY())
         def bar:EVGA11yNode (t.group("app/formulabar" "app" "Formula bar"))
@@ -2670,6 +2815,13 @@ class GridView {
         def fieldY:int (fbY + 3)
         def fieldH:int (grid.formulaBarH - 6)
         t.place(nameBox addrX fieldY 64 fieldH)
+        def bx0:int ((grid.x + 64) + 10)
+        def bCancel:EVGA11yNode (t.button("app/fx-cancel" "app/formulabar" "Cancel"))
+        t.place(bCancel bx0 fieldY 26 fieldH)
+        def bEnter:EVGA11yNode (t.button("app/fx-enter" "app/formulabar" "Enter"))
+        t.place(bEnter (bx0 + 27) fieldY 26 fieldH)
+        def bFx:EVGA11yNode (t.button("app/fx-insert" "app/formulabar" "Insert Function"))
+        t.place(bFx (bx0 + 54) fieldY 28 fieldH)
 
         def shown:string (model.formulaBarText(sel.active.row sel.active.col))
         if editing {
@@ -2682,8 +2834,8 @@ class GridView {
         if (fbFieldW > 0) {
             t.place(f fbFieldX fbFieldY fbFieldW fbFieldH)
         } {
-            def fx:int ((grid.x + 64) + 10)
-            def fw:int ((grid.w - 64) - 18)
+            def fx:int (((grid.x + 64) + 10) + fxAreaW)
+            def fw:int (((grid.w - 64) - 18) - fxAreaW)
             t.place(f fx fieldY fw fieldH)
         }
     }

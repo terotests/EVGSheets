@@ -24,6 +24,7 @@ Import "GridCursor.rgr"
 Import "../../game_engine/ui/UIInput.rgr"
 Import "pkg:evg_window/EVGWindow.rgr"
 Import "GridFormat.rgr"
+Import "SheetPivot.rgr"
 Import "GridChart.rgr"
 Import "ChartInference.rgr"
 Import "GridChartView.rgr"
@@ -195,6 +196,13 @@ class GridApp {
     def pasteMode:int 0
     ; Shared EVG dialog layer — the same windows the DOCX / PPTX hosts can use.
     def windows:EVGWindowManager (new EVGWindowManager)
+    ; PivotTables: their descriptions; the results are cells on their sheets.
+    def pivots:[SheetPivot]
+    ; The task pane the chrome shows at the right ("" for none): "pivotFields",
+    ; "comments", "watch", "selection", "formatChart", "functions".
+    def paneKind:string ""
+    ; Watch Window: cells as "Sheet!A1".
+    def watches:[string]
     def pasteDialog:EVGWindow (new EVGWindow)
     ; Charts: the picker, and the description it is editing. The charts
     ; themselves live on the view's ChartLayer, because that is what paints
@@ -5607,10 +5615,38 @@ class GridApp {
         commands.addArg("data.textToColumns" "Text to Columns" "Data" "")
         commands.addArg("data.sort" "Sort…" "Data" "")
         commands.add("view.gridlines" "Gridlines" "View" "")
+        commands.addArg("view.zoom" "Zoom…" "View" "")
+        commands.add("view.zoomIn" "Zoom In" "View" "")
+        commands.add("view.zoomOut" "Zoom Out" "View" "")
+        commands.add("view.zoom100" "100%" "View" "")
+        commands.add("view.zoomToSelection" "Zoom to Selection" "View" "")
         commands.add("view.headings" "Headings" "View" "")
         commands.add("view.freezeTopRow" "Freeze Top Row" "View" "")
         commands.add("view.freezeFirstColumn" "Freeze First Column" "View" "")
         commands.add("view.normal" "Normal" "View" "")
+        commands.add("view.pageLayout" "Page Layout" "View" "")
+        commands.addArg("insert.pivotTable" "PivotTable" "Insert" "")
+        commands.addArg("insert.recommendedPivotTables" "Recommended PivotTables" "Insert" "")
+        commands.addArg("insert.pivotChart" "PivotChart" "Insert" "")
+        commands.addArg("table.summarizePivot" "Summarize with PivotTable" "Table" "")
+        commands.add("pivot.fieldList" "Field List" "PivotTable" "")
+        commands.add("pivot.refresh" "Refresh" "PivotTable" "Alt+F5")
+        commands.addArg("pivot.changeSource" "Change Data Source" "PivotTable" "")
+        commands.addArg("pivot.calculatedField" "Calculated Field" "PivotTable" "")
+        commands.addArg("pivot.grandTotals" "Grand Totals" "PivotTable" "")
+        commands.addArg("pivot.subtotals" "Subtotals" "PivotTable" "")
+        commands.addArg("pivot.reportLayout" "Report Layout" "PivotTable" "")
+        commands.addArg("pivot.style" "PivotTable Styles" "PivotTable" "")
+        commands.addArg("pivot.addField" "Add Field" "PivotTable" "")
+        commands.addArg("pivot.removeField" "Remove Field" "PivotTable" "")
+        commands.addArg("pivot.moveField" "Move Field" "PivotTable" "")
+        commands.addArg("pivot.valueSettings" "Value Field Settings" "PivotTable" "")
+        commands.addArg("pivot.filter" "Filter" "PivotTable" "")
+        commands.addArg("pivot.sort" "Sort" "PivotTable" "")
+        commands.addArg("pivot.group" "Group Field" "PivotTable" "")
+        commands.addArg("pivot.collapse" "Collapse Field" "PivotTable" "")
+        commands.add("pivot.delete" "Delete PivotTable" "PivotTable" "")
+        commands.add("view.pageBreakPreview" "Page Break Preview" "View" "")
         commands.add("file.exportCsv" "Export CSV" "File" "")
         commands.add("file.exportHtml" "Export HTML" "File" "")
         commands.add("file.close" "Close" "File" "Ctrl+W")
@@ -6409,9 +6445,559 @@ class GridApp {
 
     ; --- the dispatcher ------------------------------------------------------------
 
+    ; --- PivotTables ------------------------------------------------------------
+
+    ; The block of data around the active cell: its table if it is in one,
+    ; otherwise grown while a neighbouring row or column has something in it.
+    fn currentRegion:[int] () {
+        def out:[int]
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        def ti:int (model.tableIndexAt(sel.active.row sel.active.col))
+        if (ti >= 0) {
+            def t:SheetTable (model.tableAt(ti))
+            push out t.r0
+            push out t.c0
+            push out t.r1
+            push out t.c1
+            return out
+        }
+        if ((a.row != b.row) || (a.col != b.col)) {
+            push out a.row
+            push out a.col
+            push out b.row
+            push out b.col
+            return out
+        }
+        def r0:int a.row
+        def c0:int a.col
+        def r1:int a.row
+        def c1:int a.col
+        def grew:boolean true
+        while grew {
+            grew = false
+            if ((r0 > 0) && (this.rowHasData((r0 - 1) c0 c1))) {
+                r0 = (r0 - 1)
+                grew = true
+            }
+            if ((r1 < (model.usedRow())) && (this.rowHasData((r1 + 1) c0 c1))) {
+                r1 = (r1 + 1)
+                grew = true
+            }
+            if ((c0 > 0) && (this.colHasData((c0 - 1) r0 r1))) {
+                c0 = (c0 - 1)
+                grew = true
+            }
+            if ((c1 < (model.usedCol())) && (this.colHasData((c1 + 1) r0 r1))) {
+                c1 = (c1 + 1)
+                grew = true
+            }
+        }
+        push out r0
+        push out c0
+        push out r1
+        push out c1
+        return out
+    }
+
+    fn rowHasData:boolean (r:int c0:int c1:int) {
+        def c:int c0
+        while (c <= c1) {
+            if ((strlen (model.getCell(r c))) > 0) {
+                return true
+            }
+            c = (c + 1)
+        }
+        return false
+    }
+
+    fn colHasData:boolean (c:int r0:int r1:int) {
+        def r:int r0
+        while (r <= r1) {
+            if ((strlen (model.getCell(r c))) > 0) {
+                return true
+            }
+            r = (r + 1)
+        }
+        return false
+    }
+
+    ; The pivot whose output the active cell is in, as an index, or -1.
+    fn pivotAtCell:int () {
+        def i:int 0
+        while (i < (array_length pivots)) {
+            def pv:SheetPivot (itemAt pivots i)
+            if ((pv.outSheet == model.name) && (pv.covers(sel.active.row sel.active.col))) {
+                return i
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
+    ; Excel's recommendation, roughly: the first text column as rows, every
+    ; numeric column summed. A summary "Total" row in the source is left out.
+    fn inferPivot:void (pv:SheetPivot src:SpreadsheetModel) {
+        def c:int pv.c0
+        while (c <= pv.c1) {
+            def field:string (src.getDisplay(pv.r0 c))
+            def numeric:boolean (ConditionalFormat.isNumberCell(src (pv.r0 + 1) c))
+            if ((strlen field) > 0) {
+                if numeric {
+                    push pv.values field
+                    push pv.aggs "sum"
+                } {
+                    if ((array_length pv.rows) == 0) {
+                        push pv.rows field
+                    }
+                }
+            }
+            c = (c + 1)
+        }
+        def last:string (to_lowercase (src.getDisplay(pv.r1 pv.c0)))
+        if ((last == "total") || (last == "grand total")) {
+            pv.r1 = (pv.r1 - 1)
+        }
+    }
+
+    ; "Rows=Region,Product;Columns=Year;Values=Q1:sum,Q2;Filter=Region=North"
+    fn applyPivotSpec:void (pv:SheetPivot spec:string) {
+        def parts:[string] (strsplit spec ";")
+        def i:int 0
+        while (i < (array_length parts)) {
+            def part:string (itemAt parts i)
+            def eq:int (indexOf part "=")
+            if (eq > 0) {
+                def key:string (to_lowercase (trim (substring part 0 eq)))
+                def val:string (trim (substring part (eq + 1) (strlen part)))
+                def items:[string] (strsplit val ",")
+                if (key == "rows") {
+                    def noRows:[string]
+                    pv.rows = noRows
+                    def k:int 0
+                    while (k < (array_length items)) {
+                        if ((strlen (trim (itemAt items k))) > 0) {
+                            push pv.rows (trim (itemAt items k))
+                        }
+                        k = (k + 1)
+                    }
+                }
+                if (key == "columns") {
+                    pv.colField = val
+                }
+                if (key == "values") {
+                    def noV:[string]
+                    pv.values = noV
+                    def noA:[string]
+                    pv.aggs = noA
+                    def k2:int 0
+                    while (k2 < (array_length items)) {
+                        def it:string (trim (itemAt items k2))
+                        def colon:int (indexOf it ":")
+                        if (colon > 0) {
+                            push pv.values (substring it 0 colon)
+                            push pv.aggs (substring it (colon + 1) (strlen it))
+                        } {
+                            if ((strlen it) > 0) {
+                                push pv.values it
+                                push pv.aggs "sum"
+                            }
+                        }
+                        k2 = (k2 + 1)
+                    }
+                }
+                if (key == "filter") {
+                    def eq2:int (indexOf val "=")
+                    if (eq2 > 0) {
+                        pv.filterField = (substring val 0 eq2)
+                        pv.filterValue = (substring val (eq2 + 1) (strlen val))
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; Write (or rewrite) a pivot's result onto its sheet.
+    fn writePivot:boolean (pv:SheetPivot) {
+        def si:int (book.indexOfName(pv.srcSheet))
+        def ti:int (book.indexOfName(pv.outSheet))
+        if ((si < 0) || (ti < 0)) {
+            view.status = "The PivotTable's source or sheet is gone."
+            return false
+        }
+        def src:SpreadsheetModel (book.sheetAt(si))
+        def t:SpreadsheetModel (book.sheetAt(ti))
+        pv.compute(src)
+        def nr:int (pv.outRows())
+        def nc:int pv.outW
+        t.beginTx()
+        ; What the last refresh wrote goes first: the new result may be smaller.
+        def cr:int 0
+        while (cr < pv.lastRows) {
+            def cc:int 0
+            while (cc < pv.lastCols) {
+                t.applyEdit((pv.outRow + cr) (pv.outCol + cc) "" "")
+                engine.syncCell(ti (pv.outRow + cr) (pv.outCol + cc))
+                cc = (cc + 1)
+            }
+            cr = (cr + 1)
+        }
+        if (((pv.outRow + nr) + 1) > t.rowCount) {
+            t.growTo(((pv.outRow + nr) + 20) t.colCount)
+        }
+        if (((pv.outCol + nc) + 1) > t.colCount) {
+            t.growTo(t.rowCount ((pv.outCol + nc) + 4))
+        }
+        def r:int 0
+        while (r < nr) {
+            def c:int 0
+            while (c < nc) {
+                def txt:string (pv.cellAt(r c))
+                def rr:int (pv.outRow + r)
+                def ccol:int (pv.outCol + c)
+                if (((strlen txt) > 0) && ((charAt txt 0) == 61)) {
+                    def f:string (substring txt 1 (strlen txt))
+                    def k:int 0
+                    while (k < nc) {
+                        def ref:string (SpreadsheetModel.cellLabel(rr (pv.outCol + k)))
+                        f = (SheetPivot.replaceAll(f ("{" + ((to_string k) + "}")) ref))
+                        k = (k + 1)
+                    }
+                    if (r == 0) {
+                        t.applyEditPlain(rr ccol txt "")
+                    } {
+                        t.applyEditPlain(rr ccol "" f)
+                    }
+                } {
+                    t.applyEditPlain(rr ccol txt "")
+                }
+                engine.syncCell(ti rr ccol)
+                c = (c + 1)
+            }
+            r = (r + 1)
+        }
+        ; The look: a filled, bold header and bold totals.
+        if ((nr > 0) && (nc > 0)) {
+            def hs:GridSelection (new GridSelection)
+            hs.setAnchor(pv.outRow pv.outCol)
+            hs.setActive(pv.outRow ((pv.outCol + nc) - 1))
+            if ((GridFormat.isOn((t.getCellStyle(hs.active.row hs.active.col)) "bold" "")) == false) {
+                def hb:boolean (GridFormat.apply(t hs "bold" ""))
+            }
+            def fillHex:string "#DDEBF7"
+            if (pv.styleName == "PivotStyleMedium2") {
+                fillHex = "#B4C6E7"
+            }
+            if (pv.styleName == "PivotStyleDark2") {
+                fillHex = "#A6A6A6"
+            }
+            def hf:boolean (GridFormat.apply(t hs "fill" fillHex))
+            def bi:int 1
+            while (bi < (array_length pv.boldRows)) {
+                def br:int (pv.outRow + (itemAt pv.boldRows bi))
+                def bs:GridSelection (new GridSelection)
+                bs.setAnchor(br pv.outCol)
+                bs.setActive(br ((pv.outCol + nc) - 1))
+                if ((GridFormat.isOn((t.getCellStyle(bs.active.row bs.active.col)) "bold" "")) == false) {
+                    def bb:boolean (GridFormat.apply(t bs "bold" ""))
+                }
+                bi = (bi + 1)
+            }
+        }
+        t.endTx()
+        pv.lastRows = nr
+        pv.lastCols = nc
+        engine.recalcDirty()
+        this.refreshAll()
+        return true
+    }
+
+    fn newPivot:int (arg:string intoNewSheet:boolean) {
+        def reg:[int] (this.currentRegion())
+        def pv:SheetPivot (new SheetPivot)
+        pv.srcSheet = model.name
+        pv.r0 = (itemAt reg 0)
+        pv.c0 = (itemAt reg 1)
+        pv.r1 = (itemAt reg 2)
+        pv.c1 = (itemAt reg 3)
+        if (pv.r1 <= pv.r0) {
+            view.status = "A PivotTable needs a header row and data under it."
+            return -1
+        }
+        this.inferPivot(pv model)
+        if ((strlen arg) > 0) {
+            this.applyPivotSpec(pv arg)
+        }
+        pv.name = ("PivotTable" + (to_string ((array_length pivots) + 1)))
+        if intoNewSheet {
+            def okAdd:boolean (this.addSheet())
+            pv.outRow = 2
+            pv.outCol = 0
+        } {
+            pv.outRow = (pv.r0)
+            pv.outCol = (pv.c1 + 2)
+        }
+        pv.outSheet = model.name
+        push pivots pv
+        def ok:boolean (this.writePivot(pv))
+        sel.setAnchor(pv.outRow pv.outCol)
+        sel.setActive(pv.outRow pv.outCol)
+        paneKind = "pivotFields"
+        view.status = (pv.name + " created")
+        return ((array_length pivots) - 1)
+    }
+
+    fn runPivotCommand:boolean (id:string arg:string) {
+        if ((id == "insert.pivotTable") || (id == "table.summarizePivot")) {
+            return ((this.newPivot(arg true)) >= 0)
+        }
+        if (id == "insert.recommendedPivotTables") {
+            ; The recommendation, put next to the data rather than on a sheet.
+            return ((this.newPivot(arg false)) >= 0)
+        }
+        if (id == "insert.pivotChart") {
+            def at:int (this.newPivot(arg true))
+            if (at < 0) {
+                return false
+            }
+            def pc:SheetPivot (itemAt pivots at)
+            def gt:int 0
+            if pc.grandTotals {
+                gt = 1
+            }
+            def spec:GridChart (new GridChart)
+            spec.sheet = book.activeIndex
+            spec.kind = 1
+            spec.r0 = pc.outRow
+            spec.c0 = pc.outCol
+            spec.r1 = (((pc.outRow + pc.lastRows) - 1) - gt)
+            spec.c1 = ((pc.outCol + (array_length pc.values)) + 0)
+            spec.title = pc.name
+            spec.x = (grid.x + 420)
+            spec.y = (grid.y + 80)
+            view.chartLayer.add(windows spec)
+            return true
+        }
+        def pi:int (this.pivotAtCell())
+        if (pi < 0) {
+            view.status = "Select a cell in a PivotTable first."
+            return false
+        }
+        def pv:SheetPivot (itemAt pivots pi)
+        if (id == "pivot.fieldList") {
+            if (paneKind == "pivotFields") {
+                paneKind = ""
+            } {
+                paneKind = "pivotFields"
+            }
+            return true
+        }
+        if (id == "pivot.refresh") {
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.changeSource") {
+            ; "Sheet!A1:D20" or "A1:D20" on the source sheet.
+            def ref:string arg
+            def bang:int (indexOf ref "!")
+            if (bang > 0) {
+                pv.srcSheet = (substring ref 0 bang)
+                ref = (substring ref (bang + 1) (strlen ref))
+            }
+            def rg:[int] (GridApp.chartRefRange(ref))
+            if ((array_length rg) < 4) {
+                return false
+            }
+            pv.r0 = (itemAt rg 0)
+            pv.c0 = (itemAt rg 1)
+            pv.r1 = (itemAt rg 2)
+            pv.c1 = (itemAt rg 3)
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.calculatedField") {
+            ; "Name=Q1+Q2" over the value fields.
+            def eq:int (indexOf arg "=")
+            if (eq <= 0) {
+                return false
+            }
+            push pv.calcNames (substring arg 0 eq)
+            push pv.calcExprs (substring arg (eq + 1) (strlen arg))
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.grandTotals") {
+            pv.grandTotals = (pv.grandTotals == false)
+            if (arg == "on") {
+                pv.grandTotals = true
+            }
+            if (arg == "off") {
+                pv.grandTotals = false
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.subtotals") {
+            pv.subtotals = (pv.subtotals == false)
+            if (arg == "on") {
+                pv.subtotals = true
+            }
+            if (arg == "off") {
+                pv.subtotals = false
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.reportLayout") {
+            if ((strlen arg) > 0) {
+                pv.layout = arg
+            } {
+                if (pv.layout == "compact") {
+                    pv.layout = "tabular"
+                } {
+                    pv.layout = "compact"
+                }
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.style") {
+            pv.styleName = "PivotStyleMedium2"
+            if ((strlen arg) > 0) {
+                pv.styleName = arg
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.addField") {
+            ; "Field" (to rows, or values when numeric) or "Field:area".
+            def colon:int (indexOf arg ":")
+            def field:string arg
+            def area:string ""
+            if (colon > 0) {
+                field = (substring arg 0 colon)
+                area = (substring arg (colon + 1) (strlen arg))
+            }
+            def src:SpreadsheetModel (book.sheetAt((book.indexOfName(pv.srcSheet))))
+            def fc:int (pv.fieldCol(src field))
+            if (fc < 0) {
+                return false
+            }
+            if ((strlen area) == 0) {
+                area = "rows"
+                if (ConditionalFormat.isNumberCell(src (pv.r0 + 1) fc)) {
+                    area = "values"
+                }
+            }
+            pv.placeField(field area)
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.removeField") {
+            if ((pv.removeField(arg)) == false) {
+                return false
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.moveField") {
+            def colon2:int (indexOf arg ":")
+            if (colon2 <= 0) {
+                return false
+            }
+            pv.placeField((substring arg 0 colon2) (substring arg (colon2 + 1) (strlen arg)))
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.valueSettings") {
+            ; "sum" "count" "average" "max" "min" for the first value, or
+            ; "Field:agg".
+            def colon3:int (indexOf arg ":")
+            def vi:int 0
+            def agg:string arg
+            if (colon3 > 0) {
+                vi = (pv.valueIndex((substring arg 0 colon3)))
+                agg = (substring arg (colon3 + 1) (strlen arg))
+            }
+            if ((vi < 0) || (vi >= (array_length pv.aggs))) {
+                return false
+            }
+            set_at pv.aggs vi agg
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.filter") {
+            ; "Field=Value", or "" to clear.
+            def eq2:int (indexOf arg "=")
+            if (eq2 > 0) {
+                pv.filterField = (substring arg 0 eq2)
+                pv.filterValue = (substring arg (eq2 + 1) (strlen arg))
+            } {
+                pv.filterField = ""
+                pv.filterValue = ""
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.sort") {
+            pv.sortDir = "desc"
+            if ((strlen arg) > 0) {
+                pv.sortDir = arg
+            }
+            if (arg == "none") {
+                pv.sortDir = ""
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.group") {
+            ; "year" / "month" for dates, "bin:<size>" for numbers, "" to ungroup.
+            pv.groupMode = arg
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.collapse") {
+            pv.collapsed = (pv.collapsed == false)
+            if (arg == "expand") {
+                pv.collapsed = false
+            }
+            if (arg == "collapse") {
+                pv.collapsed = true
+            }
+            return (this.writePivot(pv))
+        }
+        if (id == "pivot.delete") {
+            def ti:int (book.indexOfName(pv.outSheet))
+            if (ti >= 0) {
+                def t:SpreadsheetModel (book.sheetAt(ti))
+                t.beginTx()
+                def cr:int 0
+                while (cr < pv.lastRows) {
+                    def cc:int 0
+                    while (cc < pv.lastCols) {
+                        t.applyEdit((pv.outRow + cr) (pv.outCol + cc) "" "")
+                        engine.syncCell(ti (pv.outRow + cr) (pv.outCol + cc))
+                        cc = (cc + 1)
+                    }
+                    cr = (cr + 1)
+                }
+                t.endTx()
+            }
+            def keep:[SheetPivot]
+            def k:int 0
+            while (k < (array_length pivots)) {
+                if (k != pi) {
+                    push keep (itemAt pivots k)
+                }
+                k = (k + 1)
+            }
+            pivots = keep
+            if (paneKind == "pivotFields") {
+                paneKind = ""
+            }
+            engine.recalcDirty()
+            this.refreshAll()
+            return true
+        }
+        return false
+    }
+
     fn runExcelCommand:boolean (id:string arg:string) {
         def a:CellPos (this.selFirst())
         def b:CellPos (this.selLast())
+        if ((indexOf id "pivot.") == 0) {
+            return (this.runPivotCommand(id arg))
+        }
+        if ((id == "insert.pivotTable") || (id == "insert.recommendedPivotTables") || (id == "table.summarizePivot") || (id == "insert.pivotChart")) {
+            return (this.runPivotCommand(id arg))
+        }
         ; --- Home: alignment and font ---
         if (id == "home.mergeCenter") {
             if ((strlen (model.mergeAt(sel.active.row sel.active.col))) > 0) {
@@ -6885,6 +7471,67 @@ class GridApp {
             return true
         }
         ; --- View ---
+        if (id == "view.zoom") {
+            ; An argument is a percent; none steps through Excel's presets.
+            if ((strlen arg) > 0) {
+                def pz:double (?? (to_double arg) 100.0)
+                model.setZoom((pz / 100.0))
+            } {
+                def presets:[double] ([] _:double (0.5 0.75 1.0 1.25 1.5 2.0))
+                def next:double 0.5
+                def pi:int 0
+                while (pi < (array_length presets)) {
+                    def pv:double (itemAt presets ((array_length presets) - (pi + 1)))
+                    if (pv > (model.zoom + 0.001)) {
+                        next = pv
+                    }
+                    pi = (pi + 1)
+                }
+                model.setZoom(next)
+            }
+            this.refreshAll()
+            return true
+        }
+        if (id == "view.zoomIn") {
+            model.setZoom((model.zoom + 0.1))
+            this.refreshAll()
+            return true
+        }
+        if (id == "view.zoomOut") {
+            model.setZoom((model.zoom - 0.1))
+            this.refreshAll()
+            return true
+        }
+        if (id == "view.zoom100") {
+            model.setZoom(1.0)
+            this.refreshAll()
+            return true
+        }
+        if (id == "view.zoomToSelection") {
+            ; The selection, at 100 %, against the room the grid has.
+            def zw:int 0
+            def zc:int a.col
+            while (zc <= b.col) {
+                zw = (zw + (model.rawColWidth(zc)))
+                zc = (zc + 1)
+            }
+            def zh:int 0
+            def zr:int a.row
+            while (zr <= b.row) {
+                zh = (zh + (model.rawRowHeight(zr)))
+                zr = (zr + 1)
+            }
+            def roomW:double (to_double (grid.w - (grid.rowHeaderW + 20)))
+            def roomH:double (to_double (grid.h - (grid.colHeaderH + 20)))
+            def fz:double (roomW / (to_double (zw + 1)))
+            def fzh:double (roomH / (to_double (zh + 1)))
+            if (fzh < fz) {
+                fz = fzh
+            }
+            model.setZoom(fz)
+            this.refreshAll()
+            return true
+        }
         if (id == "view.gridlines") {
             model.showGridlines = (model.showGridlines == false)
             model.version = (model.version + 1)
@@ -6911,8 +7558,21 @@ class GridApp {
             return true
         }
         if (id == "view.normal") {
-            ; The only view this editor has.
+            model.viewMode = "normal"
+            model.version = (model.version + 1)
             view.status = "Normal view"
+            return true
+        }
+        if (id == "view.pageLayout") {
+            model.viewMode = "pageLayout"
+            model.version = (model.version + 1)
+            view.status = "Page Layout view"
+            return true
+        }
+        if (id == "view.pageBreakPreview") {
+            model.viewMode = "pageBreak"
+            model.version = (model.version + 1)
+            view.status = "Page Break Preview"
             return true
         }
         ; --- File ---
@@ -8839,12 +9499,32 @@ class GridApp {
         return best
     }
 
+    ; The formula bar's ✕ / ✓ / fx, by offset into their strip.
+    fn pressFxButton:void (at:int) {
+        if (at < 27) {
+            if editing {
+                this.cancelEdit()
+            }
+            return
+        }
+        if (at < 54) {
+            if editing {
+                this.commitEdit()
+            }
+            return
+        }
+        if editing {
+            this.commitEdit()
+        }
+        def ran:boolean (this.runCommand("formulas.insertFunction" ""))
+    }
+
     fn beginFormulaBarEditAt:void (px:int) {
         this.beginFormulaBarEdit()
         ; Mirror the formula-bar layout from GridView so a click works even
         ; before the next paint stores fbTextX.
         def addrBoxW:int 64
-        def fieldX:int ((grid.x + addrBoxW) + 10)
+        def fieldX:int (((grid.x + addrBoxW) + 10) + view.fxAreaW)
         view.fbTextX = (fieldX + 6)
         view.fbFontSize = 13.0
         editCaret = (this.caretIndexAtFormulaBarX(px))
@@ -10089,7 +10769,13 @@ class GridApp {
                         this.closeHeaderMenu()
                     }
                     if ((hit.row == -3) && (hit.col == -3)) {
-                        this.beginFormulaBarEditAt(input.pointerX)
+                        def fxLeft:int ((grid.x + 64) + 10)
+                        def fxAt:int (input.pointerX - fxLeft)
+                        if ((fxAt >= 0) && (fxAt < view.fxAreaW)) {
+                            this.pressFxButton(fxAt)
+                        } {
+                            this.beginFormulaBarEditAt(input.pointerX)
+                        }
                     } {
                         if ((hit.row >= 0) && (hit.col >= 0)) {
                             view.focused = true

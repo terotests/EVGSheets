@@ -19,6 +19,8 @@ class XlsxWorksheet {
     ; Both are optional and both are set by the loader before `parse`, because
     ; a hyperlink's target and a note's text live outside the sheet XML.
     def relsXml:string ""
+    ; sheetView zoomScale, applied by the loader after the row heights settle.
+    def fileZoom:double 1.0
     def commentsXml:string ""
 
     ; Shared formulas. Excel does not repeat a formula it can derive: it writes
@@ -532,6 +534,20 @@ class XlsxWorksheet {
             if ((t.name == "sheetView") && (t.isEnd == false)) {
                 if ((t.attr("showGridLines")) == "0") {
                     model.showGridlines = false
+                }
+                fileZoom = 1.0
+                if ((t.attr("view")) == "pageBreakPreview") {
+                    model.viewMode = "pageBreak"
+                }
+                if ((t.attr("view")) == "pageLayout") {
+                    model.viewMode = "pageLayout"
+                }
+                def zs:string (t.attr("zoomScale"))
+                if ((strlen zs) > 0) {
+                    def zv:double (XlsxWorksheet.parseDouble(zs))
+                    if ((zv >= 10.0) && (zv <= 400.0)) {
+                        fileZoom = (zv / 100.0)
+                    }
                 }
                 if ((t.attr("showRowColHeaders")) == "0") {
                     model.showHeadings = false

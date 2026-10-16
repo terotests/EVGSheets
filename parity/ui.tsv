@@ -3,9 +3,9 @@ W1	Window	Title bar with the workbook name	1	yes	yes	probe:ui.titleBar
 W2	Window	Quick Access Toolbar (save, undo, redo)	2	yes	partial	-	undo and redo sit in the ribbon; no QAT
 W3	Window	Dark mode following the system	1	yes	yes	-	theme=dark and the system setting; no smoke check yet
 W4	Window	File view (Backstage: Info, New, Open, Save As, Print, Export)	2	yes	no	-	File is a 3-item menu
-R1	Ribbon	Ribbon tabs: Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Automate	3	yes	no	probe:ui.ribbonTabs	a menubar (6 menus) and one toolbar row
+R1	Ribbon	Ribbon tabs: Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Automate	3	yes	yes	probe:ui.ribbonTabs	
 R2	Ribbon	Home tab groups: Clipboard, Font, Alignment, Number, Styles, Cells, Editing	2	yes	partial	probe:ui.ribbonGroups	7 groups, but no Styles, Cells or Editing group
-R3	Ribbon	Home tab controls (Excel ~60)	3	yes	no	probe:ui.homeControls	the count is U3
+R3	Ribbon	Home tab controls (Excel ~60)	3	yes	yes	probe:ui.homeControls	
 R4	Ribbon	Font and size drop-downs	1	yes	yes	smoke:choosing 14 sets the size	
 R5	Ribbon	Toggles show the active cell's state (Bold pressed)	1	yes	yes	smoke:the reader is told Bold is pressed	
 R6	Ribbon	Galleries: Conditional Formatting, Format as Table, Cell Styles	2	yes	no	-	
@@ -13,7 +13,7 @@ R7	Ribbon	Contextual tabs (Table Design, Chart Design)	2	yes	no	-
 R8	Ribbon	Key tips (Alt or F10, then letters)	1	partial	partial	smoke:F6 leaves the sheet for the chrome	F6/F10 reach the menubar and ribbon; no key tips
 R9	Ribbon	Collapse the ribbon	1	partial	yes	-	View › Toolbar
 F1	Formula bar	Name Box	1	yes	yes	probe:ui.nameBox	
-F2	Formula bar	Cancel, Enter and Insert Function (fx) buttons	3	yes	no	probe:ui.fxButtons	
+F2	Formula bar	Cancel, Enter and Insert Function (fx) buttons	3	yes	yes	probe:ui.fxButtons	
 F3	Formula bar	Expand the formula bar	2	yes	no	-	
 F4	Formula bar	Function autocomplete and argument tips	2	yes	no	-	only in the script editor
 F5	Formula bar	Point mode and reference colouring	1	yes	partial	-	references are highlighted; no point mode check
@@ -44,12 +44,12 @@ T14	Target workbook	Cell borders	1	yes	yes	probe:wb.border
 S1	Sheet tabs	Tabs for the workbook's sheets	1	yes	yes	probe:ui.sheetTabs	
 S2	Sheet tabs	Add sheet (+)	1	yes	yes	probe:ui.addSheet	
 S3	Sheet tabs	Rename, reorder by drag, tab menu	1	yes	yes	smoke:dragging a tab reorders the sheets	
-S4	Sheet tabs	Scroll arrows for many sheets	2	yes	no	probe:ui.tabScroll	
+S4	Sheet tabs	Scroll arrows for many sheets	2	yes	yes	probe:ui.tabScroll	
 S5	Sheet tabs	Tab colour, hide and unhide	2	yes	no	-	
 B1	Status bar	Mode indicator (Ready, Enter, Edit)	2	yes	yes	probe:ui.statusReady	
 B2	Status bar	Sum, Average and Count of the selection	1	yes	yes	probe:ui.statusStats	
-B3	Status bar	Zoom slider and percentage	3	yes	no	probe:ui.zoom	
-B4	Status bar	View buttons (Normal, Page Layout, Page Break Preview)	3	yes	no	probe:ui.viewButtons	
+B3	Status bar	Zoom slider and percentage	3	yes	partial	probe:ui.zoom	buttons and percentage; no slider
+B4	Status bar	View buttons (Normal, Page Layout, Page Break Preview)	3	yes	yes	probe:ui.viewButtons	
 D1	Dialogs and panes	Find and Replace	1	yes	yes	smoke:Enter finds the next match	
 D2	Dialogs and panes	Paste Special	1	yes	yes	smoke:Paste pastes the value and closes	
 D3	Dialogs and panes	Format Cells (Number, Alignment, Font, Border, Fill, Protection)	2	yes	partial	smoke:Apply draws them	separate colour and border dialogs
