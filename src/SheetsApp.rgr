@@ -76,6 +76,38 @@ class SxAction {
     }
 }
 
+; One place in a ribbon group on the tabs past Home: a toolbar row or a
+; drop-down, in column `col` of its group.
+class SxSlot {
+    def col:int 0
+    def isMenu:boolean false
+    def bar:RibbonCtl (new RibbonCtl)
+    def menu:MenuCtl (new MenuCtl)
+
+    Constructor () {
+    }
+}
+
+; A labelled group on one of the tabs past Home (Show, Zoom, Window…): its
+; slots laid out in columns of two rows, and the drop-down it folds into
+; when the window is too narrow for the whole tab.
+class SxGroup {
+    def tab:string ""
+    def tid:string ""
+    def name:string ""
+    def cols:int 1
+    ; A group the tab is mostly for (Sort & Filter on Data): it keeps its
+    ; captions and stays unfolded longest.
+    def keep:boolean false
+    def slots:[SxSlot]
+    def fold:MenuCtl (new MenuCtl)
+
+    Constructor () {
+        def none:[SxSlot]
+        slots = none
+    }
+}
+
 class SheetsApp {
     def grid:DataGridWeb (new DataGridWeb)
     def ui:UiHost (new UiHost)
@@ -118,6 +150,13 @@ class SheetsApp {
     def ribbonTab:string "home"
     def tabGroups:[RibbonCtl]
     def tabOf:[string]
+    ; The labelled groups of the tabs past Home, their drop-downs, and the
+    ; group being filled while the ribbon is built.
+    def tabSets:[SxGroup]
+    def tabMenus:[MenuCtl]
+    def curSet:SxGroup (new SxGroup)
+    ; The theme switch in the title bar.
+    def themeBar:RibbonCtl (new RibbonCtl)
     def ribTabRow:EVGElement (EVGElement.createDiv())
     ; Footer: scroll through the sheets, and the status bar's view and zoom.
     def tabNav:RibbonCtl (new RibbonCtl)
@@ -314,15 +353,20 @@ class SheetsApp {
     }
 
     fn resize:void (w:int h:int) {
-        def before:string (join (this.foldedGroups()) ",")
+        def before:string (this.foldKey())
         pageW = (to_double w)
         pageH = (to_double h)
         ui.setPageSize(pageW pageH)
         ; A width that folds or unfolds a ribbon group lays the chrome out again.
-        if (built && ((join (this.foldedGroups()) ",") != before)) {
+        if (built && ((this.foldKey()) != before)) {
             this.buildChrome()
             this.sync()
         }
+    }
+
+    ; Which ribbon groups are folded, Home's and the shown tab's.
+    fn foldKey:string () {
+        return ((join (this.foldedGroups()) ",") + "|" + (join (this.tabFolds(ribbonTab)) ","))
     }
 
     ; =========================================================================
@@ -545,6 +589,8 @@ class SheetsApp {
         def c3:UiItem (v.addCheckbox("showstatus" "Status bar" true))
         this.act("showribbon" "sx:ribbon" "" "")
         def c4:UiItem (v.addCheckbox("showribbon" "Toolbar" true))
+        this.act("showmenubar" "sx:menubar" "" "")
+        def c6:UiItem (v.addCheckbox("showmenubar" "Menu bar" true))
         v.addSeparator()
         this.act("themelight" "sx:theme" "light" "")
         def r1:UiItem (v.addRadio("themelight" "Light theme" "theme" true))
@@ -932,9 +978,622 @@ class SheetsApp {
         return out
     }
 
+    ; --- The tabs past Home --------------------------------------------------
+    ;
+    ; Laid out as Home is: labelled groups, each a few columns of two rows of
+    ; labelled buttons and drop-downs, so no tab is a wall of words. A group
+    ; that does not fit the window folds into a drop-down named after it.
+
+    ; Starts a labelled group on `tab`.
+    fn tset:void (tab:string tid:string name:string) {
+        def g (new SxGroup())
+        g.tab = tab
+        g.tid = tid
+        g.name = name
+        push tabSets g
+        curSet = g
+    }
+
+    ; The group being filled is one the tab is mostly for.
+    fn tkeep:void () {
+        curSet.keep = true
+    }
+
+    ; The next slots of the group go in a new column.
+    fn tcol:void () {
+        curSet.cols = (curSet.cols + 1)
+    }
+
+    ; A labelled button on a row of its own in the group's current column.
+    fn tb:RibbonItem (value:string name:string label:string icon:string command:string arg:string) {
+        def g:SxGroup curSet
+        def r:RibbonCtl (this.grp(g.tab (g.tid + "-" + (to_string (array_length g.slots))) g.name))
+        def sl (new SxSlot())
+        sl.col = (g.cols - 1)
+        sl.bar = r
+        push g.slots sl
+        def it:RibbonItem (this.tool(r value name (SheetsApp.icon(icon)) command arg false))
+        it.text = label
+        return it
+    }
+
+    ; The same, a button that stays down while what it shows is on.
+    fn tt:RibbonItem (value:string name:string label:string icon:string command:string arg:string) {
+        def it:RibbonItem (this.tb(value name label icon command arg))
+        it.toggle = true
+        return it
+    }
+
+    ; A drop-down on a row of its own in the group's current column.
+    fn tmenu:MenuCtl (tid:string name:string) {
+        def g:SxGroup curSet
+        def m:MenuCtl (this.drop(tid name))
+        def sl (new SxSlot())
+        sl.col = (g.cols - 1)
+        sl.isMenu = true
+        sl.menu = m
+        push g.slots sl
+        push tabMenus m
+        return m
+    }
+
+    fn titem:void (m:MenuCtl value:string label:string command:string arg:string) {
+        this.item(m value label command arg "")
+    }
+
+    fn buildTabs:void () {
+        ; --- Insert ------------------------------------------------------------
+        this.tset("insert" "sx-rb-instables" "Tables")
+        this.tkeep()
+        this.tb("i-table" "Table" "Table" "table" "insert.table" "")
+        this.tset("insert" "sx-rb-insill" "Illustrations")
+        this.tb("i-picture" "Pictures" "Pictures" "image" "insert.picture" "")
+        def shapes:MenuCtl (this.tmenu("sx-shapes" "Shapes"))
+        this.titem(shapes "i-shape" "Rectangle" "insert.shape" "rect")
+        this.titem(shapes "i-oval" "Oval" "insert.shape" "ellipse")
+        this.titem(shapes "i-diamond" "Diamond" "insert.shape" "diamond")
+        this.titem(shapes "i-line" "Line" "insert.shape" "line")
+        this.titem(shapes "i-arrow" "Arrow" "insert.shape" "arrow")
+        this.tcol()
+        this.tb("i-icons" "Icons" "Icons" "smile" "insert.icons" "")
+        this.tb("i-smartart" "SmartArt" "SmartArt" "smartart" "insert.smartArt" "")
+        this.tset("insert" "sx-rb-inscharts" "Charts")
+        this.tkeep()
+        this.tb("i-chart" "Insert chart" "Chart" "chart" "insert.chart" "")
+        this.tb("i-spark" "Line sparkline" "Sparkline" "spark" "insert.sparkline" "")
+        this.tset("insert" "sx-rb-insfilt" "Filters")
+        this.tb("i-slicer" "Slicer" "Slicer" "filter" "insert.slicer" "")
+        this.tb("i-timeline" "Timeline" "Timeline" "timeline" "insert.timeline" "")
+        this.tset("insert" "sx-rb-inslinks" "Links & Comments")
+        this.tb("i-link" "Link" "Link" "link" "insert.link" "")
+        this.tb("i-comment" "Comment" "Comment" "comment" "review.newComment" "")
+        this.tcol()
+        this.tb("i-note" "Note" "Note" "note" "review.newNote" "")
+        this.tset("insert" "sx-rb-instext" "Text")
+        this.tb("i-textbox" "Text box" "Text Box" "textbox" "insert.textBox" "")
+        this.tb("i-wordart" "WordArt" "WordArt" "wordart" "insert.wordArt" "WordArt")
+        this.tcol()
+        this.tb("i-sig" "Signature line" "Signature Line" "signature" "insert.signatureLine" "")
+        this.tb("i-check" "Checkbox" "Checkbox" "checkbox" "insert.checkbox" "")
+        this.tset("insert" "sx-rb-inssym" "Symbols")
+        this.tb("i-equation" "Equation" "Equation" "sigma" "insert.equation" "x^2")
+        this.tb("i-symbol" "Symbol" "Symbol" "omega" "insert.symbol" "")
+
+        ; --- Draw --------------------------------------------------------------
+        this.tset("draw" "sx-rb-drtools" "Drawing Tools")
+        this.tb("dr-pen" "Pen" "Pen" "pen" "draw.pen" "")
+        this.tb("dr-eraser" "Eraser" "Eraser" "eraser" "draw.eraser" "")
+        this.tcol()
+        this.tb("dr-lasso" "Lasso select" "Lasso Select" "lasso" "draw.lasso" "")
+        this.tset("draw" "sx-rb-drconv" "Convert")
+        this.tb("dr-ink" "Ink to shape" "Ink to Shape" "wand" "draw.inkToShape" "")
+
+        ; --- Page Layout -------------------------------------------------------
+        this.tset("pagelayout" "sx-rb-pgtheme" "Themes")
+        this.tb("p-theme" "Themes" "Themes" "palette" "pageLayout.theme" "")
+        this.tb("p-tcolors" "Theme colors" "Colors" "colors" "pageLayout.themeColors" "")
+        this.tcol()
+        this.tb("p-tfonts" "Theme fonts" "Fonts" "textbox" "pageLayout.themeFonts" "")
+        this.tb("p-teffects" "Theme effects" "Effects" "sparkles" "pageLayout.themeEffects" "")
+        this.tset("pagelayout" "sx-rb-pgsetup" "Page Setup")
+        this.tkeep()
+        def margins:MenuCtl (this.tmenu("sx-margins" "Margins"))
+        this.titem(margins "p-mnormal" "Normal" "pageLayout.margins" "normal")
+        this.titem(margins "p-mwide" "Wide" "pageLayout.margins" "wide")
+        this.titem(margins "p-mnarrow" "Narrow" "pageLayout.margins" "narrow")
+        margins.addSeparator()
+        this.titem(margins "p-setup" "Page Setup…" "pageLayout.pageSetup" "")
+        def orient:MenuCtl (this.tmenu("sx-orient" "Orientation"))
+        this.titem(orient "p-portrait" "Portrait" "pageLayout.orientation" "portrait")
+        this.titem(orient "p-landscape" "Landscape" "pageLayout.orientation" "landscape")
+        this.tcol()
+        def psize:MenuCtl (this.tmenu("sx-psize" "Size"))
+        this.titem(psize "p-letter" "Letter" "pageLayout.size" "letter")
+        this.titem(psize "p-legal" "Legal" "pageLayout.size" "legal")
+        this.titem(psize "p-a3" "A3" "pageLayout.size" "a3")
+        this.titem(psize "p-a4" "A4" "pageLayout.size" "a4")
+        this.titem(psize "p-a5" "A5" "pageLayout.size" "a5")
+        def parea:MenuCtl (this.tmenu("sx-parea" "Print Area"))
+        this.titem(parea "p-area" "Set Print Area" "pageLayout.printArea" "set")
+        this.titem(parea "p-areaclear" "Clear Print Area" "pageLayout.printArea" "clear")
+        this.tcol()
+        def breaks:MenuCtl (this.tmenu("sx-breaks" "Breaks"))
+        this.titem(breaks "p-breaks" "Insert Page Break" "pageLayout.breaks" "insert")
+        this.titem(breaks "p-breakdel" "Remove Page Break" "pageLayout.breaks" "remove")
+        this.titem(breaks "p-breakreset" "Reset All Page Breaks" "pageLayout.breaks" "reset")
+        this.tb("p-bg" "Background" "Background" "image" "pageLayout.background" "")
+        this.tcol()
+        this.tb("p-titles" "Print titles" "Print Titles" "heading" "pageLayout.printTitles" "")
+        this.tb("p-hf" "Header and footer" "Header & Footer" "headfoot" "pageLayout.headerFooter" "")
+        this.tset("pagelayout" "sx-rb-pgfit" "Scale to Fit")
+        def fit:MenuCtl (this.tmenu("sx-fit" "Fit to Page"))
+        this.titem(fit "p-fitall" "Fit Sheet on One Page" "pageLayout.scaleToFit" "1,1")
+        this.titem(fit "p-fit" "Fit All Columns on One Page" "pageLayout.scaleToFit" "1,0")
+        this.titem(fit "p-fitrows" "Fit All Rows on One Page" "pageLayout.scaleToFit" "0,1")
+        this.tset("pagelayout" "sx-rb-pgsheet" "Sheet Options")
+        this.tt("p-vgrid" "View gridlines" "View Gridlines" "grid" "view.gridlines" "")
+        this.tt("p-vhead" "View headings" "View Headings" "headings" "view.headings" "")
+        this.tcol()
+        this.tt("p-gridlines" "Print gridlines" "Print Gridlines" "printer" "pageLayout.printGridlines" "")
+        this.tt("p-headings" "Print headings" "Print Headings" "printer" "pageLayout.printHeadings" "")
+        this.tset("pagelayout" "sx-rb-pgarr" "Arrange")
+        this.tb("p-fwd" "Bring forward" "Bring Forward" "forward" "arrange.bringForward" "")
+        this.tb("p-back" "Send backward" "Send Backward" "backward" "arrange.sendBackward" "")
+        this.tcol()
+        this.tb("p-selpane" "Selection pane" "Selection Pane" "layers" "arrange.selectionPane" "")
+        def palign:MenuCtl (this.tmenu("sx-palign" "Align"))
+        this.titem(palign "p-align" "Align Left" "arrange.align" "left")
+        this.titem(palign "p-alignc" "Align Center" "arrange.align" "center")
+        this.titem(palign "p-alignr" "Align Right" "arrange.align" "right")
+        palign.addSeparator()
+        this.titem(palign "p-alignt" "Align Top" "arrange.align" "top")
+        this.titem(palign "p-alignm" "Align Middle" "arrange.align" "middle")
+        this.titem(palign "p-alignb" "Align Bottom" "arrange.align" "bottom")
+        this.tcol()
+        def pgroup:MenuCtl (this.tmenu("sx-pgroup" "Group"))
+        this.titem(pgroup "p-group" "Group" "arrange.group" "")
+        this.titem(pgroup "p-ungroup" "Ungroup" "arrange.group" "ungroup")
+        def protate:MenuCtl (this.tmenu("sx-protate" "Rotate"))
+        this.titem(protate "p-rotate" "Rotate Right 90°" "arrange.rotate" "right")
+        this.titem(protate "p-rotatel" "Rotate Left 90°" "arrange.rotate" "left")
+        this.titem(protate "p-flip" "Flip" "arrange.rotate" "flip")
+
+        ; --- Formulas ----------------------------------------------------------
+        this.tset("formulas" "sx-rb-flib" "Function Library")
+        this.tkeep()
+        this.tb("f-insert" "Insert function" "Insert Function" "fx" "formulas.insertFunction" "")
+        this.tb("f-autosum" "AutoSum" "AutoSum" "sigma" "formulas.autoSum" "")
+        this.tcol()
+        this.tb("f-recent" "Recently used" "Recently Used" "clock" "formulas.recentlyUsed" "")
+        this.tb("f-fin" "Financial" "Financial" "currency" "formulas.financial" "")
+        this.tcol()
+        this.tb("f-logical" "Logical" "Logical" "branch" "formulas.logical" "")
+        this.tb("f-text" "Text" "Text" "textbox" "formulas.text" "")
+        this.tcol()
+        this.tb("f-date" "Date and time" "Date & Time" "calendar" "formulas.dateTime" "")
+        this.tb("f-lookup" "Lookup and reference" "Lookup & Reference" "find" "formulas.lookupReference" "")
+        this.tcol()
+        this.tb("f-math" "Math and trig" "Math & Trig" "calculator" "formulas.mathTrig" "")
+        this.tb("f-more" "More functions" "More Functions" "more" "formulas.moreFunctions" "")
+        this.tset("formulas" "sx-rb-fnames" "Defined Names")
+        this.tb("f-namemgr" "Name manager" "Name Manager" "tag" "formulas.nameManager" "")
+        this.tb("f-define" "Define name" "Define Name" "tag" "formulas.defineName" "")
+        this.tcol()
+        this.tb("f-useinf" "Use in formula" "Use in Formula" "fx" "formulas.useInFormula" "")
+        this.tb("f-fromsel" "Create from selection" "Create from Selection" "table" "formulas.createFromSelection" "")
+        this.tset("formulas" "sx-rb-faudit" "Formula Auditing")
+        this.tb("f-prec" "Trace precedents" "Trace Precedents" "precedents" "formulas.tracePrecedents" "")
+        this.tb("f-dep" "Trace dependents" "Trace Dependents" "dependents" "formulas.traceDependents" "")
+        this.tcol()
+        this.tb("f-rmarrows" "Remove arrows" "Remove Arrows" "x" "formulas.removeArrows" "")
+        this.tt("f-show" "Show formulas" "Show Formulas" "fx" "formulas.showFormulas" "")
+        this.tcol()
+        this.tb("f-errchk" "Error checking" "Error Checking" "alert" "formulas.errorChecking" "")
+        this.tb("f-eval" "Evaluate formula" "Evaluate Formula" "checksquare" "formulas.evaluateFormula" "")
+        this.tcol()
+        this.tb("f-watch" "Watch window" "Watch Window" "eye" "formulas.watchWindow" "")
+        this.tset("formulas" "sx-rb-fcalc" "Calculation")
+        this.tb("f-calcopt" "Calculation options" "Calculation Options" "sliders" "formulas.calculationOptions" "")
+        this.tb("f-calcnow" "Calculate now" "Calculate Now" "calculator" "formulas.calculateNow" "")
+        this.tcol()
+        this.tb("f-calcsheet" "Calculate sheet" "Calculate Sheet" "calculator" "formulas.calculateSheet" "")
+
+        ; --- Data --------------------------------------------------------------
+        this.tset("data" "sx-rb-dget" "Get & Transform Data")
+        this.tb("d-getdata" "Get data" "Get Data" "database" "data.getData" "")
+        this.tb("d-csv" "From text or CSV" "From Text/CSV" "filetext" "data.fromTextCsv" "")
+        this.tcol()
+        this.tb("d-web" "From web" "From Web" "globe" "data.fromWeb" "")
+        this.tb("d-range" "From table or range" "From Table/Range" "table" "data.fromTableRange" "")
+        this.tset("data" "sx-rb-dqry" "Queries & Connections")
+        this.tb("d-refall" "Refresh all" "Refresh All" "refresh" "data.refreshAll" "")
+        this.tb("d-qc" "Queries and connections" "Queries & Connections" "list" "data.queriesConnections" "")
+        this.tcol()
+        this.tb("d-sql" "SQL query" "SQL Query" "terminal" "db.sql.dialog" "")
+        this.tb("d-conn" "Connection" "Connection" "plug" "db.connection" "")
+        this.tcol()
+        this.tb("d-refresh" "Refresh" "Refresh" "refresh" "db.refresh" "")
+        this.tset("data" "sx-rb-dsort" "Sort & Filter")
+        this.tkeep()
+        this.tb("d-asc" "Sort smallest to largest" "Sort A to Z" "sortasc" "data.sort.asc" "")
+        this.tb("d-desc" "Sort largest to smallest" "Sort Z to A" "sortdesc" "data.sort.desc" "")
+        this.tcol()
+        this.tb("d-sort" "Sort" "Sort…" "sort" "data.sort" "")
+        this.tb("d-filter" "Filter" "Filter" "filter" "data.filter" "")
+        this.tcol()
+        this.tb("d-clear" "Clear filter" "Clear" "filterclear" "data.filter.clear" "")
+        this.tb("d-reapply" "Reapply" "Reapply" "refresh" "data.reapply" "")
+        this.tcol()
+        this.tb("d-adv" "Advanced filter" "Advanced" "sliders" "data.advancedFilter" "")
+        this.tset("data" "sx-rb-dtools" "Data Tools")
+        this.tkeep()
+        this.tb("d-t2c" "Text to columns" "Text to Columns" "columns" "data.textToColumns" "")
+        this.tb("d-flash" "Flash fill" "Flash Fill" "zap" "data.flashFill" "")
+        this.tcol()
+        this.tb("d-dups" "Remove duplicates" "Remove Duplicates" "copyx" "data.removeDuplicates" "")
+        def dval:MenuCtl (this.tmenu("sx-dvalid" "Data Validation"))
+        this.titem(dval "d-valid" "Data Validation…" "data.validation" "")
+        this.titem(dval "d-circle" "Circle Invalid Data" "data.circleInvalid" "")
+        this.tcol()
+        this.tb("d-consol" "Consolidate" "Consolidate" "consolidate" "data.consolidate" "")
+        this.tb("d-rel" "Relationships" "Relationships" "link" "data.relationships" "")
+        this.tset("data" "sx-rb-dfc" "Forecast")
+        def whatif:MenuCtl (this.tmenu("sx-whatif" "What-If Analysis"))
+        this.titem(whatif "d-scen" "Scenario Manager…" "data.scenarioManager" "")
+        this.titem(whatif "d-goal" "Goal Seek…" "data.goalSeek" "")
+        this.titem(whatif "d-dtable" "Data Table…" "data.dataTable" "")
+        this.tb("d-fsheet" "Forecast sheet" "Forecast Sheet" "trending" "data.forecastSheet" "")
+        this.tset("data" "sx-rb-dout" "Outline")
+        this.tb("d-group" "Group" "Group" "outline" "data.group" "")
+        this.tb("d-ungroup" "Ungroup" "Ungroup" "ungroup" "data.ungroup" "")
+        this.tcol()
+        this.tb("d-subtotal" "Subtotal" "Subtotal" "sigma" "data.subtotal" "")
+        this.tset("data" "sx-rb-dan" "Analysis")
+        this.tb("d-atp" "Data analysis" "Data Analysis" "chart" "data.analysisToolPak" "")
+        this.tb("d-solver" "Solver" "Solver" "target" "data.solver" "")
+        this.tcol()
+        this.tb("d-analyze" "Analyze data" "Analyze Data" "sparkles" "data.analyzeData" "")
+
+        ; --- Review ------------------------------------------------------------
+        this.tset("review" "sx-rb-rproof" "Proofing")
+        this.tb("r-spell" "Spelling" "Spelling" "spell" "review.spelling" "")
+        this.tb("r-thes" "Thesaurus" "Thesaurus" "book" "review.thesaurus" "")
+        this.tcol()
+        this.tb("r-stats" "Workbook statistics" "Workbook Statistics" "chart" "review.workbookStatistics" "")
+        this.tset("review" "sx-rb-racc" "Accessibility")
+        this.tb("r-access" "Check accessibility" "Check Accessibility" "person" "review.checkAccessibility" "")
+        this.tset("review" "sx-rb-rnotes" "Comments")
+        this.tkeep()
+        this.tb("r-comment" "New comment" "New Comment" "comment" "review.newComment" "")
+        this.tb("r-delete" "Delete comment" "Delete" "trash" "review.deleteComment" "")
+        this.tcol()
+        this.tb("r-prev" "Previous comment" "Previous" "chevronLeft" "review.previousComment" "")
+        this.tb("r-next" "Next comment" "Next" "chevronRight" "review.nextComment" "")
+        this.tcol()
+        this.tb("r-showc" "Show comments" "Show Comments" "comment" "review.showComments" "")
+        this.tset("review" "sx-rb-rnote" "Notes")
+        def notes:MenuCtl (this.tmenu("sx-notes" "Notes"))
+        this.titem(notes "r-note" "New Note" "review.newNote" "")
+        this.titem(notes "r-shownotes" "Show All Notes" "review.showAllNotes" "")
+        this.titem(notes "r-conv" "Convert to Comments" "review.convertToComments" "")
+        this.tset("review" "sx-rb-rprotect" "Protect")
+        this.tb("r-psheet" "Protect sheet" "Protect Sheet" "lock" "review.protectSheet" "")
+        this.tb("r-unsheet" "Unprotect sheet" "Unprotect Sheet" "unlock" "review.unprotectSheet" "")
+        this.tcol()
+        this.tb("r-pbook" "Protect workbook" "Protect Workbook" "lock" "review.protectWorkbook" "")
+        this.tb("r-ranges" "Allow edit ranges" "Allow Edit Ranges" "key" "review.allowEditRanges" "")
+        this.tset("review" "sx-rb-rshow" "Changes")
+        this.tb("r-changes" "Show changes" "Show Changes" "clock" "review.showChanges" "")
+
+        ; --- View --------------------------------------------------------------
+        this.tset("view" "sx-rb-vviews" "Workbook Views")
+        this.tb("v-normal" "Normal view" "Normal" "grid" "view.normal" "")
+        this.tb("v-pagelayout" "Page layout view" "Page Layout" "file" "view.pageLayout" "")
+        this.tcol()
+        this.tb("v-pagebreak" "Page break preview" "Page Break" "breaks" "view.pageBreakPreview" "")
+        this.tb("v-custom" "Custom views" "Custom Views" "eye" "view.customViews" "")
+        this.tset("view" "sx-rb-vshow" "Show")
+        this.tkeep()
+        this.tt("v-grid" "Gridlines" "Gridlines" "grid" "view.gridlines" "")
+        this.tt("v-head" "Headings" "Headings" "headings" "view.headings" "")
+        this.tcol()
+        this.tt("v-fbar" "Formula bar" "Formula Bar" "fx" "sx:formulaBar" "")
+        this.tt("v-ruler" "Ruler" "Ruler" "ruler" "view.ruler" "")
+        this.tcol()
+        this.tt("v-tabs" "Sheet tabs" "Sheet Tabs" "paneltabs" "sx:tabs" "")
+        this.tt("v-status" "Status bar" "Status Bar" "panelstatus" "sx:status" "")
+        this.tset("view" "sx-rb-vlook" "Appearance")
+        this.tkeep()
+        this.tt("v-dark" "Dark mode" "Dark Mode" "moon" "sx:theme" "toggle")
+        this.tt("v-rtl" "Right to left" "Right to Left" "rtl" "view.rtl" "")
+        this.tcol()
+        this.tt("v-menubar" "Menu bar" "Menu Bar" "menu" "sx:menubar" "")
+        this.tset("view" "sx-rb-vzoom" "Zoom")
+        this.tb("v-zoom" "Zoom" "Zoom" "find" "view.zoom" "")
+        this.tb("v-zoom100" "Zoom to 100%" "100%" "zoom100" "view.zoom100" "")
+        this.tcol()
+        this.tb("v-zoomsel" "Zoom to selection" "Zoom to Selection" "zoomsel" "view.zoomToSelection" "")
+        this.tt("v-expand" "Expand formula bar" "Expand Formula Bar" "chevron" "view.expandFormulaBar" "")
+        this.tset("view" "sx-rb-vwin" "Window")
+        this.tkeep()
+        def freeze:MenuCtl (this.tmenu("sx-freeze" "Freeze Panes"))
+        this.titem(freeze "v-freeze" "Freeze Panes" "view.freeze.here" "")
+        this.titem(freeze "v-unfreeze" "Unfreeze Panes" "view.freeze.none" "")
+        this.titem(freeze "v-toprow" "Freeze Top Row" "view.freezeTopRow" "")
+        this.titem(freeze "v-firstcol" "Freeze First Column" "view.freezeFirstColumn" "")
+        this.tb("v-split" "Split" "Split" "split" "view.split" "")
+        this.tcol()
+        this.tb("v-newwin" "New window" "New Window" "window" "view.newWindow" "")
+        this.tb("v-arrange" "Arrange all" "Arrange All" "arrange" "view.arrangeAll" "")
+        this.tcol()
+        this.tb("v-hide" "Hide window" "Hide" "eyeoff" "view.hideWindow" "")
+        this.tb("v-unhide" "Unhide window" "Unhide" "eye" "view.unhideWindow" "")
+        this.tcol()
+        this.tb("v-switch" "Switch windows" "Switch Windows" "switch" "view.switchWindows" "")
+        this.tset("view" "sx-rb-vmac" "Macros")
+        this.tb("v-macros" "Macros" "Macros" "code" "view.macros" "")
+
+        ; --- Automate ----------------------------------------------------------
+        this.tset("automate" "sx-rb-ascripts" "Scripts")
+        this.tkeep()
+        this.tb("a-new" "New script" "New Script" "fileplus" "script.new" "")
+        this.tb("a-run" "Run script" "Run" "play" "script.run" "")
+        this.tcol()
+        this.tb("a-next" "Next script" "Next Script" "skip" "script.next" "")
+        this.tb("a-all" "All scripts" "All Scripts" "list" "automate.allScripts" "")
+        this.tcol()
+        this.tb("a-record" "Record actions" "Record Actions" "record" "automate.recordActions" "")
+
+        ; --- Table Design (while the caret is in a table) -----------------------
+        this.tset("tabledesign" "sx-rb-tdtools" "Tools")
+        this.tb("td-pivot" "Summarize with PivotTable" "Summarize with PivotTable" "table" "table.summarizePivot" "")
+        this.tb("td-dups" "Remove duplicates" "Remove Duplicates" "copyx" "table.removeDuplicates" "")
+        this.tcol()
+        this.tb("td-range" "Convert to range" "Convert to Range" "grid" "table.convertToRange" "")
+        this.tb("td-slicer" "Insert slicer" "Insert Slicer" "filter" "table.insertSlicer" "")
+        this.tset("tabledesign" "sx-rb-tdopts" "Table Style Options")
+        this.tkeep()
+        this.tb("td-header" "Header row" "Header Row" "checkbox" "table.headerRow" "")
+        this.tb("td-total" "Total row" "Total Row" "checkbox" "table.totalRow" "")
+        this.tcol()
+        this.tb("td-bandr" "Banded rows" "Banded Rows" "checkbox" "table.bandedRows" "")
+        this.tb("td-bandc" "Banded columns" "Banded Columns" "checkbox" "table.bandedColumns" "")
+        this.tcol()
+        this.tb("td-first" "First column" "First Column" "checkbox" "table.firstColumn" "")
+        this.tb("td-last" "Last column" "Last Column" "checkbox" "table.lastColumn" "")
+        this.tset("tabledesign" "sx-rb-tdstyle" "Table Styles")
+        def tstyle:MenuCtl (this.tmenu("sx-tdstyle" "Table Styles"))
+        def tsv:[string] ([] _:string ("TableStyleLight1" "TableStyleLight9" "TableStyleMedium2" "TableStyleMedium4" "TableStyleMedium7" "TableStyleDark1" "TableStyleDark9"))
+        def tsn:[string] ([] _:string ("Light 1" "Light 9" "Medium 2" "Medium 4" "Medium 7" "Dark 1" "Dark 9"))
+        def tsi:int 0
+        while (tsi < (array_length tsv)) {
+            this.titem(tstyle ("td-style-" + (to_string tsi)) (itemAt tsn tsi) "table.style" (itemAt tsv tsi))
+            tsi = (tsi + 1)
+        }
+
+        ; --- Chart Design (while a chart is chosen) ----------------------------
+        this.tset("chartdesign" "sx-rb-cdlay" "Chart Layouts")
+        this.tb("cd-elem" "Add chart element" "Add Chart Element" "plus" "chart.addElement" "legend")
+        this.tb("cd-quick" "Quick layout" "Quick Layout" "arrange" "chart.quickLayout" "1")
+        this.tset("chartdesign" "sx-rb-cdsty" "Chart Styles")
+        this.tb("cd-colors" "Change colors" "Change Colors" "palette" "chart.changeColors" "colorful")
+        this.tset("chartdesign" "sx-rb-cddata" "Data")
+        this.tb("cd-switch" "Switch row and column" "Switch Row/Column" "switch" "chart.switchRowColumn" "")
+        this.tb("cd-select" "Select data" "Select Data" "table" "chart.selectData" "")
+        this.tset("chartdesign" "sx-rb-cdloc" "Location")
+        this.tb("cd-move" "Move chart" "Move Chart" "move" "chart.move" "")
+        this.tb("cd-format" "Format selection" "Format Selection" "sliders" "chart.formatSelection" "")
+
+        this.buildFolds()
+    }
+
+    ; Each group's folded drop-down: its buttons as rows, its drop-downs as
+    ; submenus, under the group's name.
+    fn buildFolds:void () {
+        def i:int 0
+        while (i < (array_length tabSets)) {
+            def g:SxGroup (itemAt tabSets i)
+            def m:MenuCtl (this.drop((g.tid + "-fold") g.name))
+            def pre:string ("fd" + (to_string i) + "-")
+            def k:int 0
+            while (k < (array_length g.slots)) {
+                def sl:SxSlot (itemAt g.slots k)
+                if sl.isMenu {
+                    this.subOf(m (pre + sl.menu.tid) sl.menu.name sl.menu)
+                } {
+                    this.copyBar(m sl.bar pre)
+                }
+                k = (k + 1)
+            }
+            g.fold = m
+            push tabMenus m
+            i = (i + 1)
+        }
+    }
+
+    ; Roughly how wide a group lays out, from its words: a labelled button is
+    ; its glyph, its caption (Open Sans 12px) and padding; a drop-down is its
+    ; name (13px) and chevron. Measured against the drawn widths in the smoke.
+    fn barWidth:int (r:RibbonCtl small:boolean) {
+        def w:double 6.0
+        def i:int 0
+        while (i < (array_length r.items)) {
+            def it:RibbonItem (itemAt r.items i)
+            if (it.separator == false) {
+                if (((strlen it.text) > 0) && ((small == false) || ((strlen it.icon) == 0))) {
+                    w = (w + 38.0 + ((to_double (strlen it.text)) * 6.6))
+                } {
+                    w = (w + 29.0)
+                }
+            }
+            i = (i + 1)
+        }
+        return (to_int w)
+    }
+
+    fn menuWidth:int (m:MenuCtl) {
+        return (to_int (38.0 + ((to_double (strlen m.name)) * 7.2)))
+    }
+
+    fn setWidth:int (g:SxGroup small:boolean) {
+        def body:int 0
+        def c:int 0
+        while (c < g.cols) {
+            def cw:int 0
+            def k:int 0
+            while (k < (array_length g.slots)) {
+                def sl:SxSlot (itemAt g.slots k)
+                if (sl.col == c) {
+                    def w:int 0
+                    if sl.isMenu {
+                        w = (this.menuWidth(sl.menu))
+                    } {
+                        w = (this.barWidth(sl.bar small))
+                    }
+                    if (w > cw) {
+                        cw = w
+                    }
+                }
+                k = (k + 1)
+            }
+            body = (body + cw)
+            if (c > 0) {
+                body = (body + 4)
+            }
+            c = (c + 1)
+        }
+        def cap:int (to_int ((to_double (strlen g.name)) * 6.2))
+        if (cap > body) {
+            body = cap
+        }
+        ; The group's padding, the rule before it and the bar's two gaps.
+        return (body + 17)
+    }
+
+    ; How the groups of `tab` shrink at this width, as Excel's do: from the
+    ; right, a group first drops its captions ("c:" and its tid), and when
+    ; every group has and the tab still does not fit, groups fold into their
+    ; drop-downs ("f:"), again from the right.
+    fn tabFolds:[string] (tab:string) {
+        def out:[string]
+        def sets:[SxGroup]
+        def i:int 0
+        while (i < (array_length tabSets)) {
+            def g:SxGroup (itemAt tabSets i)
+            if (g.tab == tab) {
+                push sets g
+            }
+            i = (i + 1)
+        }
+        def n:int (array_length sets)
+        def need:int 20
+        def j:int 0
+        while (j < n) {
+            need = (need + (this.setWidth((itemAt sets j) false)))
+            j = (j + 1)
+        }
+        def avail:int (to_int pageW)
+        ; Two passes each: the other groups first, then the ones kept.
+        def pass:int 0
+        while (pass < 2) {
+            def k:int (n - 1)
+            while ((need > avail) && (k >= 0)) {
+                def g2:SxGroup (itemAt sets k)
+                if (g2.keep == (pass == 1)) {
+                    push out ("c:" + g2.tid)
+                    need = ((need - (this.setWidth(g2 false))) + (this.setWidth(g2 true)))
+                }
+                k = (k - 1)
+            }
+            pass = (pass + 1)
+        }
+        pass = 0
+        while (pass < 2) {
+            def k2:int (n - 1)
+            while ((need > avail) && (k2 >= 0)) {
+                def g3:SxGroup (itemAt sets k2)
+                if (g3.keep == (pass == 1)) {
+                    push out ("f:" + g3.tid)
+                    need = ((need - (this.setWidth(g3 true))) + ((this.menuWidth(g3.fold)) + 17))
+                }
+                k2 = (k2 - 1)
+            }
+            pass = (pass + 1)
+        }
+        return out
+    }
+
+    ; The groups of the shown tab past Home, folded or laid out.
+    fn buildTabGroups:void () {
+        def fold:[string] (this.tabFolds(ribbonTab))
+        def i:int 0
+        while (i < (array_length tabSets)) {
+            def g:SxGroup (itemAt tabSets i)
+            if (g.tab == ribbonTab) {
+                def small:boolean (RibbonCtl.listHas(fold ("c:" + g.tid)))
+                if (RibbonCtl.listHas(fold ("f:" + g.tid))) {
+                    this.foldedGroup(g.tid g.name g.fold)
+                } {
+                    def box:RibbonGroupCtl (this.openGroup(g.tid g.name))
+                    def c:int 0
+                    while (c < g.cols) {
+                        def col:EVGElement (this.groupCol(box))
+                        def k:int 0
+                        while (k < (array_length g.slots)) {
+                            def sl:SxSlot (itemAt g.slots k)
+                            if (sl.col == c) {
+                                if sl.isMenu {
+                                    this.mount((this.groupRow(col)) sl.menu)
+                                } {
+                                    sl.bar.iconsOnly = small
+                                    this.mountInRow(col sl.bar box)
+                                }
+                            }
+                            k = (k + 1)
+                        }
+                        c = (c + 1)
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; The toggles on the tabs past Home say what is shown.
+    fn syncTabToggles:void () {
+        def app:GridApp grid.app
+        def model:SpreadsheetModel app.model
+        def rs:[RibbonCtl] (this.groupsOf(ribbonTab))
+        def i:int 0
+        while (i < (array_length rs)) {
+            def r:RibbonCtl (itemAt rs i)
+            r.setOn("v-grid" model.showGridlines)
+            r.setOn("p-vgrid" model.showGridlines)
+            r.setOn("v-head" model.showHeadings)
+            r.setOn("p-vhead" model.showHeadings)
+            r.setOn("p-gridlines" model.printGridlines)
+            r.setOn("p-headings" model.printHeadings)
+            r.setOn("v-ruler" model.showRuler)
+            r.setOn("f-show" model.showFormulas)
+            r.setOn("v-fbar" showFormulaBar)
+            r.setOn("v-tabs" showTabs)
+            r.setOn("v-status" showStatus)
+            r.setOn("v-dark" (theme == "dark"))
+            r.setOn("v-rtl" app.uiRtl)
+            r.setOn("v-menubar" showMenubar)
+            r.setOn("v-expand" app.fbExpanded)
+            i = (i + 1)
+        }
+        themeBar.setOn("hdr-theme" (theme == "dark"))
+    }
+
     fn buildRibbon:void () {
         def noGroups:[RibbonCtl]
         tabGroups = noGroups
+        def noSets:[SxGroup]
+        tabSets = noSets
+        def noMenus:[MenuCtl]
+        tabMenus = noMenus
         def noTabs:[string]
         tabOf = noTabs
         qat = (new RibbonCtl)
@@ -943,6 +1602,10 @@ class SheetsApp {
         this.tool(qat "qat-save" "Save" (SheetsApp.icon("save")) "file.saveAs" "" false)
         this.tool(qat "qat-undo" "Undo" (SheetsApp.icon("undo")) "edit.undo" "" false)
         this.tool(qat "qat-redo" "Redo" (SheetsApp.icon("redo")) "edit.redo" "" false)
+        themeBar = (new RibbonCtl)
+        themeBar.tid = "sx-themebar"
+        themeBar.name = "Theme"
+        this.tool(themeBar "hdr-theme" "Dark mode" (SheetsApp.icon("moon")) "sx:theme" "toggle" true)
 
         history = (new RibbonCtl)
         history.tid = "sx-rb-history"
@@ -1135,234 +1798,7 @@ class SheetsApp {
         cgEdit.addSeparator()
         this.copyBar(cgEdit xAddins "cg-")
 
-        ; --- Insert ------------------------------------------------------------
-        def insTables:RibbonCtl (this.grp("insert" "sx-rb-instables" "Tables"))
-        this.word(insTables "i-table" "Table" "Table" "insert.table" "")
-        def insCharts:RibbonCtl (this.grp("insert" "sx-rb-inscharts" "Charts"))
-        this.word(insCharts "i-chart" "Insert chart" "Chart" "insert.chart" "")
-        def insLinks:RibbonCtl (this.grp("insert" "sx-rb-inslinks" "Links and comments"))
-        this.word(insLinks "i-link" "Link" "Link" "insert.link" "")
-        this.word(insLinks "i-note" "Note" "Note" "review.newNote" "")
-        this.word(insLinks "i-comment" "Comment" "Comment" "review.newComment" "")
-        def insIll:RibbonCtl (this.grp("insert" "sx-rb-insill" "Illustrations"))
-        this.word(insIll "i-picture" "Pictures" "Pictures" "insert.picture" "")
-        this.word(insIll "i-shape" "Shapes" "Shapes" "insert.shape" "rect")
-        this.word(insIll "i-icons" "Icons" "Icons" "insert.icons" "")
-        this.word(insIll "i-smartart" "SmartArt" "SmartArt" "insert.smartArt" "")
-        def insSpark:RibbonCtl (this.grp("insert" "sx-rb-insspark" "Sparklines"))
-        this.word(insSpark "i-spark" "Line sparkline" "Line" "insert.sparkline" "")
-        def insFilt:RibbonCtl (this.grp("insert" "sx-rb-insfilt" "Filters"))
-        this.word(insFilt "i-slicer" "Slicer" "Slicer" "insert.slicer" "")
-        this.word(insFilt "i-timeline" "Timeline" "Timeline" "insert.timeline" "")
-        def insText:RibbonCtl (this.grp("insert" "sx-rb-instext" "Text"))
-        this.word(insText "i-textbox" "Text box" "Text Box" "insert.textBox" "")
-        this.word(insText "i-wordart" "WordArt" "WordArt" "insert.wordArt" "WordArt")
-        this.word(insText "i-sig" "Signature line" "Signature Line" "insert.signatureLine" "")
-        this.word(insText "i-check" "Checkbox" "Checkbox" "insert.checkbox" "")
-        def insSym:RibbonCtl (this.grp("insert" "sx-rb-inssym" "Symbols"))
-        this.word(insSym "i-equation" "Equation" "Equation" "insert.equation" "x^2")
-        this.word(insSym "i-symbol" "Symbol" "Ω" "insert.symbol" "")
-
-        ; --- Draw --------------------------------------------------------------
-        def drTools:RibbonCtl (this.grp("draw" "sx-rb-drtools" "Drawing Tools"))
-        this.word(drTools "dr-pen" "Pen" "Pen" "draw.pen" "")
-        this.word(drTools "dr-eraser" "Eraser" "Eraser" "draw.eraser" "")
-        this.word(drTools "dr-lasso" "Lasso select" "Lasso" "draw.lasso" "")
-        def drConv:RibbonCtl (this.grp("draw" "sx-rb-drconv" "Convert"))
-        this.word(drConv "dr-ink" "Ink to shape" "Ink to Shape" "draw.inkToShape" "")
-
-        ; --- Page Layout -------------------------------------------------------
-        def pgTheme:RibbonCtl (this.grp("pagelayout" "sx-rb-pgtheme" "Themes"))
-        this.word(pgTheme "p-theme" "Themes" "Themes" "pageLayout.theme" "")
-        this.word(pgTheme "p-tcolors" "Theme colors" "Colors" "pageLayout.themeColors" "")
-        this.word(pgTheme "p-tfonts" "Theme fonts" "Fonts" "pageLayout.themeFonts" "")
-        this.word(pgTheme "p-teffects" "Theme effects" "Effects" "pageLayout.themeEffects" "")
-        def pgSetup:RibbonCtl (this.grp("pagelayout" "sx-rb-pgsetup" "Page Setup"))
-        this.word(pgSetup "p-margins" "Margins" "Margins" "pageLayout.margins" "")
-        this.word(pgSetup "p-orient" "Orientation" "Orientation" "pageLayout.orientation" "")
-        this.word(pgSetup "p-size" "Size" "Size" "pageLayout.size" "")
-        this.word(pgSetup "p-area" "Print area" "Print Area" "pageLayout.printArea" "")
-        this.word(pgSetup "p-breaks" "Breaks" "Breaks" "pageLayout.breaks" "")
-        this.word(pgSetup "p-titles" "Print titles" "Print Titles" "pageLayout.printTitles" "")
-        this.word(pgSetup "p-hf" "Header and footer" "Header & Footer" "pageLayout.headerFooter" "")
-        this.word(pgSetup "p-bg" "Background" "Background" "pageLayout.background" "")
-        this.word(pgSetup "p-setup" "Page setup" "Page Setup…" "pageLayout.pageSetup" "")
-        def pgFit:RibbonCtl (this.grp("pagelayout" "sx-rb-pgfit" "Scale to Fit"))
-        this.word(pgFit "p-fit" "Scale to fit" "Fit to Page" "pageLayout.scaleToFit" "")
-        def pgSheet:RibbonCtl (this.grp("pagelayout" "sx-rb-pgsheet" "Sheet Options"))
-        this.word(pgSheet "p-gridlines" "Print gridlines" "Print Gridlines" "pageLayout.printGridlines" "")
-        this.word(pgSheet "p-headings" "Print headings" "Print Headings" "pageLayout.printHeadings" "")
-        def pgArr:RibbonCtl (this.grp("pagelayout" "sx-rb-pgarr" "Arrange"))
-        this.word(pgArr "p-fwd" "Bring forward" "Bring Forward" "arrange.bringForward" "")
-        this.word(pgArr "p-back" "Send backward" "Send Backward" "arrange.sendBackward" "")
-        this.word(pgArr "p-selpane" "Selection pane" "Selection Pane" "arrange.selectionPane" "")
-        this.word(pgArr "p-align" "Align left" "Align" "arrange.align" "left")
-        this.word(pgArr "p-group" "Group" "Group" "arrange.group" "")
-        this.word(pgArr "p-rotate" "Rotate right" "Rotate" "arrange.rotate" "right")
-
-        ; --- Formulas ----------------------------------------------------------
-        def fLib:RibbonCtl (this.grp("formulas" "sx-rb-flib" "Function Library"))
-        this.word(fLib "f-insert" "Insert function" "fx" "formulas.insertFunction" "")
-        this.word(fLib "f-autosum" "AutoSum" "AutoSum" "formulas.autoSum" "")
-        this.word(fLib "f-recent" "Recently used" "Recent" "formulas.recentlyUsed" "")
-        this.word(fLib "f-fin" "Financial" "Financial" "formulas.financial" "")
-        this.word(fLib "f-logical" "Logical" "Logical" "formulas.logical" "")
-        this.word(fLib "f-text" "Text" "Text" "formulas.text" "")
-        this.word(fLib "f-date" "Date and time" "Date & Time" "formulas.dateTime" "")
-        this.word(fLib "f-lookup" "Lookup and reference" "Lookup" "formulas.lookupReference" "")
-        this.word(fLib "f-math" "Math and trig" "Math & Trig" "formulas.mathTrig" "")
-        this.word(fLib "f-more" "More functions" "More" "formulas.moreFunctions" "")
-        def fNames:RibbonCtl (this.grp("formulas" "sx-rb-fnames" "Defined Names"))
-        this.word(fNames "f-namemgr" "Name manager" "Name Manager" "formulas.nameManager" "")
-        this.word(fNames "f-define" "Define name" "Define Name" "formulas.defineName" "")
-        this.word(fNames "f-useinf" "Use in formula" "Use in Formula" "formulas.useInFormula" "")
-        this.word(fNames "f-fromsel" "Create from selection" "Create from Selection" "formulas.createFromSelection" "")
-        def fAudit:RibbonCtl (this.grp("formulas" "sx-rb-faudit" "Formula Auditing"))
-        this.word(fAudit "f-prec" "Trace precedents" "Precedents" "formulas.tracePrecedents" "")
-        this.word(fAudit "f-dep" "Trace dependents" "Dependents" "formulas.traceDependents" "")
-        this.word(fAudit "f-rmarrows" "Remove arrows" "Remove Arrows" "formulas.removeArrows" "")
-        this.word(fAudit "f-errchk" "Error checking" "Error Checking" "formulas.errorChecking" "")
-        this.word(fAudit "f-eval" "Evaluate formula" "Evaluate" "formulas.evaluateFormula" "")
-        this.word(fAudit "f-watch" "Watch window" "Watch Window" "formulas.watchWindow" "")
-        this.word(fAudit "f-show" "Show formulas" "Show Formulas" "formulas.showFormulas" "")
-        def fCalc:RibbonCtl (this.grp("formulas" "sx-rb-fcalc" "Calculation"))
-        this.word(fCalc "f-calcnow" "Calculate now" "Calc Now" "formulas.calculateNow" "")
-        this.word(fCalc "f-calcsheet" "Calculate sheet" "Calc Sheet" "formulas.calculateSheet" "")
-        this.word(fCalc "f-calcopt" "Calculation options" "Options" "formulas.calculationOptions" "")
-
-        ; --- Data --------------------------------------------------------------
-        def dGet:RibbonCtl (this.grp("data" "sx-rb-dget" "Get and Transform Data"))
-        this.word(dGet "d-getdata" "Get data" "Get Data" "data.getData" "")
-        this.word(dGet "d-csv" "From text or CSV" "From Text/CSV" "data.fromTextCsv" "")
-        this.word(dGet "d-web" "From web" "From Web" "data.fromWeb" "")
-        this.word(dGet "d-range" "From table or range" "From Table/Range" "data.fromTableRange" "")
-        def dQry:RibbonCtl (this.grp("data" "sx-rb-dqry" "Queries and Connections"))
-        this.word(dQry "d-refall" "Refresh all" "Refresh All" "data.refreshAll" "")
-        this.word(dQry "d-qc" "Queries and connections" "Queries" "data.queriesConnections" "")
-        def dSort:RibbonCtl (this.grp("data" "sx-rb-dsort" "Sort and Filter"))
-        this.word(dSort "d-asc" "Sort smallest to largest" "A→Z" "data.sort.asc" "")
-        this.word(dSort "d-desc" "Sort largest to smallest" "Z→A" "data.sort.desc" "")
-        this.word(dSort "d-sort" "Sort" "Sort…" "data.sort" "")
-        this.word(dSort "d-clear" "Clear filter" "Clear" "data.filter.clear" "")
-        this.word(dSort "d-filter" "Filter" "Filter" "data.filter" "")
-        this.word(dSort "d-reapply" "Reapply" "Reapply" "data.reapply" "")
-        this.word(dSort "d-adv" "Advanced filter" "Advanced" "data.advancedFilter" "")
-        def dTools:RibbonCtl (this.grp("data" "sx-rb-dtools" "Data Tools"))
-        this.word(dTools "d-t2c" "Text to columns" "Text to Columns" "data.textToColumns" "")
-        this.word(dTools "d-dups" "Remove duplicates" "Remove Duplicates" "data.removeDuplicates" "")
-        this.word(dTools "d-valid" "Data validation" "Validation" "data.validation" "")
-        this.word(dTools "d-flash" "Flash fill" "Flash Fill" "data.flashFill" "")
-        this.word(dTools "d-circle" "Circle invalid data" "Circle Invalid" "data.circleInvalid" "")
-        this.word(dTools "d-consol" "Consolidate" "Consolidate" "data.consolidate" "")
-        this.word(dTools "d-rel" "Relationships" "Relationships" "data.relationships" "")
-        def dFc:RibbonCtl (this.grp("data" "sx-rb-dfc" "Forecast"))
-        this.word(dFc "d-scen" "Scenario manager" "Scenarios" "data.scenarioManager" "")
-        this.word(dFc "d-goal" "Goal seek" "Goal Seek" "data.goalSeek" "")
-        this.word(dFc "d-dtable" "Data table" "Data Table" "data.dataTable" "")
-        this.word(dFc "d-fsheet" "Forecast sheet" "Forecast Sheet" "data.forecastSheet" "")
-        def dOut:RibbonCtl (this.grp("data" "sx-rb-dout" "Outline"))
-        this.word(dOut "d-group" "Group" "Group" "data.group" "")
-        this.word(dOut "d-ungroup" "Ungroup" "Ungroup" "data.ungroup" "")
-        this.word(dOut "d-subtotal" "Subtotal" "Subtotal" "data.subtotal" "")
-        def dAn:RibbonCtl (this.grp("data" "sx-rb-dan" "Analysis"))
-        this.word(dAn "d-atp" "Data analysis" "Data Analysis" "data.analysisToolPak" "")
-        this.word(dAn "d-solver" "Solver" "Solver" "data.solver" "")
-        this.word(dAn "d-analyze" "Analyze data" "Analyze Data" "data.analyzeData" "")
-        def dDb:RibbonCtl (this.grp("data" "sx-rb-ddb" "Queries and Connections"))
-        this.word(dDb "d-refresh" "Refresh" "Refresh" "db.refresh" "")
-        this.word(dDb "d-sql" "SQL query" "SQL…" "db.sql.dialog" "")
-        this.word(dDb "d-conn" "Connection" "Connection…" "db.connection" "")
-
-        ; --- Review ------------------------------------------------------------
-        def rNotes:RibbonCtl (this.grp("review" "sx-rb-rnotes" "Comments and Notes"))
-        this.word(rNotes "r-comment" "New comment" "New Comment" "review.newComment" "")
-        this.word(rNotes "r-note" "New note" "New Note" "review.newNote" "")
-        this.word(rNotes "r-delete" "Delete comment" "Delete" "review.deleteComment" "")
-        this.word(rNotes "r-prev" "Previous comment" "Previous" "review.previousComment" "")
-        this.word(rNotes "r-next" "Next comment" "Next" "review.nextComment" "")
-        def rProtect:RibbonCtl (this.grp("review" "sx-rb-rprotect" "Protect"))
-        this.word(rProtect "r-psheet" "Protect sheet" "Protect Sheet" "review.protectSheet" "")
-        this.word(rProtect "r-unsheet" "Unprotect sheet" "Unprotect Sheet" "review.unprotectSheet" "")
-        this.word(rProtect "r-pbook" "Protect workbook" "Protect Workbook" "review.protectWorkbook" "")
-        def rProof:RibbonCtl (this.grp("review" "sx-rb-rproof" "Proofing"))
-        this.word(rProof "r-spell" "Spelling" "Spelling" "review.spelling" "")
-        this.word(rProof "r-thes" "Thesaurus" "Thesaurus" "review.thesaurus" "")
-        this.word(rProof "r-stats" "Workbook statistics" "Statistics" "review.workbookStatistics" "")
-        def rAcc:RibbonCtl (this.grp("review" "sx-rb-racc" "Accessibility"))
-        this.word(rAcc "r-access" "Check accessibility" "Check Accessibility" "review.checkAccessibility" "")
-        def rShow:RibbonCtl (this.grp("review" "sx-rb-rshow" "Show"))
-        this.word(rShow "r-showc" "Show comments" "Show Comments" "review.showComments" "")
-        this.word(rShow "r-shownotes" "Show all notes" "Show Notes" "review.showAllNotes" "")
-        this.word(rShow "r-conv" "Convert to comments" "Convert" "review.convertToComments" "")
-        this.word(rShow "r-changes" "Show changes" "Show Changes" "review.showChanges" "")
-        this.word(rShow "r-ranges" "Allow edit ranges" "Allow Edit Ranges" "review.allowEditRanges" "")
-
-        ; --- View --------------------------------------------------------------
-        def vViews:RibbonCtl (this.grp("view" "sx-rb-vviews" "Workbook Views"))
-        this.word(vViews "v-normal" "Normal view" "Normal" "view.normal" "")
-        this.word(vViews "v-pagelayout" "Page layout view" "Page Layout" "view.pageLayout" "")
-        this.word(vViews "v-pagebreak" "Page break preview" "Page Break" "view.pageBreakPreview" "")
-        this.word(vViews "v-custom" "Custom views" "Custom Views" "view.customViews" "")
-        def vShow:RibbonCtl (this.grp("view" "sx-rb-vshow" "Show"))
-        this.word(vShow "v-grid" "Gridlines" "Gridlines" "view.gridlines" "")
-        this.word(vShow "v-head" "Headings" "Headings" "view.headings" "")
-        this.word(vShow "v-fbar" "Formula bar" "Formula Bar" "sx:formulaBar" "")
-        this.word(vShow "v-ruler" "Ruler" "Ruler" "view.ruler" "")
-        this.word(vShow "v-expand" "Expand formula bar" "Expand Bar" "view.expandFormulaBar" "")
-        def vZoom:RibbonCtl (this.grp("view" "sx-rb-vzoom" "Zoom"))
-        this.word(vZoom "v-zoom" "Zoom" "Zoom" "view.zoom" "")
-        this.word(vZoom "v-zoom100" "Zoom to 100%" "100%" "view.zoom100" "")
-        this.word(vZoom "v-zoomsel" "Zoom to selection" "Zoom to Selection" "view.zoomToSelection" "")
-        def vWin:RibbonCtl (this.grp("view" "sx-rb-vwin" "Window"))
-        this.word(vWin "v-freeze" "Freeze panes" "Freeze Panes" "view.freeze.here" "")
-        this.word(vWin "v-unfreeze" "Unfreeze panes" "Unfreeze" "view.freeze.none" "")
-        this.word(vWin "v-toprow" "Freeze top row" "Freeze Top Row" "view.freezeTopRow" "")
-        this.word(vWin "v-firstcol" "Freeze first column" "Freeze First Column" "view.freezeFirstColumn" "")
-        this.word(vWin "v-newwin" "New window" "New Window" "view.newWindow" "")
-        this.word(vWin "v-arrange" "Arrange all" "Arrange All" "view.arrangeAll" "")
-        this.word(vWin "v-split" "Split" "Split" "view.split" "")
-        this.word(vWin "v-hide" "Hide window" "Hide" "view.hideWindow" "")
-        this.word(vWin "v-unhide" "Unhide window" "Unhide" "view.unhideWindow" "")
-        this.word(vWin "v-switch" "Switch windows" "Switch Windows" "view.switchWindows" "")
-        def vMac:RibbonCtl (this.grp("view" "sx-rb-vmac" "Macros"))
-        this.word(vMac "v-macros" "Macros" "Macros" "view.macros" "")
-
-        ; --- Automate ----------------------------------------------------------
-        def aScripts:RibbonCtl (this.grp("automate" "sx-rb-ascripts" "Scripts"))
-        this.word(aScripts "a-new" "New script" "New Script" "script.new" "")
-        this.word(aScripts "a-run" "Run script" "Run" "script.run" "")
-        this.word(aScripts "a-next" "Next script" "Next Script" "script.next" "")
-        this.word(aScripts "a-all" "All scripts" "All Scripts" "automate.allScripts" "")
-        this.word(aScripts "a-record" "Record actions" "Record Actions" "automate.recordActions" "")
-
-        ; --- Contextual tabs: shown while a table or a chart is selected --------
-        def tdOpts:RibbonCtl (this.grp("tabledesign" "sx-rb-tdopts" "Table Style Options"))
-        this.word(tdOpts "td-header" "Header row" "Header Row" "table.headerRow" "")
-        this.word(tdOpts "td-total" "Total row" "Total Row" "table.totalRow" "")
-        this.word(tdOpts "td-bandr" "Banded rows" "Banded Rows" "table.bandedRows" "")
-        this.word(tdOpts "td-bandc" "Banded columns" "Banded Columns" "table.bandedColumns" "")
-        this.word(tdOpts "td-first" "First column" "First Column" "table.firstColumn" "")
-        this.word(tdOpts "td-last" "Last column" "Last Column" "table.lastColumn" "")
-        def tdTools:RibbonCtl (this.grp("tabledesign" "sx-rb-tdtools" "Tools"))
-        this.word(tdTools "td-pivot" "Summarize with PivotTable" "PivotTable" "table.summarizePivot" "")
-        this.word(tdTools "td-dups" "Remove duplicates" "Remove Duplicates" "table.removeDuplicates" "")
-        this.word(tdTools "td-range" "Convert to range" "Convert to Range" "table.convertToRange" "")
-        this.word(tdTools "td-slicer" "Insert slicer" "Insert Slicer" "table.insertSlicer" "")
-        def tdStyle:RibbonCtl (this.grp("tabledesign" "sx-rb-tdstyle" "Table Styles"))
-        this.word(tdStyle "td-light" "Light style" "Light 9" "table.style" "TableStyleLight9")
-        this.word(tdStyle "td-medium" "Medium style" "Medium 2" "table.style" "TableStyleMedium2")
-        this.word(tdStyle "td-dark" "Dark style" "Dark 1" "table.style" "TableStyleDark1")
-        def cdLay:RibbonCtl (this.grp("chartdesign" "sx-rb-cdlay" "Chart Layouts"))
-        this.word(cdLay "cd-elem" "Add chart element" "Add Element" "chart.addElement" "legend")
-        this.word(cdLay "cd-quick" "Quick layout" "Quick Layout" "chart.quickLayout" "1")
-        def cdSty:RibbonCtl (this.grp("chartdesign" "sx-rb-cdsty" "Chart Styles"))
-        this.word(cdSty "cd-colors" "Change colors" "Colors" "chart.changeColors" "colorful")
-        def cdData:RibbonCtl (this.grp("chartdesign" "sx-rb-cddata" "Data"))
-        this.word(cdData "cd-switch" "Switch row and column" "Switch Row/Column" "chart.switchRowColumn" "")
-        this.word(cdData "cd-select" "Select data" "Select Data" "chart.selectData" "")
-        def cdLoc:RibbonCtl (this.grp("chartdesign" "sx-rb-cdloc" "Location"))
-        this.word(cdLoc "cd-move" "Move chart" "Move Chart" "chart.move" "")
-        this.word(cdLoc "cd-format" "Format selection" "Format" "chart.formatSelection" "")
+        this.buildTabs()
 
         ribTabs = (new TabsCtl)
         ribTabs.tid = "sx-ribtabs"
@@ -1422,7 +1858,13 @@ class SheetsApp {
 
     ; The ribbon's drop-down menus.
     fn ribbonMenus:[MenuCtl] () {
-        return ([] _:MenuCtl (fontMenu sizeMenu numMenu borderMenu cfMenu tableMenu styleMenu pasteMenu mergeMenu insMenu delMenu fmtMenu fillMenu clearMenu sortMenu findMenu cgClip cgAlign cgNum cgStyles cgEdit))
+        def out:[MenuCtl] ([] _:MenuCtl (fontMenu sizeMenu numMenu borderMenu cfMenu tableMenu styleMenu pasteMenu mergeMenu insMenu delMenu fmtMenu fillMenu clearMenu sortMenu findMenu cgClip cgAlign cgNum cgStyles cgEdit))
+        def i:int 0
+        while (i < (array_length tabMenus)) {
+            push out (itemAt tabMenus i)
+            i = (i + 1)
+        }
+        return out
     }
 
     ; Lucide's icons (ISC licence), 24×24, stroked.
@@ -1470,6 +1912,95 @@ class SheetsApp {
         if (name == "chevronLeft") { return "m15 18-6-6 6-6" }
         if (name == "check") { return "M20 6 9 17l-5-5" }
         if (name == "dot") { return "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z" }
+        if (name == "table") { return "M3 3h18v18H3z M3 9h18 M3 15h18 M12 3v18" }
+        if (name == "image") { return "M3 3h18v18H3z M9 7a2 2 0 1 0 0 4a2 2 0 1 0 0-4z M21 15l-5-5L5 21" }
+        if (name == "smile") { return "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z M8 14s1.5 2 4 2 4-2 4-2 M9 9h.01 M15 9h.01" }
+        if (name == "smartart") { return "M9 2h6v6H9z M2 16h6v6H2z M16 16h6v6h-6z M5 16v-3h14v3 M12 8v5" }
+        if (name == "spark") { return "M22 12h-4l-3 9L9 3l-3 9H2" }
+        if (name == "filter") { return "M22 3H2l8 9.46V19l4 2v-8.54L22 3z" }
+        if (name == "timeline") { return "M3 4h18v18H3z M16 2v4 M8 2v4 M3 10h18 M8 15h8" }
+        if (name == "comment") { return "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
+        if (name == "note") { return "M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5z M15 3v6h6" }
+        if (name == "textbox") { return "M4 7V4h16v3 M9 20h6 M12 4v16" }
+        if (name == "wordart") { return "M4 20 12 4l8 16 M7.5 13h9" }
+        if (name == "signature") { return "M12 20h9 M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" }
+        if (name == "checkbox") { return "M3 3h18v18H3z M9 12l2 2 4-4" }
+        if (name == "sigma") { return "M18 7V4H6l6 8-6 8h12v-3" }
+        if (name == "omega") { return "M3 20h5v-2.5a8 8 0 1 1 8 0V20h5" }
+        if (name == "pen") { return "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z M15 5l4 4" }
+        if (name == "eraser") { return "m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21 M22 21H7 M5 11l9 9" }
+        if (name == "lasso") { return "M7 22a5 5 0 0 1-2-4 M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1 M5 14a2 2 0 1 0 0 4a2 2 0 1 0 0-4z" }
+        if (name == "wand") { return "M15 4V2 M15 16v-2 M8 9h2 M20 9h2 M17.8 11.8 19 13 M17.8 6.2 19 5 M3 21l9-9 M12.2 6.2 11 5" }
+        if (name == "palette") { return "M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2v-.5c0-.6.4-1 1-1h2a5 5 0 0 0 5-5C22 7 17.5 2 12 2z M7.5 10.5h.01 M10.5 7.5h.01 M15.5 7.5h.01" }
+        if (name == "colors") { return "M9 3a6 6 0 1 0 0 12a6 6 0 1 0 0-12z M15 9a6 6 0 1 0 0 12a6 6 0 1 0 0-12z" }
+        if (name == "sparkles") { return "M12 3l1.9 5.8L20 10l-6.1 1.2L12 17l-1.9-5.8L4 10l6.1-1.2z M19 17v4 M17 19h4" }
+        if (name == "heading") { return "M6 12h12 M6 20V4 M18 20V4" }
+        if (name == "headfoot") { return "M3 3h18v18H3z M3 7h18 M3 17h18" }
+        if (name == "grid") { return "M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18" }
+        if (name == "headings") { return "M4 12h8 M4 18V6 M12 18V6 M17 12l3-2v8" }
+        if (name == "printer") { return "M6 9V2h12v7 M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2 M6 14h12v8H6z" }
+        if (name == "forward") { return "M8 8h12v12H8z M4 16V4h12" }
+        if (name == "backward") { return "M4 4h12v12H4z M8 20h12V8" }
+        if (name == "layers") { return "M12 2 2 7l10 5 10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" }
+        if (name == "fx") { return "M3 3h18v18H3z M9 17c2 0 2.8-1 2.8-2.8V10c0-2 1-3.3 3.2-3 M9 11.2h5.7" }
+        if (name == "clock") { return "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z M12 6v6l4 2" }
+        if (name == "branch") { return "M6 3v12 M18 3a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M6 15a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M18 9a9 9 0 0 1-9 9" }
+        if (name == "calendar") { return "M3 4h18v18H3z M16 2v4 M8 2v4 M3 10h18" }
+        if (name == "calculator") { return "M4 2h16v20H4z M8 6h8 M8 10h.01 M12 10h.01 M16 10h.01 M8 14h.01 M12 14h.01 M16 14v4 M8 18h.01 M12 18h.01" }
+        if (name == "more") { return "M5 12h.01 M12 12h.01 M19 12h.01" }
+        if (name == "tag") { return "M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z M7.5 7.5h.01" }
+        if (name == "precedents") { return "M3 5v14 M21 12H7 M15 18l6-6-6-6" }
+        if (name == "dependents") { return "M17 12H3 M11 18l6-6-6-6 M21 5v14" }
+        if (name == "x") { return "M18 6 6 18 M6 6l12 12" }
+        if (name == "alert") { return "m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3 M12 9v4 M12 17h.01" }
+        if (name == "checksquare") { return "M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" }
+        if (name == "eye") { return "M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z" }
+        if (name == "eyeoff") { return "M9.9 9.9a3 3 0 1 0 4.2 4.2 M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.7 2.7 M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6 M2 2l20 20" }
+        if (name == "sliders") { return "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6" }
+        if (name == "database") { return "M12 3c5 0 9 1.3 9 3s-4 3-9 3-9-1.3-9-3 4-3 9-3z M3 6v12c0 1.7 4 3 9 3s9-1.3 9-3V6 M3 12c0 1.7 4 3 9 3s9-1.3 9-3" }
+        if (name == "filetext") { return "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" }
+        if (name == "file") { return "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" }
+        if (name == "fileplus") { return "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6 M9 15h6" }
+        if (name == "globe") { return "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z M2 12h20 M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" }
+        if (name == "refresh") { return "M3 12a9 9 0 0 1 9-9 9.8 9.8 0 0 1 6.7 2.7L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-9 9 9.8 9.8 0 0 1-6.7-2.7L3 16 M8 16H3v5" }
+        if (name == "list") { return "M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01" }
+        if (name == "terminal") { return "M4 17l6-6-6-6 M12 19h8" }
+        if (name == "plug") { return "M12 22v-5 M9 8V2 M15 8V2 M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z" }
+        if (name == "sort") { return "m21 16-4 4-4-4 M17 20V4 M3 8l4-4 4 4 M7 4v16" }
+        if (name == "columns") { return "M3 3h18v18H3z M12 3v18" }
+        if (name == "zap") { return "M13 2 3 14h9l-1 8 10-12h-9l1-8z" }
+        if (name == "copyx") { return "M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2 M12.5 12.5l5 5 M17.5 12.5l-5 5" }
+        if (name == "consolidate") { return "M8 3v3a2 2 0 0 1-2 2H3 M21 8h-3a2 2 0 0 1-2-2V3 M3 16h3a2 2 0 0 1 2 2v3 M16 21v-3a2 2 0 0 1 2-2h3" }
+        if (name == "trending") { return "M22 7l-8.5 8.5-5-5L2 17 M16 7h6v6" }
+        if (name == "outline") { return "M3 6h18 M7 12h14 M7 18h14 M3 10v10" }
+        if (name == "ungroup") { return "M3 6h18 M3 12h18 M3 18h18" }
+        if (name == "target") { return "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z M12 6a6 6 0 1 0 0 12a6 6 0 1 0 0-12z M12 10a2 2 0 1 0 0 4a2 2 0 1 0 0-4z" }
+        if (name == "spell") { return "m6 16 6-12 6 12 M8 12h8 M16 20l2 2 4-4" }
+        if (name == "book") { return "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
+        if (name == "person") { return "M12 2a2 2 0 1 0 0 4a2 2 0 1 0 0-4z M5 8l7 1 7-1 M12 9v5 M9 22l3-8 3 8" }
+        if (name == "trash") { return "M3 6h18 M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6 M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" }
+        if (name == "lock") { return "M5 11h14v11H5z M7 11V7a5 5 0 0 1 10 0v4" }
+        if (name == "unlock") { return "M5 11h14v11H5z M7 11V7a5 5 0 0 1 9.9-1" }
+        if (name == "key") { return "M15.5 7.5l2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4 M21 2l-9.6 9.6 M7.5 13a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11z" }
+        if (name == "breaks") { return "M3 12h18 M8 8l4-4 4 4 M16 16l-4 4-4-4" }
+        if (name == "ruler") { return "M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0z M14.5 12.5l2-2 M11.5 9.5l2-2 M8.5 6.5l2-2 M17.5 15.5l2-2" }
+        if (name == "paneltabs") { return "M3 3h18v18H3z M3 15h18 M9 15v6" }
+        if (name == "panelstatus") { return "M3 3h18v18H3z M3 17h18" }
+        if (name == "zoom100") { return "M11 3a8 8 0 1 0 0 16a8 8 0 1 0 0-16z M21 21l-4.3-4.3 M9 9l2-1v6" }
+        if (name == "zoomsel") { return "M3 7V5a2 2 0 0 1 2-2h2 M17 3h2a2 2 0 0 1 2 2v2 M21 17v2a2 2 0 0 1-2 2h-2 M7 21H5a2 2 0 0 1-2-2v-2 M8 8h8v8H8z" }
+        if (name == "split") { return "M3 3h18v18H3z M12 3v18 M3 12h18" }
+        if (name == "window") { return "M2 4h20v16H2z M2 8h20 M6 6h.01 M9 6h.01" }
+        if (name == "arrange") { return "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z" }
+        if (name == "switch") { return "M8 3 4 7l4 4 M4 7h16 M16 21l4-4-4-4 M20 17H4" }
+        if (name == "moon") { return "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z" }
+        if (name == "sun") { return "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M6.3 17.7l-1.4 1.4 M19.1 4.9l-1.4 1.4" }
+        if (name == "rtl") { return "M14 3v11 M14 9h-3a3 3 0 0 1 0-6h9 M18 3v11 M22 18H2 M6 14l-4 4 4 4" }
+        if (name == "menu") { return "M4 6h16 M4 12h16 M4 18h16" }
+        if (name == "code") { return "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M10 12.5 8 15l2 2.5 M14 12.5l2 2.5-2 2.5" }
+        if (name == "play") { return "M6 3l14 9-14 9z" }
+        if (name == "skip") { return "M5 4l10 8-10 8z M19 5v14" }
+        if (name == "record") { return "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z" }
+        if (name == "move") { return "M5 9l-3 3 3 3 M9 5l3-3 3 3 M15 19l-3 3-3-3 M19 9l3 3-3 3 M2 12h20 M12 2v20" }
         if (name == "logo") { return "M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M3 9h18 M3 15h18 M9 9v12 M15 9v12" }
         return ""
     }
@@ -1537,6 +2068,7 @@ class SheetsApp {
             docEl.className = "sx-doc"
             docEl.elementType = 1
             headerEl.addChild(docEl)
+            this.mount(headerEl themeBar)
             root.addChild(headerEl)
         }
 
@@ -1584,17 +2116,7 @@ class SheetsApp {
                 if (ribbonTab == "home") {
                     this.buildExcelHome()
                 } {
-                    def tg:[RibbonCtl] (this.groupsOf(ribbonTab))
-                    def ti:int 0
-                    while (ti < (array_length tg)) {
-                        def one:RibbonCtl (itemAt tg ti)
-                        if ((one.buttonCount()) > 0) {
-                            def g1:RibbonGroupCtl (this.openGroup(one.tid one.name))
-                            def c1:EVGElement (this.groupCol(g1))
-                            this.mountInRow(c1 one g1)
-                        }
-                        ti = (ti + 1)
-                    }
+                    this.buildTabGroups()
                 }
             }
             root.addChild(ribbonEl)
@@ -2003,6 +2525,8 @@ class SheetsApp {
         this.setChecked(vm.menu "themelight" (theme == "light"))
         this.setChecked(vm.menu "themedark" (theme == "dark"))
         this.setChecked(vm.menu "rtl" app.uiRtl)
+        this.setChecked(vm.menu "showmenubar" showMenubar)
+        this.syncTabToggles()
 
         this.syncTabs()
 
@@ -2035,6 +2559,7 @@ class SheetsApp {
         qat.setDisabled("qat-undo" ((model.history.canUndo()) == false))
         qat.setDisabled("qat-redo" ((model.history.canRedo()) == false))
         qat.build()
+        themeBar.build()
         tabs.build()
         this.colourTabs()
         ; The grid is what a tab shows, and it is drawn beside the tabs, not in
@@ -3252,6 +3777,7 @@ class SheetsApp {
         push groups tabNav
         push groups viewTools
         push groups qat
+        push groups themeBar
         def i:int 0
         while (i < (array_length groups)) {
             def g:RibbonCtl (itemAt groups i)
@@ -3347,6 +3873,12 @@ class SheetsApp {
         def cmd:string a.command
         if ((indexOf cmd "sx:") == 0) {
             if (cmd == "sx:theme") {
+                if (a.arg == "toggle") {
+                    if (theme == "dark") {
+                        return (this.setTheme("light"))
+                    }
+                    return (this.setTheme("dark"))
+                }
                 return (this.setTheme(a.arg))
             }
             ; The sheet's own clipboard, through the same paste as Ctrl+V.
@@ -3369,6 +3901,9 @@ class SheetsApp {
             }
             if (cmd == "sx:ribbon") {
                 showRibbon = (showRibbon == false)
+            }
+            if (cmd == "sx:menubar") {
+                showMenubar = (showMenubar == false)
             }
             this.rebuildChrome()
             return true
