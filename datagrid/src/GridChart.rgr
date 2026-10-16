@@ -516,6 +516,8 @@ class ChartData {
     ; the field name the generator invented ("cat", "value"), which is a
     ; detail of this file leaking onto the user's chart.
     def catTitle:string ""
+    ; Characters a category name may show, 0 for all of them (see specJson).
+    def catClip:int 0
     def valueTitle:string ""
     def seriesTitle:string ""
 
@@ -1259,7 +1261,7 @@ class ChartData {
                     if (wrote > 0) {
                         out = (out + ",")
                     }
-                    def cat:string (itemAt cats ci)
+                    def cat:string (this.shownCat(ci))
                     out = (out + "{\"cat\":")
                     if catNumeric {
                         out = (out + cat)
@@ -1353,6 +1355,60 @@ class ChartData {
 
     ; The whole Vega-Lite specification, sized to the box it will be drawn in.
     fn specJson:string (ch:GridChart plotW:int plotH:int) {
+        def keepCat:string catTitle
+        def keepValue:string valueTitle
+        ; A small chart keeps its words inside its box: titles and category
+        ; names are cut with an ellipsis to the room they have.
+        catTitle = (ChartData.clipText(catTitle (to_int ((to_double plotW) / 7.5))))
+        valueTitle = (ChartData.clipText(valueTitle (to_int ((to_double plotH) / 7.5))))
+        catClip = 0
+        if (((this.catCount()) > 0) && (catNumeric == false)) {
+            if (this.levelLabels()) {
+                catClip = (to_int (((to_double plotW) / (to_double (this.catCount()))) / 6.0))
+            } {
+                catClip = (to_int (((to_double plotH) * 0.45) / 5.5))
+            }
+            if (catClip < 8) {
+                catClip = 8
+            }
+        }
+        def spec:string (this.specJsonIn(ch plotW plotH))
+        catTitle = keepCat
+        valueTitle = keepValue
+        catClip = 0
+        return spec
+    }
+
+    ; `s` cut to `most` characters, the last of them an ellipsis.
+    sfn clipText:string (s:string most:int) {
+        if ((strlen s) <= most) {
+            return s
+        }
+        if (most < 2) {
+            return "…"
+        }
+        return ((substring s 0 (most - 1)) + "…")
+    }
+
+    ; A category as the axis shows it: clipped to `catClip`, unless that would
+    ; make it read the same as an earlier one.
+    fn shownCat:string (ci:int) {
+        def cat:string (itemAt cats ci)
+        if ((catClip <= 0) || ((strlen cat) <= catClip)) {
+            return cat
+        }
+        def cut:string (ChartData.clipText(cat catClip))
+        def k:int 0
+        while (k < ci) {
+            if ((ChartData.clipText((itemAt cats k) catClip)) == cut) {
+                return cat
+            }
+            k = (k + 1)
+        }
+        return cut
+    }
+
+    fn specJsonIn:string (ch:GridChart plotW:int plotH:int) {
         def kind:int ch.kind
         if (ch.axisTitles == false) {
             catTitle = ""
@@ -1373,7 +1429,8 @@ class ChartData {
         out = ((out + "\"width\":") + (to_string plotW) + ",\"height\":" + (to_string plotH))
         out = ((out + ",\"background\":\"") + (ChartStyle.background(ch.style)) + "\"")
         if ((strlen ch.title) > 0) {
-            out = ((out + ",\"title\":\"") + (ChartData.jsonEscape(ch.title)) + "\"")
+            def shownTitle:string (ChartData.clipText(ch.title (to_int (((to_double plotW) + 60.0) / 7.5))))
+            out = ((out + ",\"title\":\"") + (ChartData.jsonEscape(shownTitle)) + "\"")
         }
         if (ChartKind.wantsXY(kind)) {
             out = ((out + ",\"data\":{\"values\":[") + (this.rowsXyJson()) + "]}")

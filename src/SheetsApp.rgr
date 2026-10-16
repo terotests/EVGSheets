@@ -93,6 +93,10 @@ class SheetsApp {
     def qat:RibbonCtl (new RibbonCtl)
     def zoomSlider:SliderCtl (new SliderCtl)
     def sliderDrag:boolean false
+    ; A hover the pointer passed over on its way to an open submenu.
+    def holdHover:string ""
+    def holdMs:double 0.0
+    def holdDelayMs:double 400.0
     ; The contextual tab showing: "tabledesign", "chartdesign" or "".
     def ctxTab:string ""
     ; The colour each sheet's tab was drawn with, by sheet index.
@@ -2136,8 +2140,12 @@ class SheetsApp {
             }
             ; A submenu surface hangs off its row: keep it after the label.
             def k:int 0
+            ; Decorated in the same pass: left for the next frame, the
+            ; submenu's rows drew one frame bare on every rebuild.
             while (k < (array_length kids)) {
-                el.addChild((itemAt kids k))
+                def sub:EVGElement (itemAt kids k)
+                el.addChild(sub)
+                this.decorate(sub)
                 k = (k + 1)
             }
             return
@@ -2492,8 +2500,23 @@ class SheetsApp {
             ui.pointerUp()
             def over:string (ui.hitTest((to_double x) (to_double y)))
             if ((strlen over) > 0) {
-                ui.hover(over)
+                ; On its way to an open submenu the pointer crosses the rows
+                ; below it: those wait a moment instead of closing it at once.
+                if (this.hoverHeld(over)) {
+                    if (over != holdHover) {
+                        holdHover = over
+                        holdMs = 0.0
+                    }
+                    return
+                }
+                holdHover = ""
+                ; Back on the row whose submenu is open: nothing to do. Hovered
+                ; again, the menu shut that submenu and reopened it a moment later.
+                if ((this.openSubTrigger(over)) == false) {
+                    ui.hover(over)
+                }
             } {
+                holdHover = ""
                 ui.unhover()
                 if (this.insideGrid(x y)) {
                     grid.pointer((x - gx) (y - gy) false shift ctrl)
@@ -3375,8 +3398,52 @@ class SheetsApp {
     }
 
     ; One tick for the controllers: a submenu opens on a delay.
+    ; A row of a menu whose submenu is open, outside that submenu: the hover
+    ; it means is held for `holdDelayMs`.
+    fn hoverHeld:boolean (over:string) {
+        def menus:[MenuCtl] (this.allMenus())
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            def depth:int (array_length mc.openPath)
+            if (mc.open && (depth > 0) && ((mc.rowIndexOf(over)) >= 0)) {
+                def deepest:string (itemAt mc.openPath (depth - 1))
+                if ((indexOf over deepest) == 0) {
+                    return false
+                }
+                if (mc.isOpenSub(over)) {
+                    return false
+                }
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    fn openSubTrigger:boolean (over:string) {
+        def menus:[MenuCtl] (this.allMenus())
+        def i:int 0
+        while (i < (array_length menus)) {
+            def mc:MenuCtl (itemAt menus i)
+            if (mc.open && (mc.isOpenSub(over))) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
     fn tick:boolean (dtMs:double) {
-        def busy:boolean (ui.tick(dtMs))
+        if ((strlen holdHover) > 0) {
+            holdMs = (holdMs + dtMs)
+            if (holdMs >= holdDelayMs) {
+                def h:string holdHover
+                holdHover = ""
+                ui.hover(h)
+            }
+        }
+        def busy:boolean ((ui.tick(dtMs)) || ((strlen holdHover) > 0))
         return (busy || (menubar.pendingSub()))
     }
 
