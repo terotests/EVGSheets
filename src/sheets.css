@@ -306,7 +306,7 @@
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   column-gap: 6px;
   row-gap: 2px;
   width: 100%;
@@ -324,7 +324,7 @@
   align-items: center;
   gap: 1px;
   width: fit-content;
-  height: 32px;
+  height: 30px;
   padding: 0 3px;
   border-radius: 8px;
   background-color: var(--page);
@@ -372,6 +372,53 @@
   background-color: var(--rule);
 }
 
+/* Excel's groups on the Home tab: a box of columns of rows, its name under
+ * it, and a hairline between two groups. */
+.sx-group {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: fit-content;
+  padding: 0 2px;
+}
+.sx-group-body {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 4px;
+  width: fit-content;
+}
+.sx-group-col {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  row-gap: 3px;
+  width: fit-content;
+}
+.sx-group-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  column-gap: 3px;
+  width: fit-content;
+}
+.sx-group-label {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 14px;
+  margin-top: 3px;
+}
+.sx-group-rule {
+  width: 1px;
+  height: 74px;
+  background-color: var(--rule);
+  flex-shrink: 0;
+}
+
 /* Dropdown triggers on the ribbon: the font, the size, number and borders. */
 .ui-dropdownmenu {
   display: flex;
@@ -386,8 +433,8 @@
   align-items: center;
   gap: 6px;
   width: fit-content;
-  height: 32px;
-  padding: 0 8px 0 10px;
+  height: 30px;
+  padding: 0 6px 0 8px;
   border-radius: 8px;
   border: 1px solid rgba(0, 0, 0, 0);
   background-color: var(--page);

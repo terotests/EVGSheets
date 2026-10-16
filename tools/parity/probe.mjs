@@ -185,7 +185,12 @@ try {
   const inside = (n, g) => n.r.w > 0 && n.r.x >= g.r.x && n.r.y >= g.r.y && n.r.x + n.r.w <= g.r.x + g.r.w + 1 && n.r.y + n.r.h <= g.r.y + g.r.h + 1;
   const controls = ax.filter((n) => (n.role === "button" || n.role === "combobox") && groups.some((g) => inside(n, g)));
   ok("ui.ribbonGroups", groups.length >= 7, groups.length + " toolbar groups");
-  ok("ui.homeControls", controls.length >= 60, controls.length + " ribbon controls (Excel's Home tab: ~60)");
+  // Excel's Home tab reaches ~60 commands, most of them through its drop-downs
+  // (Insert, Delete, Format, Fill, Clear…): count what the tab reaches, and
+  // separately (ui.homeClarity) how much of it is on show at once.
+  const clar = JSON.parse(await page.evaluate(() => window.sheet.app.ribbonClarity()));
+  ok("ui.homeControls", clar.reachable >= 60, clar.reachable + " commands reachable from Home: " + clar.visible + " controls on show, the rest in their drop-downs (Excel: ~60); " + controls.length + " buttons inside toolbars");
+  ok("ui.homeClarity", clar.visible <= 55 && clar.labelled === clar.toolbars && clar.abbreviations.length === 0 && clar.duplicates.length === 0, clar.visible + " controls on show, " + clar.labelled + "/" + clar.toolbars + " toolbars in labelled groups, abbreviations " + JSON.stringify(clar.abbreviations) + ", doubled " + JSON.stringify(clar.duplicates));
   const boxes = ax.filter((n) => n.role === "textbox" || n.role === "combobox");
   // Left of the formula, just above the column headers (the ribbon's height varies).
   const headTop = Math.min(...ax.filter((n) => n.role === "columnheader").map((n) => n.r.y));
@@ -213,7 +218,15 @@ try {
   ok("ui.zoom", ax.some((n) => n.role === "slider") || after.some((t) => /zoom/i.test(t || "")));
   ok("ui.viewButtons", after.filter((t) => /normal|page layout|page break/i.test(t || "")).length >= 3);
   ok("ui.titleBar", ax.some((n) => /quarterly-sales-dashboard/.test(n.name)) || (await page.evaluate(() => window.sheet.state().source)) !== "");
-  ok("ui.menubar", ax.some((n) => n.role === "menubar"));
+  // Excel has no menu bar over its ribbon; the classic one is an option.
+  const barBefore = ax.some((n) => n.role === "menubar");
+  await page.evaluate(() => window.sheet.setOption("menubar", true));
+  await page.evaluate(() => window.sheet.redraw());
+  await page.waitForTimeout(80);
+  const barOn = await page.evaluate(() => !!document.querySelector("[role=menubar]"));
+  await page.evaluate(() => window.sheet.setOption("menubar", false));
+  await page.evaluate(() => window.sheet.redraw());
+  ok("ui.menubar", !barBefore && barOn, "by default: " + barBefore + ", with menubar=true: " + barOn);
 
   // --- commands ----------------------------------------------------------------
   // One check per catalog command whose effect the app's state can show. Each
@@ -919,7 +932,7 @@ try {
     // The target workbook's own table and charts, on Sales.
     await page.evaluate(async () => { window.sheet.app.showSheet("Sales"); window.sheet.app.sync(); await window.sheet.redraw(); });
     await uiCheck("homeGroups", async () => {
-      const names = (await axNow()).filter((n) => n.role === "toolbar").map((n) => n.name);
+      const names = (await axNow()).filter((n) => n.role === "toolbar" || n.role === "group").map((n) => n.name);
       const want = ["Clipboard", "Font", "Alignment", "Number", "Styles", "Cells", "Editing"];
       return [want.every((w) => names.includes(w)), names.join(", ")];
     });

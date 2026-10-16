@@ -122,6 +122,35 @@ class SheetsApp {
     ; Footer: scroll through the sheets, and the status bar's view and zoom.
     def tabNav:RibbonCtl (new RibbonCtl)
     def viewTools:RibbonCtl (new RibbonCtl)
+    ; The full Home tab, laid out as Excel's groups: these toolbars and the
+    ; drop-downs below, in labelled boxes. A host's `tools=` list keeps the
+    ; flat bar of `history`, `textTools`… above instead.
+    def xUndo:RibbonCtl (new RibbonCtl)
+    def xClip:RibbonCtl (new RibbonCtl)
+    def xFontA:RibbonCtl (new RibbonCtl)
+    def xFontB:RibbonCtl (new RibbonCtl)
+    def xFontC:RibbonCtl (new RibbonCtl)
+    def xAlignV:RibbonCtl (new RibbonCtl)
+    def xAlignH:RibbonCtl (new RibbonCtl)
+    def xNum:RibbonCtl (new RibbonCtl)
+    def xSum:RibbonCtl (new RibbonCtl)
+    def xAddins:RibbonCtl (new RibbonCtl)
+    def pasteMenu:MenuCtl (new MenuCtl)
+    def mergeMenu:MenuCtl (new MenuCtl)
+    def insMenu:MenuCtl (new MenuCtl)
+    def delMenu:MenuCtl (new MenuCtl)
+    def fmtMenu:MenuCtl (new MenuCtl)
+    def fillMenu:MenuCtl (new MenuCtl)
+    def clearMenu:MenuCtl (new MenuCtl)
+    def sortMenu:MenuCtl (new MenuCtl)
+    def findMenu:MenuCtl (new MenuCtl)
+    ; A narrow window folds whole groups into one drop-down each, the way
+    ; Excel's ribbon does, instead of wrapping onto a second line.
+    def cgClip:MenuCtl (new MenuCtl)
+    def cgAlign:MenuCtl (new MenuCtl)
+    def cgNum:MenuCtl (new MenuCtl)
+    def cgStyles:MenuCtl (new MenuCtl)
+    def cgEdit:MenuCtl (new MenuCtl)
 
     ; The page's own elements (not controllers).
     def headerEl:EVGElement (EVGElement.createDiv())
@@ -166,7 +195,10 @@ class SheetsApp {
 
     ; --- what is shown ------------------------------------------------------
     def preset:string "full"
-    def showMenubar:boolean true
+    ; Excel has no menu bar over its ribbon, and two rows naming File, Insert,
+    ; Data… twice was the first thing that made the editor read as cluttered.
+    ; `menubar=true` brings the classic menus back.
+    def showMenubar:boolean false
     def showRibbon:boolean true
     def showFormulaBar:boolean true
     def showTabs:boolean true
@@ -282,9 +314,15 @@ class SheetsApp {
     }
 
     fn resize:void (w:int h:int) {
+        def before:string (join (this.foldedGroups()) ",")
         pageW = (to_double w)
         pageH = (to_double h)
         ui.setPageSize(pageW pageH)
+        ; A width that folds or unfolds a ribbon group lays the chrome out again.
+        if (built && ((join (this.foldedGroups()) ",") != before)) {
+            this.buildChrome()
+            this.sync()
+        }
     }
 
     ; =========================================================================
@@ -292,7 +330,7 @@ class SheetsApp {
     ; =========================================================================
 
     ; A preset is a starting point; `setOption` changes one piece after it.
-    ;   full     menubar, ribbon, formula bar, sheet tabs, status bar
+    ;   full     title, ribbon, formula bar, sheet tabs, status bar
     ;   compact  a short ribbon, formula bar, tabs, status — no menubar
     ;   viewer   read-only: tabs and status only; select, scroll, copy, sort
     ;   grid     the bare grid, editable, nothing around it
@@ -301,7 +339,7 @@ class SheetsApp {
         def empty:[string]
         tools = empty
         if (n == "full") {
-            showMenubar = true
+            showMenubar = false
             showRibbon = true
             showFormulaBar = true
             showTabs = true
@@ -807,6 +845,74 @@ class SheetsApp {
         return g
     }
 
+    ; A toolbar of the full Home tab.
+    fn bar:RibbonCtl (tid:string name:string) {
+        def g:RibbonCtl (new RibbonCtl)
+        g.tid = tid
+        g.name = name
+        return g
+    }
+
+    ; A drop-down of the full Home tab, named by what its trigger says.
+    fn drop:MenuCtl (tid:string name:string) {
+        def m:MenuCtl (new MenuCtl)
+        m.tid = tid
+        m.name = name
+        return m
+    }
+
+    ; The same command under another value, for a folded group's menu.
+    fn alias:void (value:string from:string) {
+        if (has actions from) {
+            def a:SxAction (unwrap (get actions from))
+            this.act(value a.command a.arg a.shortcut)
+        }
+    }
+
+    ; A toolbar's buttons as rows of a folded group's menu.
+    fn copyBar:void (mc:MenuCtl r:RibbonCtl prefix:string) {
+        def i:int 0
+        while (i < (array_length r.items)) {
+            def it:RibbonItem (itemAt r.items i)
+            if (it.separator == false) {
+                this.alias((prefix + it.value) it.value)
+                mc.addItem((prefix + it.value) it.name false)
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; Another drop-down's rows, inline.
+    fn copyMenu:void (mc:MenuCtl src:MenuCtl prefix:string) {
+        def i:int 0
+        while (i < (array_length src.items)) {
+            def it:UiItem (itemAt src.items i)
+            if (it.kind == "separator") {
+                mc.addSeparator()
+            } {
+                this.alias((prefix + it.value) it.value)
+                mc.addItem((prefix + it.value) it.name false)
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; Another drop-down as a submenu.
+    fn subOf:void (mc:MenuCtl value:string label:string src:MenuCtl) {
+        def sub:UiItem (mc.addSub(value label false))
+        def i:int 0
+        while (i < (array_length src.items)) {
+            def it:UiItem (itemAt src.items i)
+            if (it.kind == "separator") {
+                MenuCtl.addKidSeparator(sub)
+            } {
+                this.alias((value + "-" + it.value) it.value)
+                def k:UiItem (MenuCtl.addKid(sub (value + "-" + it.value) it.name false))
+            }
+            i = (i + 1)
+        }
+    }
+
     ; A button labelled with a word instead of a glyph.
     fn word:RibbonItem (r:RibbonCtl value:string name:string label:string command:string arg:string) {
         def it:RibbonItem (this.tool(r value name "" command arg false))
@@ -896,60 +1002,138 @@ class SheetsApp {
         this.tool(insertTools "link" "Insert link" (SheetsApp.icon("link")) "insert.link" "" false)
         this.tool(insertTools "find" "Find and replace" (SheetsApp.icon("find")) "edit.find" "" false)
 
-        ; --- Home: the rest of Excel's groups --------------------------------
-        def clip:RibbonCtl (this.grp("home" "sx-rb-clip" "Clipboard"))
-        this.word(clip "h-paste" "Paste" "Paste" "sx:paste" "")
-        this.word(clip "h-cut" "Cut" "Cut" "edit.cut" "")
-        this.word(clip "h-copy" "Copy" "Copy" "edit.copy" "")
-        this.word(clip "h-pastesp" "Paste special" "Paste…" "edit.pasteSpecial" "")
-        def fontx:RibbonCtl (this.grp("home" "sx-rb-fontx" "Font size and effects"))
-        this.word(fontx "h-grow" "Increase font size" "A+" "format.size.up" "")
-        this.word(fontx "h-shrink" "Decrease font size" "A-" "format.size.down" "")
-        this.word(fontx "h-dunder" "Double underline" "UU" "home.doubleUnderline" "")
-        this.word(fontx "h-border" "Borders" "▦" "format.border" "")
-        this.word(fontx "h-clearfmt" "Clear formats" "Clr" "format.clear" "")
-        this.word(fontx "h-sup" "Superscript" "x²" "home.superscript" "")
-        this.word(fontx "h-sub" "Subscript" "x₂" "home.subscript" "")
-        def alignx:RibbonCtl (this.grp("home" "sx-rb-alignx" "Vertical alignment and indent"))
-        this.word(alignx "h-top" "Top align" "Top" "format.valign" "top")
-        this.word(alignx "h-middle" "Middle align" "Mid" "format.valign" "middle")
-        this.word(alignx "h-bottom" "Bottom align" "Bot" "format.valign" "bottom")
-        this.word(alignx "h-orient" "Orientation" "ab↗" "home.orientation" "")
-        this.word(alignx "h-indless" "Decrease indent" "⇤" "home.decreaseIndent" "")
-        this.word(alignx "h-indmore" "Increase indent" "⇥" "home.increaseIndent" "")
-        this.word(alignx "h-mergec" "Merge and center" "M&C" "home.mergeCenter" "")
-        this.word(alignx "h-unmerge" "Unmerge cells" "Unm" "home.unmergeCells" "")
-        def numx:RibbonCtl (this.grp("home" "sx-rb-numx" "More number formats"))
-        this.word(numx "h-comma" "Comma style" "," "format.numfmt" "comma")
-        this.word(numx "h-date" "Short date" "Date" "format.numfmt" "date")
-        this.word(numx "h-textfmt" "Text format" "Txt" "format.numfmt" "text")
-        def styles:RibbonCtl (this.grp("home" "sx-rb-styles" "Styles"))
-        this.word(styles "h-cond" "Conditional formatting" "Cond" "format.conditional" "")
-        this.word(styles "h-astable" "Format as table" "Table" "home.formatAsTable" "")
-        this.word(styles "h-cellstyle" "Cell styles" "Styles" "home.cellStyle" "")
-        this.word(styles "h-clearrules" "Clear rules" "NoCF" "home.clearRules" "")
-        this.word(styles "h-newstyle" "New cell style" "New Style" "home.newCellStyle" "")
-        def cells:RibbonCtl (this.grp("home" "sx-rb-cells" "Cells"))
-        this.word(cells "h-inscells" "Insert cells" "Ins" "home.insertCells" "")
-        this.word(cells "h-delcells" "Delete cells" "Del" "home.deleteCells" "")
-        this.word(cells "h-insrow" "Insert sheet rows" "+Row" "insert.row.above" "")
-        this.word(cells "h-delrow" "Delete sheet rows" "-Row" "delete.rows" "")
-        this.word(cells "h-inscol" "Insert sheet columns" "+Col" "insert.column.left" "")
-        this.word(cells "h-delcol" "Delete sheet columns" "-Col" "delete.columns" "")
-        this.word(cells "h-fitcol" "AutoFit column width" "Fit" "format.autofit.column" "")
-        this.word(cells "h-lock" "Lock cell" "Lock" "home.lockCell" "")
-        this.word(cells "h-fmtcells" "Format cells" "Format…" "home.formatCells" "")
-        def editx:RibbonCtl (this.grp("home" "sx-rb-editx" "Editing"))
-        this.word(editx "h-autosum" "AutoSum" "Σ" "formulas.autoSum" "")
-        this.word(editx "h-filldown" "Fill down" "Fill↓" "edit.fillDown" "")
-        this.word(editx "h-fillright" "Fill right" "Fill→" "edit.fillRight" "")
-        this.word(editx "h-series" "Fill series" "Series" "edit.fillSeries" "")
-        this.word(editx "h-clearall" "Clear all" "Clear" "edit.clearAll" "")
-        this.word(editx "h-goto" "Go to" "GoTo" "edit.goTo" "")
-        this.word(editx "h-special" "Go to special" "Special" "edit.goToSpecial" "")
-        this.word(editx "h-flash" "Flash fill" "Flash Fill" "edit.flashFill" "")
-        def addins:RibbonCtl (this.grp("home" "sx-rb-addins" "Add-ins"))
-        this.word(addins "h-addins" "Add-ins" "Add-ins" "home.addIns" "")
+        ; --- Home, as Excel lays it out ---------------------------------------
+        ; Every command keeps an icon and a name a reader hears; a word is
+        ; drawn only where Excel itself draws one (Σ, ",", ".00"). What Excel
+        ; tucks into a drop-down (Insert, Delete, Format, Fill, Clear…) is a
+        ; drop-down here too, so the tab shows ~50 controls rather than ~75.
+        xUndo = (this.bar("sx-rb-undo" "Undo"))
+        this.tool(xUndo "undo" "Undo" (SheetsApp.icon("undo")) "edit.undo" "" false)
+        this.tool(xUndo "redo" "Redo" (SheetsApp.icon("redo")) "edit.redo" "" false)
+        xClip = (this.bar("sx-rb-clip" "Clipboard"))
+        this.tool(xClip "h-cut" "Cut" (SheetsApp.icon("cut")) "edit.cut" "" false)
+        this.tool(xClip "h-copy" "Copy" (SheetsApp.icon("copy")) "edit.copy" "" false)
+        this.tool(xClip "painter" "Format painter" (SheetsApp.icon("painter")) "edit.formatPainter" "" true)
+        pasteMenu = (this.drop("sx-paste" "Paste"))
+        this.item(pasteMenu "hm-paste" "Paste" "sx:paste" "" "Ctrl+V")
+        this.item(pasteMenu "hm-pastevalues" "Paste values only" "sx:pasteValues" "" "Ctrl+⇧V")
+        this.item(pasteMenu "hm-pastesp" "Paste special…" "edit.pasteSpecial" "" "")
+        xFontA = (this.bar("sx-rb-fontsize" "Font size"))
+        this.tool(xFontA "h-grow" "Increase font size" (SheetsApp.icon("grow")) "format.size.up" "" false)
+        this.tool(xFontA "h-shrink" "Decrease font size" (SheetsApp.icon("shrink")) "format.size.down" "" false)
+        xFontB = (this.bar("sx-rb-text" "Font"))
+        def xb:RibbonItem (this.tool(xFontB "bold" "Bold" (SheetsApp.icon("bold")) "format.bold" "" true))
+        xb.shortcut = "Control+B"
+        def xi:RibbonItem (this.tool(xFontB "italic" "Italic" (SheetsApp.icon("italic")) "format.italic" "" true))
+        xi.shortcut = "Control+I"
+        def xu:RibbonItem (this.tool(xFontB "underline" "Underline" (SheetsApp.icon("underline")) "format.underline" "" true))
+        xu.shortcut = "Control+U"
+        this.tool(xFontB "h-dunder" "Double underline" (SheetsApp.icon("dunder")) "home.doubleUnderline" "" false)
+        this.tool(xFontB "strike" "Strikethrough" (SheetsApp.icon("strike")) "format.strike" "" true)
+        xFontC = (this.bar("sx-rb-fontfx" "Colour and script"))
+        def xf:RibbonItem (this.tool(xFontC "fill" "Fill colour" (SheetsApp.icon("fill")) "format.fill" "" false))
+        xf.swatch = "#facc15"
+        def xc:RibbonItem (this.tool(xFontC "color" "Text colour" (SheetsApp.icon("color")) "format.color" "" false))
+        xc.swatch = "#dc2626"
+        this.tool(xFontC "h-sup" "Superscript" (SheetsApp.icon("sup")) "home.superscript" "" false)
+        this.tool(xFontC "h-sub" "Subscript" (SheetsApp.icon("sub")) "home.subscript" "" false)
+        xAlignV = (this.bar("sx-rb-valign" "Vertical alignment"))
+        this.tool(xAlignV "h-top" "Top align" (SheetsApp.icon("vtop")) "format.valign" "top" false)
+        this.tool(xAlignV "h-middle" "Middle align" (SheetsApp.icon("vmid")) "format.valign" "middle" false)
+        this.tool(xAlignV "h-bottom" "Bottom align" (SheetsApp.icon("vbot")) "format.valign" "bottom" false)
+        xAlignV.addSeparator()
+        this.tool(xAlignV "h-orient" "Orientation" (SheetsApp.icon("orient")) "home.orientation" "" false)
+        this.tool(xAlignV "wrap" "Wrap text" (SheetsApp.icon("wrap")) "format.wrap" "" true)
+        xAlignH = (this.bar("sx-rb-align" "Alignment"))
+        this.tool(xAlignH "left" "Align left" (SheetsApp.icon("left")) "format.align" "left" true)
+        this.tool(xAlignH "center" "Align center" (SheetsApp.icon("center")) "format.align" "center" true)
+        this.tool(xAlignH "right" "Align right" (SheetsApp.icon("right")) "format.align" "right" true)
+        xAlignH.addSeparator()
+        this.tool(xAlignH "h-indless" "Decrease indent" (SheetsApp.icon("outdent")) "home.decreaseIndent" "" false)
+        this.tool(xAlignH "h-indmore" "Increase indent" (SheetsApp.icon("indent")) "home.increaseIndent" "" false)
+        mergeMenu = (this.drop("sx-merge" "Merge"))
+        this.item(mergeMenu "hm-mergec" "Merge & Center" "home.mergeCenter" "" "")
+        this.item(mergeMenu "hm-merge" "Merge cells" "format.merge" "" "")
+        this.item(mergeMenu "hm-unmerge" "Unmerge cells" "home.unmergeCells" "" "")
+        xNum = (this.bar("sx-rb-number" "Number"))
+        this.tool(xNum "currency" "Currency" (SheetsApp.icon("currency")) "format.numfmt" "currency" true)
+        this.tool(xNum "percent" "Percent" (SheetsApp.icon("percent")) "format.numfmt" "percent" true)
+        def xcm:RibbonItem (this.tool(xNum "h-comma" "Comma style" "" "format.numfmt" "comma" false))
+        xcm.text = ","
+        def xdm:RibbonItem (this.tool(xNum "decmore" "More decimals" "" "format.decimals" "more" false))
+        xdm.text = ".00"
+        def xdl:RibbonItem (this.tool(xNum "decless" "Fewer decimals" "" "format.decimals" "less" false))
+        xdl.text = ".0"
+        insMenu = (this.drop("sx-cellins" "Insert"))
+        this.item(insMenu "hm-inscells" "Insert cells…" "home.insertCells" "" "")
+        this.item(insMenu "hm-insrow" "Insert sheet rows" "insert.row.above" "" "")
+        this.item(insMenu "hm-inscol" "Insert sheet columns" "insert.column.left" "" "")
+        this.item(insMenu "hm-inssheet" "Insert sheet" "sheet.add" "" "")
+        delMenu = (this.drop("sx-celldel" "Delete"))
+        this.item(delMenu "hm-delcells" "Delete cells…" "home.deleteCells" "" "")
+        this.item(delMenu "hm-delrow" "Delete sheet rows" "delete.rows" "" "")
+        this.item(delMenu "hm-delcol" "Delete sheet columns" "delete.columns" "" "")
+        fmtMenu = (this.drop("sx-cellfmt" "Format"))
+        this.item(fmtMenu "hm-fitrow" "AutoFit row height" "format.autofit.row" "" "")
+        this.item(fmtMenu "hm-fitcol" "AutoFit column width" "format.autofit.column" "" "")
+        this.item(fmtMenu "hm-lock" "Lock cell" "home.lockCell" "" "")
+        fmtMenu.addSeparator()
+        this.item(fmtMenu "hm-fmtcells" "Format cells…" "home.formatCells" "" "Ctrl+1")
+        xSum = (this.bar("sx-rb-editing" "Editing"))
+        def xs:RibbonItem (this.tool(xSum "h-autosum" "AutoSum" "" "formulas.autoSum" "" false))
+        xs.text = "Σ"
+        fillMenu = (this.drop("sx-fill" "Fill"))
+        this.item(fillMenu "hm-filldown" "Down" "edit.fillDown" "" "Ctrl+D")
+        this.item(fillMenu "hm-fillright" "Right" "edit.fillRight" "" "Ctrl+R")
+        this.item(fillMenu "hm-series" "Series…" "edit.fillSeries" "" "")
+        this.item(fillMenu "hm-flash" "Flash Fill" "edit.flashFill" "" "Ctrl+E")
+        clearMenu = (this.drop("sx-clear" "Clear"))
+        this.item(clearMenu "hm-clearall" "Clear all" "edit.clearAll" "" "")
+        this.item(clearMenu "hm-clearfmt" "Clear formats" "format.clear" "" "")
+        this.item(clearMenu "hm-clearcont" "Clear contents" "edit.clear" "" "Del")
+        sortMenu = (this.drop("sx-sortfilter" "Sort & Filter"))
+        this.item(sortMenu "hm-sortasc" "Sort A to Z" "data.sort.asc" "" "")
+        this.item(sortMenu "hm-sortdesc" "Sort Z to A" "data.sort.desc" "" "")
+        this.item(sortMenu "hm-sort" "Custom sort…" "data.sort" "" "")
+        sortMenu.addSeparator()
+        this.item(sortMenu "hm-filter" "Filter" "data.filter" "" "")
+        this.item(sortMenu "hm-filterclear" "Clear filter" "data.filter.clear" "" "")
+        this.item(sortMenu "hm-reapply" "Reapply" "data.reapply" "" "")
+        findMenu = (this.drop("sx-findselect" "Find & Select"))
+        this.item(findMenu "hm-find" "Find and replace…" "edit.find" "" "Ctrl+F")
+        this.item(findMenu "hm-goto" "Go to…" "edit.goTo" "" "Ctrl+G")
+        this.item(findMenu "hm-special" "Go to special…" "edit.goToSpecial" "" "")
+        xAddins = (this.bar("sx-rb-addins" "Add-ins"))
+        this.word(xAddins "h-addins" "Add-ins" "Add-ins" "home.addIns" "")
+
+        ; The folded groups: the same commands, one drop-down per group.
+        cgClip = (this.drop("sx-cg-clip" "Paste"))
+        this.copyBar(cgClip xUndo "cg-")
+        cgClip.addSeparator()
+        this.copyMenu(cgClip pasteMenu "cg-")
+        cgClip.addSeparator()
+        this.copyBar(cgClip xClip "cg-")
+        cgAlign = (this.drop("sx-cg-align" "Alignment"))
+        this.copyBar(cgAlign xAlignV "cg-")
+        cgAlign.addSeparator()
+        this.copyBar(cgAlign xAlignH "cg-")
+        cgAlign.addSeparator()
+        this.copyMenu(cgAlign mergeMenu "cg-")
+        cgNum = (this.drop("sx-cg-num" "Number"))
+        this.subOf(cgNum "cg-numfmt" "Number format" numMenu)
+        this.copyBar(cgNum xNum "cg-")
+        cgStyles = (this.drop("sx-cg-styles" "Styles"))
+        this.subOf(cgStyles "cg-cf" "Conditional Formatting" cfMenu)
+        this.subOf(cgStyles "cg-table" "Format as Table" tableMenu)
+        this.subOf(cgStyles "cg-cellstyles" "Cell Styles" styleMenu)
+        cgEdit = (this.drop("sx-cg-edit" "Editing"))
+        this.copyBar(cgEdit xSum "cg-")
+        this.subOf(cgEdit "cg-fill" "Fill" fillMenu)
+        this.subOf(cgEdit "cg-clear" "Clear" clearMenu)
+        this.subOf(cgEdit "cg-sort" "Sort & Filter" sortMenu)
+        this.subOf(cgEdit "cg-find" "Find & Select" findMenu)
+        cgEdit.addSeparator()
+        this.copyBar(cgEdit xAddins "cg-")
 
         ; --- Insert ------------------------------------------------------------
         def insTables:RibbonCtl (this.grp("insert" "sx-rb-instables" "Tables"))
@@ -1220,28 +1404,25 @@ class SheetsApp {
         zoomSlider.step = 5
     }
 
-    ; The groups of the tab that is showing, in the order they are mounted.
+    ; The toolbars of the tab that is showing, in the order they are mounted.
     fn ribbonGroups:[RibbonCtl] () {
         if (ribbonTab != "home") {
             return (this.groupsOf(ribbonTab))
         }
-        def h:[RibbonCtl] (this.groupsOf("home"))
-        def a:[RibbonCtl]
-        push a history
-        push a (itemAt h 0)
-        push a textTools
-        push a (itemAt h 1)
-        push a alignTools
-        push a (itemAt h 2)
-        push a numberTools
-        push a (itemAt h 3)
-        push a (itemAt h 4)
-        push a (itemAt h 5)
-        push a dataTools
-        push a (itemAt h 6)
-        push a insertTools
-        push a (itemAt h 7)
-        return a
+        if ((array_length tools) > 0) {
+            return ([] _:RibbonCtl (history textTools alignTools numberTools dataTools insertTools))
+        }
+        return ([] _:RibbonCtl (xUndo xClip xFontA xFontB xFontC xAlignV xAlignH xNum xSum xAddins))
+    }
+
+    ; Every toolbar whose buttons mirror the caret's cell, whichever is showing.
+    fn stateGroups:[RibbonCtl] () {
+        return ([] _:RibbonCtl (history textTools alignTools numberTools dataTools xUndo xClip xFontB xFontC xAlignV xAlignH xNum))
+    }
+
+    ; The ribbon's drop-down menus.
+    fn ribbonMenus:[MenuCtl] () {
+        return ([] _:MenuCtl (fontMenu sizeMenu numMenu borderMenu cfMenu tableMenu styleMenu pasteMenu mergeMenu insMenu delMenu fmtMenu fillMenu clearMenu sortMenu findMenu cgClip cgAlign cgNum cgStyles cgEdit))
     }
 
     ; Lucide's icons (ISC licence), 24×24, stroked.
@@ -1270,6 +1451,19 @@ class SheetsApp {
         if (name == "chart") { return "M3 3v16a2 2 0 0 0 2 2h16 M18 17V9 M13 17V5 M8 17v-3" }
         if (name == "link") { return "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }
         if (name == "find") { return "M11 3a8 8 0 1 0 0 16a8 8 0 1 0 0-16z M21 21l-4.3-4.3" }
+        if (name == "cut") { return "M6 3a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M8.12 8.12 12 12 M20 4 8.12 15.88 M6 15a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M14.8 14.8 20 20" }
+        if (name == "copy") { return "M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }
+        if (name == "grow") { return "M3.5 13h6 M2 16l4.5-9 4.5 9 M18 16V7 M14 11l4-4 4 4" }
+        if (name == "shrink") { return "M3.5 13h6 M2 16l4.5-9 4.5 9 M18 7v9 M14 12l4 4 4-4" }
+        if (name == "dunder") { return "M6 3v6a6 6 0 0 0 12 0V3 M4 18h16 M4 22h16" }
+        if (name == "sup") { return "m4 19 8-8 M12 19l-8-8 M20 12h-4c0-1.5.44-2 1.5-2.5S20 8.33 20 7c0-.47-.17-.93-.48-1.29a2.11 2.11 0 0 0-2.62-.44c-.42.24-.74.62-.9 1.07" }
+        if (name == "sub") { return "m4 5 8 8 M12 5l-8 8 M20 19h-4c0-1.5.44-2 1.5-2.5S20 15.33 20 14c0-.47-.17-.93-.48-1.29a2.11 2.11 0 0 0-2.62-.44c-.42.24-.74.62-.9 1.07" }
+        if (name == "vtop") { return "M4 6h6v16H4z M14 6h6v9h-6z M22 2H2" }
+        if (name == "vmid") { return "M2 12h20 M4 6h6v12H4z M14 8h6v8h-6z" }
+        if (name == "vbot") { return "M4 2h6v16H4z M14 9h6v9h-6z M22 22H2" }
+        if (name == "orient") { return "M4 20 20 4 M13 4h7v7 M4 13l7 7" }
+        if (name == "outdent") { return "M21 12H11 M21 18H11 M21 6H11 M7 8l-4 4 4 4" }
+        if (name == "indent") { return "M21 12H11 M21 18H11 M21 6H11 M3 8l4 4-4 4" }
         if (name == "plus") { return "M12 5v14 M5 12h14" }
         if (name == "chevron") { return "m6 9 6 6 6-6" }
         if (name == "chevronRight") { return "m9 18 6-6-6-6" }
@@ -1361,10 +1555,9 @@ class SheetsApp {
             ribbonEl.id = "sx-ribbonbar"
             ribbonEl.className = "sx-ribbonbar"
             UiTree.clearChildren(ribbonEl)
-            if (ribbonTab == "home") {
-                def h:[RibbonCtl] (this.groupsOf("home"))
+            if ((ribbonTab == "home") && ((array_length tools) > 0)) {
+                ; A host's tool list: one flat bar of the buttons it kept.
                 this.mountGroup(history)
-                this.mountGroup((itemAt h 0))
                 if (this.wantsTool("font")) {
                     this.mount(ribbonEl fontMenu)
                 }
@@ -1372,34 +1565,36 @@ class SheetsApp {
                     this.mount(ribbonEl sizeMenu)
                 }
                 this.mountGroup(textTools)
-                this.mountGroup((itemAt h 1))
                 this.mountGroup(alignTools)
-                this.mountGroup((itemAt h 2))
                 if (this.wantsTool("numfmt")) {
                     this.mount(ribbonEl numMenu)
                 }
                 this.mountGroup(numberTools)
-                this.mountGroup((itemAt h 3))
                 if (this.wantsTool("borders")) {
                     this.mount(ribbonEl borderMenu)
                 }
-                this.mountGroup((itemAt h 4))
                 if (this.wantsTool("galleries")) {
                     this.mount(ribbonEl cfMenu)
                     this.mount(ribbonEl tableMenu)
                     this.mount(ribbonEl styleMenu)
                 }
-                this.mountGroup((itemAt h 5))
                 this.mountGroup(dataTools)
-                this.mountGroup((itemAt h 6))
                 this.mountGroup(insertTools)
-                this.mountGroup((itemAt h 7))
             } {
-                def tg:[RibbonCtl] (this.groupsOf(ribbonTab))
-                def ti:int 0
-                while (ti < (array_length tg)) {
-                    this.mountGroup((itemAt tg ti))
-                    ti = (ti + 1)
+                if (ribbonTab == "home") {
+                    this.buildExcelHome()
+                } {
+                    def tg:[RibbonCtl] (this.groupsOf(ribbonTab))
+                    def ti:int 0
+                    while (ti < (array_length tg)) {
+                        def one:RibbonCtl (itemAt tg ti)
+                        if ((one.buttonCount()) > 0) {
+                            def g1:RibbonGroupCtl (this.openGroup(one.tid one.name))
+                            def c1:EVGElement (this.groupCol(g1))
+                            this.mountInRow(c1 one g1)
+                        }
+                        ti = (ti + 1)
+                    }
                 }
             }
             root.addChild(ribbonEl)
@@ -1512,6 +1707,203 @@ class SheetsApp {
         return (RibbonCtl.listHas(tools value))
     }
 
+    ; --- Excel's groups: a labelled box of columns of rows ------------------
+    ;
+    ; EVG has no per-side borders and no descendant selectors, so each piece
+    ; is its own class and the rule between two groups is an element.
+
+    fn openGroup:RibbonGroupCtl (tid:string label:string) {
+        def kids:[EVGElement] ribbonEl.children
+        if ((array_length kids) > 0) {
+            def rule:EVGElement (EVGElement.createDiv())
+            rule.className = "sx-group-rule"
+            rule.a11yHidden = true
+            ribbonEl.addChild(rule)
+        }
+        def g (new RibbonGroupCtl())
+        g.tid = (tid + "-group")
+        g.name = label
+        def box:EVGElement (unwrap g.rootEl)
+        box.id = g.tid
+        box.className = "sx-group"
+        UiTree.clearChildren(box)
+        def body:EVGElement (unwrap g.bodyEl)
+        body.className = "sx-group-body"
+        UiTree.clearChildren(body)
+        box.addChild(body)
+        def cap:EVGElement (EVGElement.createSpan())
+        cap.className = "sx-group-label"
+        cap.textContent = label
+        cap.elementType = 1
+        cap.a11yHidden = true
+        box.addChild(cap)
+        this.mount(ribbonEl g)
+        return g
+    }
+
+    fn groupCol:EVGElement (g:RibbonGroupCtl) {
+        def col:EVGElement (EVGElement.createDiv())
+        col.className = "sx-group-col"
+        def body:EVGElement (unwrap g.bodyEl)
+        body.addChild(col)
+        return col
+    }
+
+    fn groupRow:EVGElement (col:EVGElement) {
+        def row:EVGElement (EVGElement.createDiv())
+        row.className = "sx-group-row"
+        col.addChild(row)
+        return row
+    }
+
+    ; One toolbar on a row of its own in `col`.
+    fn mountInRow:void (col:EVGElement r:RibbonCtl g:RibbonGroupCtl) {
+        def row:EVGElement (this.groupRow(col))
+        this.mountBar(row r g)
+    }
+
+    fn mountBar:void (row:EVGElement r:RibbonCtl g:RibbonGroupCtl) {
+        r.groupTid = g.tid
+        this.mount(row r)
+    }
+
+    ; Which groups fold at this width. The widths are the groups' measured
+    ; sizes (Open Sans, 1×) with their rule; the order is Excel's: the groups
+    ; furthest right and least used fold first, Font never does. Undo goes
+    ; next to last, into the Quick Access Toolbar or the folded Clipboard.
+    fn foldedGroups:[string] () {
+        def out:[string]
+        def need:int 1570
+        def avail:int ((to_int pageW) - 20)
+        if (need <= avail) {
+            return out
+        }
+        need = (need - 121)
+        push out "edit"
+        if (need > avail) {
+            need = (need - 104)
+            push out "styles"
+        }
+        if (need > avail) {
+            need = (need - 140)
+            push out "align"
+        }
+        if (need > avail) {
+            need = (need - 46)
+            push out "num"
+        }
+        if (need > avail) {
+            need = (need - 84)
+            push out "addins"
+        }
+        if (need > avail) {
+            need = (need - 85)
+            push out "undo"
+            ; Without the title bar's Quick Access Toolbar, Undo and Redo then
+            ; live in the folded Clipboard menu, so that folds with it.
+            if (showTitle == false) {
+                push out "clip"
+                return out
+            }
+        }
+        if (need > avail) {
+            push out "clip"
+        }
+        return out
+    }
+
+    ; A folded group: its drop-down alone in the box, the name still under it.
+    fn foldedGroup:void (tid:string label:string m:MenuCtl) {
+        def g:RibbonGroupCtl (this.openGroup(tid label))
+        def c:EVGElement (this.groupCol(g))
+        this.mount((this.groupRow(c)) m)
+    }
+
+    fn buildExcelHome:void () {
+        def fold:[string] (this.foldedGroups())
+        if ((RibbonCtl.listHas(fold "undo")) == false) {
+            def gu:RibbonGroupCtl (this.openGroup("sx-rb-undo" "Undo"))
+            def cu:EVGElement (this.groupCol(gu))
+            this.mountInRow(cu xUndo gu)
+        }
+
+        if (RibbonCtl.listHas(fold "clip")) {
+            this.foldedGroup("sx-rb-clip" "Clipboard" cgClip)
+        } {
+            def gc:RibbonGroupCtl (this.openGroup("sx-rb-clip" "Clipboard"))
+            def cc:EVGElement (this.groupCol(gc))
+            this.mount((this.groupRow(cc)) pasteMenu)
+            this.mountInRow(cc xClip gc)
+        }
+
+        def gf:RibbonGroupCtl (this.openGroup("sx-rb-font" "Font"))
+        def cf:EVGElement (this.groupCol(gf))
+        def f1:EVGElement (this.groupRow(cf))
+        this.mount(f1 fontMenu)
+        this.mount(f1 sizeMenu)
+        this.mountBar(f1 xFontA gf)
+        def f2:EVGElement (this.groupRow(cf))
+        this.mountBar(f2 xFontB gf)
+        this.mount(f2 borderMenu)
+        this.mountBar(f2 xFontC gf)
+
+        if (RibbonCtl.listHas(fold "align")) {
+            this.foldedGroup("sx-rb-alignment" "Alignment" cgAlign)
+        } {
+            def ga:RibbonGroupCtl (this.openGroup("sx-rb-alignment" "Alignment"))
+            def ca:EVGElement (this.groupCol(ga))
+            this.mountInRow(ca xAlignV ga)
+            def a2:EVGElement (this.groupRow(ca))
+            this.mountBar(a2 xAlignH ga)
+            this.mount(a2 mergeMenu)
+        }
+
+        if (RibbonCtl.listHas(fold "num")) {
+            this.foldedGroup("sx-rb-num" "Number" cgNum)
+        } {
+            def gn:RibbonGroupCtl (this.openGroup("sx-rb-num" "Number"))
+            def cn:EVGElement (this.groupCol(gn))
+            this.mount((this.groupRow(cn)) numMenu)
+            this.mountInRow(cn xNum gn)
+        }
+
+        if (RibbonCtl.listHas(fold "styles")) {
+            this.foldedGroup("sx-rb-styles" "Styles" cgStyles)
+        } {
+            def gs:RibbonGroupCtl (this.openGroup("sx-rb-styles" "Styles"))
+            def cs:EVGElement (this.groupCol(gs))
+            this.mount((this.groupRow(cs)) cfMenu)
+            this.mount((this.groupRow(cs)) tableMenu)
+            this.mount((this.groupRow(cs)) styleMenu)
+        }
+
+        def gk:RibbonGroupCtl (this.openGroup("sx-rb-cells" "Cells"))
+        def ck:EVGElement (this.groupCol(gk))
+        this.mount((this.groupRow(ck)) insMenu)
+        this.mount((this.groupRow(ck)) delMenu)
+        this.mount((this.groupRow(ck)) fmtMenu)
+
+        if (RibbonCtl.listHas(fold "edit")) {
+            this.foldedGroup("sx-rb-edit" "Editing" cgEdit)
+        } {
+            def ge:RibbonGroupCtl (this.openGroup("sx-rb-edit" "Editing"))
+            def ce:EVGElement (this.groupCol(ge))
+            def e1:EVGElement (this.groupRow(ce))
+            this.mountBar(e1 xSum ge)
+            this.mount(e1 fillMenu)
+            this.mount((this.groupRow(ce)) clearMenu)
+            def ce2:EVGElement (this.groupCol(ge))
+            this.mount((this.groupRow(ce2)) sortMenu)
+            this.mount((this.groupRow(ce2)) findMenu)
+        }
+
+        if ((RibbonCtl.listHas(fold "addins")) == false) {
+            def gx:RibbonGroupCtl (this.openGroup("sx-rb-addins" "Add-ins"))
+            def cx:EVGElement (this.groupCol(gx))
+            this.mountInRow(cx xAddins gx)
+        }
+    }
+
     fn mountGroup:void (g:RibbonCtl) {
         if ((g.buttonCount()) == 0) {
             return
@@ -1562,24 +1954,34 @@ class SheetsApp {
         def sel:GridSelection app.sel
         def st:CellStyle (model.getCellStyle(sel.active.row sel.active.col))
 
-        textTools.setOn("bold" st.bold)
-        textTools.setOn("italic" st.italic)
-        textTools.setOn("underline" st.underline)
-        textTools.setOn("strike" st.strike)
-        if ((strlen st.textRgb) >= 4) {
-            textTools.setSwatch("color" st.textRgb)
+        def merged:boolean ((strlen (model.mergeAt(sel.active.row sel.active.col))) > 0)
+        def frozen:boolean ((model.freezeRows > 0) || (model.freezeCols > 0))
+        def canUndo:boolean (model.history.canUndo())
+        def canRedo:boolean (model.history.canRedo())
+        def sg:[RibbonCtl] (this.stateGroups())
+        def sgi:int 0
+        while (sgi < (array_length sg)) {
+            def t:RibbonCtl (itemAt sg sgi)
+            t.setOn("bold" st.bold)
+            t.setOn("italic" st.italic)
+            t.setOn("underline" st.underline)
+            t.setOn("strike" st.strike)
+            if ((strlen st.textRgb) >= 4) {
+                t.setSwatch("color" st.textRgb)
+            }
+            t.setOn("left" (st.alignSet && (st.align == "left")))
+            t.setOn("center" (st.align == "center"))
+            t.setOn("right" (st.align == "right"))
+            t.setOn("wrap" st.wrapText)
+            t.setOn("merge" merged)
+            t.setOn("currency" (GridFormat.isOn(st "numfmt" "currency")))
+            t.setOn("percent" (GridFormat.isOn(st "numfmt" "percent")))
+            t.setOn("freeze" frozen)
+            t.setDisabled("undo" (canUndo == false))
+            t.setDisabled("redo" (canRedo == false))
+            t.setOn("painter" app.formatBrushArmed)
+            sgi = (sgi + 1)
         }
-        alignTools.setOn("left" (st.alignSet && (st.align == "left")))
-        alignTools.setOn("center" (st.align == "center"))
-        alignTools.setOn("right" (st.align == "right"))
-        alignTools.setOn("wrap" st.wrapText)
-        alignTools.setOn("merge" ((strlen (model.mergeAt(sel.active.row sel.active.col))) > 0))
-        numberTools.setOn("currency" (GridFormat.isOn(st "numfmt" "currency")))
-        numberTools.setOn("percent" (GridFormat.isOn(st "numfmt" "percent")))
-        dataTools.setOn("freeze" ((model.freezeRows > 0) || (model.freezeCols > 0)))
-        history.setDisabled("undo" ((model.history.canUndo()) == false))
-        history.setDisabled("redo" ((model.history.canRedo()) == false))
-        history.setOn("painter" app.formatBrushArmed)
 
         ; The font and size dropdowns name what the caret is on.
         def fname:string st.fontName
@@ -1622,13 +2024,13 @@ class SheetsApp {
         }
         sheetTools.build()
         menubar.build()
-        fontMenu.build()
-        sizeMenu.build()
-        numMenu.build()
-        borderMenu.build()
-        cfMenu.build()
-        tableMenu.build()
-        styleMenu.build()
+        def rms:[MenuCtl] (this.ribbonMenus())
+        def rmi:int 0
+        while (rmi < (array_length rms)) {
+            def rm:MenuCtl (itemAt rms rmi)
+            rm.build()
+            rmi = (rmi + 1)
+        }
         ctxMenu.build()
         qat.setDisabled("qat-undo" ((model.history.canUndo()) == false))
         qat.setDisabled("qat-redo" ((model.history.canRedo()) == false))
@@ -2268,13 +2670,12 @@ class SheetsApp {
             push a m.menu
             i = (i + 1)
         }
-        push a fontMenu
-        push a sizeMenu
-        push a numMenu
-        push a borderMenu
-        push a cfMenu
-        push a tableMenu
-        push a styleMenu
+        def rms:[MenuCtl] (this.ribbonMenus())
+        def j:int 0
+        while (j < (array_length rms)) {
+            push a (itemAt rms j)
+            j = (j + 1)
+        }
         push a ctxMenu
         return a
     }
@@ -2483,8 +2884,17 @@ class SheetsApp {
         if ((strlen menubar.openValue) > 0) {
             return true
         }
-        if (fontMenu.open || sizeMenu.open || numMenu.open || borderMenu.open || ctxMenu.open || cfMenu.open || tableMenu.open || styleMenu.open) {
+        if ctxMenu.open {
             return true
+        }
+        def rms:[MenuCtl] (this.ribbonMenus())
+        def i:int 0
+        while (i < (array_length rms)) {
+            def m:MenuCtl (itemAt rms i)
+            if m.open {
+                return true
+            }
+            i = (i + 1)
         }
         return false
     }
@@ -2666,7 +3076,7 @@ class SheetsApp {
                 ctxOpen = false
             }
         }
-        def menus:[MenuCtl] ([] _:MenuCtl (fontMenu sizeMenu numMenu borderMenu cfMenu tableMenu styleMenu))
+        def menus:[MenuCtl] (this.ribbonMenus())
         def i:int 0
         while (i < (array_length menus)) {
             def mc:MenuCtl (itemAt menus i)
@@ -3313,11 +3723,17 @@ class SheetsApp {
             this.sync()
             return
         }
-        ; F10 goes to the menubar, as on every desktop.
+        ; F10 goes to the menubar, as on every desktop — or, with none, to
+        ; the ribbon's tabs, as in Excel.
         if (name == "F10") {
             if showMenubar {
                 gridFocused = false
                 ui.focus((menubar.triggerTid("file")))
+            } {
+                if (showRibbon && (readOnly == false) && ((array_length tools) == 0)) {
+                    gridFocused = false
+                    ui.focus(("sx-ribtabs-tab-" + ribbonTab))
+                }
             }
             this.sync()
             return
@@ -3629,6 +4045,120 @@ class SheetsApp {
 
     fn rectOf:string (tid:string) {
         return (ui.rectOf(tid))
+    }
+
+    ; How the ribbon reads, for the parity benchmark's clarity rows: the
+    ; controls on show, the words drawn that are not the command's own name
+    ; ("M&C" for Merge and Center), names shown twice, and how many of the
+    ; tab's toolbars sit in a labelled group. Measured on what is laid out.
+    fn ribbonClarity:string () {
+        def names:[string]
+        def abbrevs:[string]
+        def dups:[string]
+        def visible:int 0
+        def inMenus:int 0
+        def bars:int 0
+        def labelled:int 0
+        def groups:[RibbonCtl] (this.ribbonGroups())
+        def i:int 0
+        while (i < (array_length groups)) {
+            def g:RibbonCtl (itemAt groups i)
+            if ((strlen (ui.rectOf(g.tid))) > 0) {
+                bars = (bars + 1)
+                if ((strlen g.groupTid) > 0) {
+                    labelled = (labelled + 1)
+                }
+                def j:int 0
+                while (j < (array_length g.items)) {
+                    def it:RibbonItem (itemAt g.items j)
+                    if ((it.separator == false) && ((strlen (ui.rectOf((g.itemTid(it.value))))) > 0)) {
+                        visible = (visible + 1)
+                        if (RibbonCtl.listHas(names it.name)) {
+                            push dups it.name
+                        }
+                        push names it.name
+                        if (SheetsApp.isAbbreviation(it.text it.name)) {
+                            push abbrevs it.text
+                        }
+                    }
+                    j = (j + 1)
+                }
+            }
+            i = (i + 1)
+        }
+        def ms:[MenuCtl] (this.ribbonMenus())
+        def k:int 0
+        while (k < (array_length ms)) {
+            def m:MenuCtl (itemAt ms k)
+            if ((strlen (ui.rectOf((m.tid + "-trigger")))) > 0) {
+                visible = (visible + 1)
+                inMenus = (inMenus + (SheetsApp.countItems(m.items)))
+            }
+            k = (k + 1)
+        }
+        def o:string ("{\"visible\":" + (to_string visible) + ",\"reachable\":" + (to_string (visible + inMenus)))
+        o = (o + ",\"toolbars\":" + (to_string bars) + ",\"labelled\":" + (to_string labelled))
+        o = (o + ",\"abbreviations\":" + (SheetsApp.jsonList(abbrevs)) + ",\"duplicates\":" + (SheetsApp.jsonList(dups)) + "}")
+        return o
+    }
+
+    ; A word on a button that is not in the button's name: letters that only
+    ; stand for the command. Symbols Excel itself draws (Σ, ".00") are fine.
+    sfn isAbbreviation:boolean (text:string name:string) {
+        def t:string (to_lowercase (trim text))
+        if ((strlen t) == 0) {
+            return false
+        }
+        def letters:boolean false
+        def i:int 0
+        while (i < (strlen t)) {
+            def c:int (charAt t i)
+            if ((c >= 97) && (c <= 122)) {
+                letters = true
+            }
+            i = (i + 1)
+        }
+        if (letters == false) {
+            return false
+        }
+        if ((strlen t) > 1) {
+            def last:string (substring t ((strlen t) - 1) (strlen t))
+            if (last == "…") {
+                t = (substring t 0 ((strlen t) - 1))
+            }
+        }
+        return ((indexOf (to_lowercase name) t) < 0)
+    }
+
+    ; The rows of a menu a press can run, submenus' rows included.
+    sfn countItems:int (items:[UiItem]) {
+        def n:int 0
+        def i:int 0
+        while (i < (array_length items)) {
+            def it:UiItem (itemAt items i)
+            if ((array_length it.kids) > 0) {
+                n = (n + (SheetsApp.countItems(it.kids)))
+            } {
+                if (it.kind != "separator") {
+                    n = (n + 1)
+                }
+            }
+            i = (i + 1)
+        }
+        return n
+    }
+
+    sfn jsonList:string (a:[string]) {
+        def o:string "["
+        def i:int 0
+        while (i < (array_length a)) {
+            if (i > 0) {
+                o = (o + ",")
+            }
+            o = (o + (EVGA11yTree.jsonString((itemAt a i))))
+            i = (i + 1)
+        }
+        return (o + "]")
     }
 
     ; The facade the page also reaches through: files, clipboard, requests.

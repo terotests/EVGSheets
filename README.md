@@ -15,8 +15,8 @@ embeds: <https://terotests.github.io/EVGSheets/embed.html>
 
 | Part | Built from |
 |---|---|
-| Menubar: File, Edit, View, Insert, Format (with Number and Alignment submenus), Data | `MenubarCtl` / `MenuCtl` |
-| Ribbon: undo/redo, format painter, font and size, B I U S, text and fill colour, alignment, wrap, merge, number formats, borders, sort, filters, freeze, chart, link, find | `RibbonCtl` (an EVGUI controller in this repository) and `MenuCtl` dropdowns |
+| Ribbon as Excel lays it out: tabs (File, Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Automate), and on Home the labelled groups Undo, Clipboard, Font, Alignment, Number, Styles, Cells, Editing and Add-ins, with Excel's drop-downs (Paste, Merge, Insert, Delete, Format, Fill, Clear, Sort & Filter, Find & Select). A narrow window folds Editing, Styles, Alignment and Number into one drop-down each. | `RibbonCtl` and `RibbonGroupCtl` (in this repository) and `MenuCtl` dropdowns |
+| Classic menu bar (off by default, `menubar=true`): File, Edit, View, Insert, Format, Data, Page Layout, Formulas, Review | `MenubarCtl` / `MenuCtl` |
 | Context menu on cells, and on column and row headers (insert, delete, clear, move, fit, sort, conditional formatting, validation) | `MenuCtl` in context mode |
 | Sheet tabs: add, drag to reorder, and a right-click menu (rename, duplicate, insert, move left/right, delete with confirmation) | `TabsCtl`, `RibbonCtl`, `MenuCtl` in context mode |
 | Status line: Ready / editing / what happened, and Sum, Average and Count of the selection | the app |
@@ -44,8 +44,8 @@ tree as real DOM over the canvas.
 - **Menus:** they behave as Radix menus do.
 - **Status line:** it is a live region.
 - **Keyboard:**
-  - F6 moves between the menubar, the ribbon, the sheet and the tabs.
-  - F10 goes to the menubar.
+  - F6 moves between the ribbon, the sheet and the tabs (and the menu bar when it is on).
+  - F10 goes to the menu bar when it is on.
   - Escape returns to the sheet.
   - Ctrl chords reach the sheet from anywhere.
 

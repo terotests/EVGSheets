@@ -55,6 +55,9 @@ class RibbonCtl extends UiCtl {
     ; same controller laid out as rows.
     def rootClass:string "sx-ribbon"
     def toolClass:string ""
+    ; The labelled ribbon group this toolbar sits in, so a reader hears
+    ; "Font, group" around its buttons. "" when it stands alone.
+    def groupTid:string ""
 
     Constructor () {
         rootEl = (EVGElement.createDiv())
@@ -406,6 +409,7 @@ class RibbonCtl extends UiCtl {
         def out:[UiRow]
         def bar:UiRow (UiRow.of(tid (EVGA11yRole.toolbar()) name))
         bar.orientation = "horizontal"
+        bar.parentTid = groupTid
         push out bar
         def i:int 0
         while (i < (array_length items)) {
@@ -430,6 +434,29 @@ class RibbonCtl extends UiCtl {
             }
             i = (i + 1)
         }
+        return out
+    }
+}
+
+; =============================================================================
+; RibbonGroupCtl — one labelled group of Excel's ribbon (Clipboard, Font, …)
+; =============================================================================
+; Its root is the group's box: the app lays the group's toolbars and drop-down
+; menus out in rows inside it and puts the label under them, as Excel does.
+; To a reader it is a named group, which the toolbars inside it name as their
+; parent. It has nothing to press and builds nothing of its own — the app owns
+; the subtree, so `build` is deliberately the base class's no-op.
+class RibbonGroupCtl extends UiCtl {
+    def bodyEl:EVGElement
+
+    Constructor () {
+        rootEl = (EVGElement.createDiv())
+        bodyEl = (EVGElement.createDiv())
+    }
+
+    fn rows:[UiRow] () {
+        def out:[UiRow]
+        push out (UiRow.of(tid (EVGA11yRole.group()) name))
         return out
     }
 }

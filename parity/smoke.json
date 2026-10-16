@@ -1,5 +1,5 @@
 {
- "passed": 113,
+ "passed": 118,
  "checks": [
   {
    "name": "a plain visit opens an empty workbook",
@@ -59,6 +59,26 @@
   },
   {
    "name": "the reader is told Bold is pressed",
+   "ok": true
+  },
+  {
+   "name": "the full editor has no menu bar over the ribbon",
+   "ok": true
+  },
+  {
+   "name": "every Home toolbar sits in a labelled group",
+   "ok": true
+  },
+  {
+   "name": "no abbreviations or doubled commands on Home",
+   "ok": true
+  },
+  {
+   "name": "the Insert drop-down opens",
+   "ok": true
+  },
+  {
+   "name": "…and Insert sheet rows moves the row down",
    "ok": true
   },
   {

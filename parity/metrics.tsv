@@ -3,7 +3,8 @@ C1	features	Excel ribbon/menu commands with a tested EVGSheets command	count of 
 C2	features	Commands claimed but not yet proven by a check	count	lower	-	-	computed	0	parity/catalog.tsv	claimed yes/partial, test "-" or failing
 U1	ui	UI checklist, weighted (target screenshot elements weigh 3)	points	higher	computed	computed	computed	75%	parity/ui.tsv	yes = 1, partial = 0.5, times the row weight; EVGSheets rows need a passing check
 U2	ui	Ribbon tabs	count of 9	higher	9	9	probe:ui.ribbonTabs	9	tools/parity/probe.mjs	tabs named like Excel's main tabs in the accessibility tree
-U3	ui	Ribbon controls on the first tab	count	higher	~60	unmeasured	probe:ui.homeControls	50	tools/parity/probe.mjs	buttons and drop-downs inside the ribbon's toolbars
+U3	ui	Commands reachable from the first tab	count	higher	~60	unmeasured	probe:ui.homeControls	60	tools/parity/probe.mjs	buttons and drop-downs on show plus the rows of those drop-downs (ribbonClarity().reachable)
+U5	ui	Controls on show on the first tab	count	lower	~45	unmeasured	probe:ui.homeClarity	55	tools/parity/probe.mjs	buttons and drop-down triggers laid out at 1650 px; the check also needs every toolbar in a labelled group and no abbreviated or doubled command
 U4	ui	Modal dialogs on EVGUI	count	higher	~100	54	13	25	src/*Dialog.rgr	one WindowCtl dialog per file
 W1	workbook	Target workbook checks that pass	count of 15	higher	15	unmeasured	computed	15	parity/probe.json wb.*	quarterly-sales-dashboard.xlsx opened at 1650×1030
 F1	formulas	Worksheet functions	count of 523	higher	523	513	computed	300	datagrid/src/FormulaFunctions.rgr	names in FormulaFunctions.isKnown
