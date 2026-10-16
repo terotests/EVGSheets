@@ -95,6 +95,8 @@ class SheetsApp {
     def sliderDrag:boolean false
     ; A hover the pointer passed over on its way to an open submenu.
     def holdHover:string ""
+    ; The first tab the strip shows (see tabWindow).
+    def tabFirst:int 0
     def holdMs:double 0.0
     def holdDelayMs:double 400.0
     ; The contextual tab showing: "tabledesign", "chartdesign" or "".
@@ -1709,9 +1711,70 @@ class SheetsApp {
 
     ; The tabs are the workbook's sheets, by index. Rebuilt only when the
     ; names changed, so a reader's place in the list survives an edit.
+    ; The tabs that fit: a window of the strip around the active sheet, so a
+    ; workbook of many sheets scrolls its tabs instead of pushing the status
+    ; line and the zoom off the page. The arrows move the active sheet, and
+    ; the window follows it.
+    fn tabWindow:[int] (all:[int]) {
+        def book:WorkbookModel grid.app.book
+        def n:int (array_length all)
+        if (n == 0) {
+            return all
+        }
+        def budget:int (to_int (pageW * 0.45))
+        if (budget < 160) {
+            budget = 160
+        }
+        def widths:[int]
+        def pos:int 0
+        def i:int 0
+        while (i < n) {
+            def at:int (itemAt all i)
+            def sh:SpreadsheetModel (book.sheetAt(at))
+            push widths (((strlen sh.name) * 7) + 28)
+            if (at == book.activeIndex) {
+                pos = i
+            }
+            i = (i + 1)
+        }
+        if (tabFirst > pos) {
+            tabFirst = pos
+        }
+        if (tabFirst >= n) {
+            tabFirst = 0
+        }
+        def used:int 0
+        def k:int tabFirst
+        while (k <= pos) {
+            used = (used + (itemAt widths k))
+            k = (k + 1)
+        }
+        while ((used > budget) && (tabFirst < pos)) {
+            used = (used - (itemAt widths tabFirst))
+            tabFirst = (tabFirst + 1)
+        }
+        ; Fill the room left: after the active tab, then back before it.
+        def last:int pos
+        while (((last + 1) < n) && ((used + (itemAt widths (last + 1))) <= budget)) {
+            last = (last + 1)
+            used = (used + (itemAt widths last))
+        }
+        while ((tabFirst > 0) && ((used + (itemAt widths (tabFirst - 1))) <= budget)) {
+            tabFirst = (tabFirst - 1)
+            used = (used + (itemAt widths tabFirst))
+        }
+        def out:[int]
+        def j:int tabFirst
+        while (j <= last) {
+            push out (itemAt all j)
+            j = (j + 1)
+        }
+        return out
+    }
+
     fn syncTabs:void () {
         def book:WorkbookModel grid.app.book
-        def order:[int] (this.tabOrder())
+        def order:[int] (this.tabWindow((this.tabOrder())))
         def n:int (array_length order)
         def same:boolean ((array_length tabs.items) == n)
         if same {

@@ -774,7 +774,7 @@
 .sx-pane-row { width: 100%; height: 24px; align-items: flex-start; padding: 0 6px; }
 
 /* The status bar's zoom slider, between − and +. */
-.ui-slider { width: 110px; height: 18px; margin: 0 4px; }
+.ui-slider { width: 110px; height: 18px; margin: 0 4px; flex-shrink: 0; }
 .ui-slider-track {
   background-color: var(--pressed);
   border-radius: 999px;
