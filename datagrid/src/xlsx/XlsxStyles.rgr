@@ -571,6 +571,12 @@ class XlsxStyles {
                                     }
                                 }
                             } {
+                                if ((at.name == "protection") && (at.isEnd == false)) {
+                                    def lk:string (at.attr("locked"))
+                                    if ((lk == "0") || (lk == "false")) {
+                                        st.locked = false
+                                    }
+                                }
                                 if ((at.name == "alignment") && (at.isEnd == false)) {
                                     def h:string (at.attr("horizontal"))
                                     if ((strlen h) > 0) {
@@ -590,6 +596,10 @@ class XlsxStyles {
                                     def wt:string (at.attr("wrapText"))
                                     if ((wt == "1") || (wt == "true")) {
                                         st.wrapText = true
+                                    }
+                                    def ind:string (at.attr("indent"))
+                                    if ((strlen ind) > 0) {
+                                        st.indent = (XlsxStyles.parseInt0(ind))
                                     }
                                     def rot:string (at.attr("textRotation"))
                                     if ((strlen rot) > 0) {

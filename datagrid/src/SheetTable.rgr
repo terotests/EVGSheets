@@ -45,6 +45,15 @@ class SheetTable {
     def totalsRowCount:int 0
     ; Column names, left to right, one per column between c0 and c1.
     def columns:[string]
+    ; How it is drawn (OOXML tableStyleInfo) and whether its header row carries
+    ; filter buttons (an autoFilter element). Excel's own default for a new
+    ; table is TableStyleMedium2 with banded rows and filter buttons.
+    def styleName:string "TableStyleMedium2"
+    def showRowStripes:boolean true
+    def showColumnStripes:boolean false
+    def showFirstColumn:boolean false
+    def showLastColumn:boolean false
+    def showFilter:boolean true
 
     Constructor () {
     }
@@ -124,6 +133,13 @@ class SheetTable {
     ; Does this row fall inside the table at all? `[#This Row]` is only
     ; meaningful where it does — a formula that says it from somewhere else is
     ; asking about a row the table does not have.
+    fn contains:boolean (row:int col:int) {
+        if ((row < r0) || (row > r1)) {
+            return false
+        }
+        return ((col >= c0) && (col <= c1))
+    }
+
     fn containsRow:boolean (row:int) {
         if (row < r0) {
             return false
@@ -140,6 +156,12 @@ class SheetTable {
         t.c1 = c1
         t.headerRowCount = headerRowCount
         t.totalsRowCount = totalsRowCount
+        t.styleName = styleName
+        t.showRowStripes = showRowStripes
+        t.showColumnStripes = showColumnStripes
+        t.showFirstColumn = showFirstColumn
+        t.showLastColumn = showLastColumn
+        t.showFilter = showFilter
         def i:int 0
         while (i < (array_length columns)) {
             push t.columns (itemAt columns i)

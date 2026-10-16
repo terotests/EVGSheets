@@ -1,0 +1,14 @@
+id	dimension	metric	unit	better	excel	gridcraft	evgsheets	target	source	how
+C1	features	Excel ribbon/menu commands with a tested EVGSheets command	count of 290	higher	290	274	computed	145	parity/catalog.tsv	GridCraft's catalog ids; an EVGSheets row scores when its command is registered and its smoke or probe check passed
+C2	features	Commands claimed but not yet proven by a check	count	lower	-	-	computed	0	parity/catalog.tsv	claimed yes/partial, test "-" or failing
+U1	ui	UI checklist, weighted (target screenshot elements weigh 3)	points	higher	computed	computed	computed	75%	parity/ui.tsv	yes = 1, partial = 0.5, times the row weight; EVGSheets rows need a passing check
+U2	ui	Ribbon tabs	count of 9	higher	9	9	probe:ui.ribbonTabs	9	tools/parity/probe.mjs	tabs named like Excel's main tabs in the accessibility tree
+U3	ui	Ribbon controls on the first tab	count	higher	~60	unmeasured	probe:ui.homeControls	50	tools/parity/probe.mjs	buttons and drop-downs inside the ribbon's toolbars
+U4	ui	Modal dialogs on EVGUI	count	higher	~100	54	13	25	src/*Dialog.rgr	one WindowCtl dialog per file
+W1	workbook	Target workbook checks that pass	count of 15	higher	15	unmeasured	computed	15	parity/probe.json wb.*	quarterly-sales-dashboard.xlsx opened at 1650×1030
+F1	formulas	Worksheet functions	count of 523	higher	523	513	computed	300	datagrid/src/FormulaFunctions.rgr	names in FormulaFunctions.isKnown
+CH1	charts	Excel chart subtypes drawn	count of ~60	higher	60	25	15	30	datagrid/src/GridChart.rgr	column, bar, stacked, 100% stacked, histogram, line, line with markers, smooth line, area, stacked area, scatter, bubble, pie, doughnut, box and whisker
+CH2	charts	Charts read from an .xlsx	yes/no	higher	1	1	probe:wb.charts	1	tools/parity/probe.mjs	the target workbook's two charts
+X1	formats	File formats read or written (xlsx, csv, tsv, xls, xlsb, ods, pdf, html)	count of 8	higher	8	8	computed	3	probe	xlsx in and out; CSV and HTML out (probe:cmd.file.exportCsv, cmd.file.exportHtml); TSV only through the clipboard
+P1	performance	Open and first paint of the target workbook	ms	lower	unmeasured	unmeasured	unmeasured	500	datagrid/bench	not yet wired into the benchmark
+T1	tests	Browser checks run by the benchmark	count	higher	-	~1930 tests	computed	300	parity/smoke.json + parity/probe.json	smoke checks + probe checks

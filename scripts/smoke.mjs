@@ -5,10 +5,11 @@
  * real pointer events on the canvas, real keys, the accessibility mirror read
  * back from the DOM.
  *
- *   node scripts/smoke.mjs [--dist dist] [--shots DIR] [--port 8931]
+ *   node scripts/smoke.mjs [--dist dist] [--shots DIR] [--port 8931] [--json FILE]
  *
  * --shots writes screenshots of what it checked, for the README and for a
- * reviewer. Exits non-zero on the first failed check, with every check listed.
+ * reviewer. --json writes every check and its result (the parity report reads
+ * parity/smoke.json). Exits non-zero on the first failed check, with every check listed.
  */
 import http from "node:http";
 import fs from "node:fs";
@@ -26,6 +27,7 @@ const flag = (n, d) => {
 const DIST = path.resolve(flag("--dist", path.join(REPO, "dist")));
 const SHOTS = flag("--shots", "");
 const PORT = parseInt(flag("--port", "8931"), 10);
+const JSON_OUT = flag("--json", "");
 
 function loadPlaywright() {
   const places = [REPO, process.cwd(), "/opt/node-tools"];
@@ -732,5 +734,6 @@ try {
 }
 
 const failed = checks.filter((c) => !c.ok);
+if (JSON_OUT) fs.writeFileSync(JSON_OUT, JSON.stringify({ passed: checks.length - failed.length, checks }, null, 1) + "\n");
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

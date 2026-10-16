@@ -1,0 +1,212 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; TableLook.rgr — how a table (a ListObject) is drawn from its style name.
+; ==============================================================================
+;
+; A table's look is not in its cells. The file names a style
+; (`TableStyleMedium2`) and switches parts of it on and off (banded rows,
+; first column…); the reader draws the header fill, the bands and the bold
+; totals itself. Excel's built-in styles come in three families, each over the
+; theme's accents:
+;
+;     Light1–21   header in bold, bands a light tint of the accent
+;     Medium1–28  header filled with the accent, white bold text, light bands
+;     Dark1–11    header near black, rows in the accent, white text
+;
+; The number picks the accent: (n - 1) mod 7 over black/grey and accents 1–6
+; of the default Office theme. That is the shape of Excel's gallery, not a
+; copy of its definitions; a style this does not know is drawn as Medium2.
+;
+; A cell's own formatting wins: an explicit fill or font colour stays.
+; ==============================================================================
+
+Import "CellStyle.rgr"
+Import "SheetTable.rgr"
+
+class TableLook {
+    sfn accentFor:string (i:int) {
+        def k:int (i % 7)
+        if (k == 0) { return "#595959" }
+        if (k == 1) { return "#4472C4" }
+        if (k == 2) { return "#ED7D31" }
+        if (k == 3) { return "#A5A5A5" }
+        if (k == 4) { return "#FFC000" }
+        if (k == 5) { return "#5B9BD5" }
+        return "#70AD47"
+    }
+
+    ; "TableStyleMedium2" → family "Medium", number 2.
+    sfn family:string (styleName:string) {
+        if ((indexOf styleName "Light") >= 0) {
+            return "Light"
+        }
+        if ((indexOf styleName "Dark") >= 0) {
+            return "Dark"
+        }
+        if ((indexOf styleName "Medium") >= 0) {
+            return "Medium"
+        }
+        return ""
+    }
+
+    sfn number:int (styleName:string) {
+        def n:int 0
+        def i:int 0
+        def len:int (strlen styleName)
+        while (i < len) {
+            def ch:int (charAt styleName i)
+            if ((ch >= 48) && (ch <= 57)) {
+                n = ((n * 10) + (ch - 48))
+            }
+            i = (i + 1)
+        }
+        if (n < 1) {
+            return 2
+        }
+        return n
+    }
+
+    ; `towards` mixed into `hex` by `f` (0 = hex, 1 = towards).
+    sfn mix:string (hex:string towards:string f:double) {
+        def a:[int] (TableLook.rgbOf(hex))
+        def b:[int] (TableLook.rgbOf(towards))
+        def out:string "#"
+        def i:int 0
+        while (i < 3) {
+            def va:double (to_double (itemAt a i))
+            def vb:double (to_double (itemAt b i))
+            def v:int (to_int ((va + ((vb - va) * f)) + 0.5))
+            out = (out + (TableLook.hex2(v)))
+            i = (i + 1)
+        }
+        return out
+    }
+
+    sfn rgbOf:[int] (hex:string) {
+        def out:[int]
+        def s:string hex
+        if ((strlen s) > 0) {
+            if ((charAt s 0) == 35) {
+                s = (substring s 1 (strlen s))
+            }
+        }
+        if ((strlen s) == 8) {
+            s = (substring s 2 8)
+        }
+        if ((strlen s) != 6) {
+            push out 0
+            push out 0
+            push out 0
+            return out
+        }
+        push out (TableLook.hexByte((substring s 0 2)))
+        push out (TableLook.hexByte((substring s 2 4)))
+        push out (TableLook.hexByte((substring s 4 6)))
+        return out
+    }
+
+    sfn hexDigit:int (ch:int) {
+        if ((ch >= 48) && (ch <= 57)) {
+            return (ch - 48)
+        }
+        if ((ch >= 65) && (ch <= 70)) {
+            return (ch - 55)
+        }
+        if ((ch >= 97) && (ch <= 102)) {
+            return (ch - 87)
+        }
+        return 0
+    }
+
+    sfn hexByte:int (s:string) {
+        return (((TableLook.hexDigit((charAt s 0))) * 16) + (TableLook.hexDigit((charAt s 1))))
+    }
+
+    sfn hex2:string (v:int) {
+        def digits:string "0123456789ABCDEF"
+        def x:int v
+        if (x < 0) {
+            x = 0
+        }
+        if (x > 255) {
+            x = 255
+        }
+        return ((substring digits (idiv x 16) ((idiv x 16) + 1)) + (substring digits (x % 16) ((x % 16) + 1)))
+    }
+
+    ; The style a cell of `t` is drawn with, given its own style `st`. Returns
+    ; `st` itself when the table adds nothing.
+    sfn apply:CellStyle (t:SheetTable row:int col:int st:CellStyle) {
+        def fam:string (TableLook.family(t.styleName))
+        if ((strlen fam) == 0) {
+            return st
+        }
+        def accent:string (TableLook.accentFor(((TableLook.number(t.styleName)) - 1)))
+        def header:boolean ((t.hasHeader()) && (row == t.r0))
+        def totals:boolean ((t.hasTotals()) && (row == t.r1))
+        def fill:string ""
+        def text:string ""
+        def bold:boolean false
+        if header {
+            bold = true
+            if (fam == "Medium") {
+                fill = accent
+                text = "#FFFFFF"
+            }
+            if (fam == "Dark") {
+                fill = "#262626"
+                text = "#FFFFFF"
+            }
+        } {
+            if totals {
+                bold = true
+                if (fam == "Dark") {
+                    fill = (TableLook.mix(accent "#000000" 0.5))
+                    text = "#FFFFFF"
+                }
+            } {
+                def k:int (row - (t.dataR0()))
+                def band:boolean false
+                if (t.showRowStripes && ((k % 2) == 0)) {
+                    band = true
+                }
+                if (t.showColumnStripes && (((col - t.c0) % 2) == 0)) {
+                    band = true
+                }
+                if (fam == "Dark") {
+                    fill = (TableLook.mix(accent "#000000" 0.25))
+                    if band {
+                        fill = accent
+                    }
+                    text = "#FFFFFF"
+                } {
+                    if band {
+                        fill = (TableLook.mix(accent "#FFFFFF" 0.8))
+                    }
+                }
+                if (t.showFirstColumn && (col == t.c0)) {
+                    bold = true
+                }
+                if (t.showLastColumn && (col == t.c1)) {
+                    bold = true
+                }
+            }
+        }
+        if (((strlen fill) == 0) && ((strlen text) == 0) && (bold == false)) {
+            return st
+        }
+        def o:CellStyle (st.copy())
+        if (((strlen fill) > 0) && (st.hasFill == false)) {
+            o.hasFill = true
+            o.fillRgb = fill
+        }
+        if (((strlen text) > 0) && ((strlen st.textRgb) == 0)) {
+            o.textRgb = text
+        }
+        if bold {
+            o.bold = true
+        }
+        return o
+    }
+}

@@ -339,6 +339,14 @@ export async function mountSheets(container, options = {}) {
       if (options.onSave) options.onSave(raw, name, controller);
       else saveBlob(new Blob([raw], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
       app.grid.markSavedAs(name);
+      return;
+    }
+    if (want === "exportCsv" || want === "exportHtml") {
+      const csv = want === "exportCsv";
+      const g = app.grid.app;
+      const text = csv ? g.sheetCsv() : g.sheetHtml();
+      const base = (app.grid.suggestSaveName() || "workbook.xlsx").replace(/\.xlsx$/i, "");
+      saveBlob(new Blob([text], { type: csv ? "text/csv" : "text/html" }), base + (csv ? ".csv" : ".html"));
     }
   }
 

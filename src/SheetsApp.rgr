@@ -429,12 +429,19 @@ class SheetsApp {
         menubar.addMenu("insert" "Insert")
         menubar.addMenu("format" "Format")
         menubar.addMenu("data" "Data")
+        menubar.addMenu("pagelayout" "Page Layout")
+        menubar.addMenu("formulas" "Formulas")
+        menubar.addMenu("review" "Review")
 
         def f:MenuCtl (menubar.attachMenu("file"))
         this.item(f "new" "New workbook" "file.new" "" "")
         this.item(f "open" "Open…" "file.open" "" "Ctrl+O")
         f.addSeparator()
         this.item(f "save" "Download .xlsx" "file.saveAs" "" "Ctrl+S")
+        this.item(f "csv" "Download .csv" "file.exportCsv" "" "")
+        this.item(f "html" "Download .html" "file.exportHtml" "" "")
+        f.addSeparator()
+        this.item(f "close" "Close" "file.close" "" "")
 
         def e:MenuCtl (menubar.attachMenu("edit"))
         this.item(e "undo" "Undo" "edit.undo" "" "Ctrl+Z")
@@ -467,6 +474,11 @@ class SheetsApp {
         v.addSeparator()
         this.item(v "freeze" "Freeze panes at selection" "view.freeze.here" "" "")
         this.item(v "unfreeze" "Unfreeze panes" "view.freeze.none" "" "")
+        this.item(v "freezetop" "Freeze top row" "view.freezeTopRow" "" "")
+        this.item(v "freezefirst" "Freeze first column" "view.freezeFirstColumn" "" "")
+        v.addSeparator()
+        this.item(v "gridlines" "Gridlines" "view.gridlines" "" "")
+        this.item(v "headings" "Headings" "view.headings" "" "")
         this.act("rtl" "view.rtl" "" "")
         def c5:UiItem (v.addCheckbox("rtl" "Right to left" false))
 
@@ -477,6 +489,7 @@ class SheetsApp {
         this.item(ins "colright" "Column right" "insert.column.right" "" "")
         ins.addSeparator()
         this.item(ins "chart" "Chart…" "insert.chart" "" "")
+        this.item(ins "table" "Table" "insert.table" "" "Ctrl+T")
         this.item(ins "link" "Link…" "insert.link" "" "Ctrl+K")
         ins.addSeparator()
         this.item(ins "sheet" "New sheet" "sheet.add" "" "")
@@ -487,6 +500,10 @@ class SheetsApp {
         this.item(fm "fitalic" "Italic" "format.italic" "" "Ctrl+I")
         this.item(fm "funderline" "Underline" "format.underline" "" "Ctrl+U")
         this.item(fm "fstrike" "Strikethrough" "format.strike" "" "")
+        def textSub:UiItem (fm.addSub("textmore" "Text" false))
+        this.kid(textSub "fdunder" "Double underline" "home.doubleUnderline" "")
+        this.kid(textSub "fbigger" "Bigger text" "format.size.up" "")
+        this.kid(textSub "fsmaller" "Smaller text" "format.size.down" "")
         fm.addSeparator()
         def numSub:UiItem (fm.addSub("number" "Number" false))
         this.kid(numSub "nf-currency" "Currency" "format.numfmt" "currency")
@@ -505,8 +522,24 @@ class SheetsApp {
         this.kid(alignSub "al-top" "Top" "format.valign" "top")
         this.kid(alignSub "al-middle" "Middle" "format.valign" "center")
         this.kid(alignSub "al-bottom" "Bottom" "format.valign" "bottom")
+        this.kid(alignSub "al-indent" "Increase indent" "home.increaseIndent" "")
+        this.kid(alignSub "al-outdent" "Decrease indent" "home.decreaseIndent" "")
+        this.kid(alignSub "al-rotate" "Angle counterclockwise" "home.orientation" "counterclockwise")
         this.item(fm "fwrap" "Wrap text" "format.wrap" "" "")
-        this.item(fm "fmerge" "Merge cells" "format.merge" "" "")
+        def mergeSub:UiItem (fm.addSub("merge" "Merge" false))
+        this.kid(mergeSub "fmerge" "Merge cells" "format.merge" "")
+        this.kid(mergeSub "fmergecenter" "Merge & center" "home.mergeCenter" "")
+        this.kid(mergeSub "fmergeacross" "Merge across" "home.mergeAcross" "")
+        this.kid(mergeSub "funmerge" "Unmerge cells" "home.unmergeCells" "")
+        def styleSub:UiItem (fm.addSub("cellstyles" "Cell styles" false))
+        def styleNames:[string] ([] _:string ("Normal" "Good" "Bad" "Neutral" "Title" "Heading 1" "Total" "Note" "Input" "Calculation" "Warning Text"))
+        def sti:int 0
+        while (sti < (array_length styleNames)) {
+            def stn:string (itemAt styleNames sti)
+            this.kid(styleSub ("cs-" + (to_string sti)) stn "home.cellStyle" stn)
+            sti = (sti + 1)
+        }
+        this.item(fm "ftable" "Format as table" "home.formatAsTable" "" "")
         fm.addSeparator()
         this.item(fm "ftextcolor" "Text colour…" "format.color" "" "")
         this.item(fm "ffill" "Fill colour…" "format.fill" "" "")
@@ -516,6 +549,14 @@ class SheetsApp {
         this.item(fm "fautocol" "Fit column width" "format.autofit.column" "" "")
         this.item(fm "fautorow" "Fit row height" "format.autofit.row" "" "")
         this.item(fm "fclear" "Clear formatting" "format.clear" "" "")
+        this.item(fm "fclearall" "Clear all" "edit.clearAll" "" "")
+        def hideSub:UiItem (fm.addSub("hide" "Hide & unhide" false))
+        this.kid(hideSub "fhiderows" "Hide rows" "home.hideRows" "")
+        this.kid(hideSub "funhiderows" "Unhide rows" "home.unhideRows" "")
+        this.kid(hideSub "fhidecols" "Hide columns" "home.hideColumns" "")
+        this.kid(hideSub "funhidecols" "Unhide columns" "home.unhideColumns" "")
+        MenuCtl.addKidSeparator(hideSub)
+        this.kid(hideSub "flock" "Lock or unlock cell" "home.lockCell" "")
 
         def d:MenuCtl (menubar.attachMenu("data"))
         this.item(d "dsortasc" "Sort A → Z" "data.sort.asc" "" "")
@@ -526,6 +567,53 @@ class SheetsApp {
         d.addSeparator()
         this.item(d "ddelrows" "Delete rows" "delete.rows" "" "")
         this.item(d "ddelcols" "Delete columns" "delete.columns" "" "")
+        d.addSeparator()
+        this.item(d "ddedupe" "Remove duplicates" "data.removeDuplicates" "" "")
+        this.item(d "dsplit" "Text to columns" "data.textToColumns" "" "")
+        this.item(d "dfilldown" "Fill down" "edit.fillDown" "" "Ctrl+D")
+        this.item(d "dfillright" "Fill right" "edit.fillRight" "" "Ctrl+R")
+        this.item(d "dseries" "Fill series" "edit.fillSeries" "" "")
+
+        def pl:MenuCtl (menubar.attachMenu("pagelayout"))
+        this.item(pl "pl-portrait" "Portrait" "pageLayout.orientation" "portrait" "")
+        this.item(pl "pl-landscape" "Landscape" "pageLayout.orientation" "landscape" "")
+        def sizeSub:UiItem (pl.addSub("pl-size" "Size" false))
+        this.kid(sizeSub "pl-letter" "Letter" "pageLayout.size" "letter")
+        this.kid(sizeSub "pl-a4" "A4" "pageLayout.size" "a4")
+        this.kid(sizeSub "pl-legal" "Legal" "pageLayout.size" "legal")
+        def marginSub:UiItem (pl.addSub("pl-margins" "Margins" false))
+        this.kid(marginSub "pl-mnormal" "Normal" "pageLayout.margins" "normal")
+        this.kid(marginSub "pl-mwide" "Wide" "pageLayout.margins" "wide")
+        this.kid(marginSub "pl-mnarrow" "Narrow" "pageLayout.margins" "narrow")
+        pl.addSeparator()
+        this.item(pl "pl-area" "Set print area" "pageLayout.printArea" "set" "")
+        this.item(pl "pl-areaclear" "Clear print area" "pageLayout.printArea" "clear" "")
+        this.item(pl "pl-titles" "Print titles (selected rows)" "pageLayout.printTitles" "" "")
+        this.item(pl "pl-break" "Insert page break" "pageLayout.breaks" "insert" "")
+        this.item(pl "pl-breakreset" "Reset all page breaks" "pageLayout.breaks" "reset" "")
+        pl.addSeparator()
+        this.item(pl "pl-grid" "Print gridlines" "pageLayout.printGridlines" "" "")
+        this.item(pl "pl-head" "Print headings" "pageLayout.printHeadings" "" "")
+        this.item(pl "pl-fit" "Fit all columns on one page" "pageLayout.scaleToFit" "1,0" "")
+
+        def fx:MenuCtl (menubar.attachMenu("formulas"))
+        this.item(fx "fx-autosum" "AutoSum" "formulas.autoSum" "" "Alt+=")
+        this.item(fx "fx-insert" "Insert function" "formulas.insertFunction" "" "Shift+F3")
+        fx.addSeparator()
+        this.item(fx "fx-show" "Show formulas" "formulas.showFormulas" "" "Ctrl+`")
+        this.item(fx "fx-trace" "Select precedents" "formulas.tracePrecedents" "" "Ctrl+[")
+        this.item(fx "fx-calc" "Calculate now" "formulas.calculateNow" "" "F9")
+
+        def rv:MenuCtl (menubar.attachMenu("review"))
+        this.item(rv "rv-next" "Next note" "review.nextComment" "" "")
+        this.item(rv "rv-prev" "Previous note" "review.previousComment" "" "")
+        this.item(rv "rv-delete" "Delete note" "review.deleteComment" "" "")
+        rv.addSeparator()
+        this.item(rv "rv-protect" "Protect sheet" "review.protectSheet" "" "")
+        this.item(rv "rv-unprotect" "Unprotect sheet" "review.unprotectSheet" "" "")
+        this.item(rv "rv-book" "Protect workbook structure" "review.protectWorkbook" "" "")
+        rv.addSeparator()
+        this.item(rv "rv-stats" "Workbook statistics" "review.workbookStatistics" "" "")
 
         ; --- the ribbon dropdowns -----------------------------------------
         fontMenu = (new MenuCtl)
@@ -1213,10 +1301,10 @@ class SheetsApp {
         if app.editing {
             if ((strlen app.editBuf) > 0) {
                 if ((charAt app.editBuf 0) == 61) {
-                    return "Editing a formula — click cells to insert references"
+                    return "Enter    Editing a formula — click cells to insert references"
                 }
             }
-            return "Editing — Enter to keep, Esc to cancel"
+            return "Edit    Enter to keep, Esc to cancel"
         }
         def s:string app.view.status
         if ((strlen s) > 1) {
@@ -1224,7 +1312,7 @@ class SheetsApp {
             if (((charAt s 0) == 118) && ((strlen s) < 8)) {
                 return "Ready"
             }
-            return s
+            return ("Ready    " + s)
         }
         return "Ready"
     }

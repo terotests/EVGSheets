@@ -1,0 +1,457 @@
+{
+ "passed": 113,
+ "checks": [
+  {
+   "name": "a plain visit opens an empty workbook",
+   "ok": true
+  },
+  {
+   "name": "the editor started",
+   "ok": true
+  },
+  {
+   "name": "the sample workbook is open",
+   "ok": true
+  },
+  {
+   "name": "the tabs show the sheet the grid shows",
+   "ok": true
+  },
+  {
+   "name": "the scene has commands",
+   "ok": true
+  },
+  {
+   "name": "typing goes into the cell",
+   "ok": true
+  },
+  {
+   "name": "a paste fills the selected range, format and all",
+   "ok": true
+  },
+  {
+   "name": "Backspace clears the selected range",
+   "ok": true
+  },
+  {
+   "name": "Ctrl+Shift+V pastes the value without its format",
+   "ok": true
+  },
+  {
+   "name": "outside text loses its \\r and keeps the row below",
+   "ok": true
+  },
+  {
+   "name": "a block fills a range it divides, formulas re-based",
+   "ok": true
+  },
+  {
+   "name": "and one undo takes the whole fill away",
+   "ok": true
+  },
+  {
+   "name": "the Bold button toggles the cell",
+   "ok": true
+  },
+  {
+   "name": "…and the keyboard went back to the sheet",
+   "ok": true
+  },
+  {
+   "name": "the reader is told Bold is pressed",
+   "ok": true
+  },
+  {
+   "name": "a menubar menu opens",
+   "ok": true
+  },
+  {
+   "name": "the Format menu opens under Format",
+   "ok": true
+  },
+  {
+   "name": "hovering Insert switches to the Insert menu, under Insert",
+   "ok": true
+  },
+  {
+   "name": "Escape closes it",
+   "ok": true
+  },
+  {
+   "name": "the size dropdown opens",
+   "ok": true
+  },
+  {
+   "name": "choosing 14 sets the size",
+   "ok": true
+  },
+  {
+   "name": "…and closes the menu",
+   "ok": true
+  },
+  {
+   "name": "right click opens the context menu",
+   "ok": true
+  },
+  {
+   "name": "right click on a column header opens the column menu",
+   "ok": true
+  },
+  {
+   "name": "…with column C selected",
+   "ok": true
+  },
+  {
+   "name": "…naming the column it acts on",
+   "ok": true
+  },
+  {
+   "name": "Insert 1 column left moves C to D",
+   "ok": true
+  },
+  {
+   "name": "…and undo puts it back",
+   "ok": true
+  },
+  {
+   "name": "right click on a row header opens the row menu",
+   "ok": true
+  },
+  {
+   "name": "…with row 5 selected",
+   "ok": true
+  },
+  {
+   "name": "the header arrow opens the column menu",
+   "ok": true
+  },
+  {
+   "name": "…for column E, and not the core's popup",
+   "ok": true
+  },
+  {
+   "name": "Ctrl+click on headers selects B and D",
+   "ok": true
+  },
+  {
+   "name": "…and a Mac Ctrl+click opens no menu",
+   "ok": true
+  },
+  {
+   "name": "right click on B keeps both columns selected",
+   "ok": true
+  },
+  {
+   "name": "a row header press selects the row, with no popup",
+   "ok": true
+  },
+  {
+   "name": "a cell gets the cell menu back",
+   "ok": true
+  },
+  {
+   "name": "Ctrl+F opens Find and replace",
+   "ok": true
+  },
+  {
+   "name": "…as an EVGUI dialog, not the core's window",
+   "ok": true
+  },
+  {
+   "name": "…with focus in the Find field",
+   "ok": true
+  },
+  {
+   "name": "Enter finds the next match",
+   "ok": true
+  },
+  {
+   "name": "a click ticks Match case",
+   "ok": true
+  },
+  {
+   "name": "Find next by pointer",
+   "ok": true
+  },
+  {
+   "name": "Close closes it",
+   "ok": true
+  },
+  {
+   "name": "…and the query is kept",
+   "ok": true
+  },
+  {
+   "name": "Escape closes it and the sheet has the keyboard",
+   "ok": true
+  },
+  {
+   "name": "Paste special opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "a click chooses Values only",
+   "ok": true
+  },
+  {
+   "name": "Paste pastes the value and closes",
+   "ok": true
+  },
+  {
+   "name": "…and the next paste is a full one again",
+   "ok": true
+  },
+  {
+   "name": "it opens again",
+   "ok": true
+  },
+  {
+   "name": "Escape cancels it",
+   "ok": true
+  },
+  {
+   "name": "Rename opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "a refused name keeps it open and says why",
+   "ok": true
+  },
+  {
+   "name": "Enter renames and closes",
+   "ok": true
+  },
+  {
+   "name": "Ctrl+K opens Link as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "Enter sets the link and the text",
+   "ok": true
+  },
+  {
+   "name": "Remove takes the link off",
+   "ok": true
+  },
+  {
+   "name": "Fill colour opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "a swatch previews on the sheet",
+   "ok": true
+  },
+  {
+   "name": "Escape takes the preview back",
+   "ok": true
+  },
+  {
+   "name": "a typed hex and Enter apply the text colour",
+   "ok": true
+  },
+  {
+   "name": "…as one undo",
+   "ok": true
+  },
+  {
+   "name": "Borders opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "Box, Medium and red make the spec",
+   "ok": true
+  },
+  {
+   "name": "Apply draws them",
+   "ok": true
+  },
+  {
+   "name": "Conditional formatting opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "Enter adds the rule and keeps it open",
+   "ok": true
+  },
+  {
+   "name": "the rule is listed, painted in its fill",
+   "ok": true
+  },
+  {
+   "name": "choosing a rule loads it into the form",
+   "ok": true
+  },
+  {
+   "name": "Enter on a chosen rule updates it in place",
+   "ok": true
+  },
+  {
+   "name": "Delete rule removes it",
+   "ok": true
+  },
+  {
+   "name": "undo brings the deleted rule back",
+   "ok": true
+  },
+  {
+   "name": "undo again takes the edit back",
+   "ok": true
+  },
+  {
+   "name": "redo deletes it again",
+   "ok": true
+  },
+  {
+   "name": "Clear takes it off, Close closes",
+   "ok": true
+  },
+  {
+   "name": "Data validation opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "Add rule puts a list rule on the cell",
+   "ok": true
+  },
+  {
+   "name": "the cell's list opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "Choose writes the value",
+   "ok": true
+  },
+  {
+   "name": "Insert chart makes the chart and opens its editor",
+   "ok": true
+  },
+  {
+   "name": "…offering only the types the data suits",
+   "ok": true
+  },
+  {
+   "name": "the type is a drop-down",
+   "ok": true
+  },
+  {
+   "name": "a type chosen redraws the chart on the sheet",
+   "ok": true
+  },
+  {
+   "name": "Escape leaves the chart on the sheet",
+   "ok": true
+  },
+  {
+   "name": "its editor deletes it",
+   "ok": true
+  },
+  {
+   "name": "the SQL box opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "the connection window opens as an EVGUI dialog",
+   "ok": true
+  },
+  {
+   "name": "Connect leaves the host a request",
+   "ok": true
+  },
+  {
+   "name": "Escape closes it",
+   "ok": true
+  },
+  {
+   "name": "a tab shows its sheet",
+   "ok": true
+  },
+  {
+   "name": "right click on a tab opens the sheet menu",
+   "ok": true
+  },
+  {
+   "name": "…on that sheet",
+   "ok": true
+  },
+  {
+   "name": "…above the tabs",
+   "ok": true
+  },
+  {
+   "name": "Duplicate adds a copy after it, shown",
+   "ok": true
+  },
+  {
+   "name": "Delete… asks before deleting",
+   "ok": true
+  },
+  {
+   "name": "…Escape keeps the sheet",
+   "ok": true
+  },
+  {
+   "name": "…and Delete deletes it",
+   "ok": true
+  },
+  {
+   "name": "dragging a tab reorders the sheets",
+   "ok": true
+  },
+  {
+   "name": "…and the dragged sheet stays shown",
+   "ok": true
+  },
+  {
+   "name": "…and moves back by command",
+   "ok": true
+  },
+  {
+   "name": "the status bar has the selection's figures",
+   "ok": true
+  },
+  {
+   "name": "F6 leaves the sheet for the chrome",
+   "ok": true
+  },
+  {
+   "name": "the tree has a menubar, toolbars, a grid and tabs",
+   "ok": true
+  },
+  {
+   "name": "the mirror put real buttons on the page",
+   "ok": true
+  },
+  {
+   "name": "?ui=viewer is read-only",
+   "ok": true
+  },
+  {
+   "name": "…with no menubar and no ribbon",
+   "ok": true
+  },
+  {
+   "name": "typing changes nothing",
+   "ok": true
+  },
+  {
+   "name": "?tools= keeps only the tools asked for",
+   "ok": true
+  },
+  {
+   "name": "…so Underline is not there",
+   "ok": true
+  },
+  {
+   "name": "four editors on one page",
+   "ok": true
+  },
+  {
+   "name": "the slide's sheet switches to editing in place",
+   "ok": true
+  },
+  {
+   "name": "no errors in any page",
+   "ok": true
+  }
+ ]
+}

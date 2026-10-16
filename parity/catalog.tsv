@@ -1,0 +1,301 @@
+tab	group	feature	command	gridcraft	evgsheets_cmd	evgsheets	test	note
+File	File	New	file.new	live	file.new	yes	smoke:a plain visit opens an empty workbook	
+File	File	Open	file.open	live	file.open	yes	probe:wb.opens	opens .xlsx; the probe opens the target workbook
+File	File	Save	file.save	live	file.saveAs	partial	probe:cmd.file.saveAs	Download .xlsx; no save in place
+File	File	Save As	file.saveAs	live	file.saveAs	yes	probe:cmd.file.saveAs	Download .xlsx
+File	File	Close	file.close	live	file.close	partial	probe:cmd.file.close	starts an empty workbook; the page stays
+File	File	Print	file.print	live	file.print	partial	-	core command only, no menu entry
+File	Export	Export to PDF	file.exportPdf	live	script.export.pdf	partial	-	report scripts export PDF; no sheet export
+File	Export	CSV	file.exportCsv	live	file.exportCsv	yes	probe:cmd.file.exportCsv	active sheet, displayed values
+File	Export	Web Page	file.exportHtml	live	file.exportHtml	yes	probe:cmd.file.exportHtml	active sheet as one HTML table
+File	Info	Properties	file.properties	live	-	no	-	
+File	Options	Options	file.options	live	-	no	-	
+Home	Clipboard	Paste	edit.paste	live	sx:paste	yes	smoke:a paste fills the selected range, format and all	
+Home	Clipboard	Paste Special	edit.pasteSpecial	live	edit.pasteSpecial	yes	smoke:Paste special opens as an EVGUI dialog	
+Home	Clipboard	Cut	edit.cut	live	edit.cut	yes	-	
+Home	Clipboard	Copy	edit.copy	live	edit.copy	yes	smoke:a paste fills the selected range, format and all	
+Home	Clipboard	Format Painter	edit.formatPainter	live	edit.formatPainter	yes	-	
+Home	Font	Font	home.fontName	live	format.font	yes	probe:cmd.home.fontName	5 fonts
+Home	Font	Font Size	home.fontSize	live	format.size	yes	smoke:choosing 14 sets the size	
+Home	Font	Increase Font Size	home.increaseFontSize	live	format.size.up	yes	probe:cmd.home.increaseFontSize	Format menu: Bigger text
+Home	Font	Decrease Font Size	home.decreaseFontSize	live	format.size.down	yes	probe:cmd.home.decreaseFontSize	Format menu: Smaller text
+Home	Font	Bold	home.bold	live	format.bold	yes	smoke:the Bold button toggles the cell	
+Home	Font	Italic	home.italic	live	format.italic	yes	probe:cmd.home.italic	
+Home	Font	Underline	home.underline	live	format.underline	yes	probe:cmd.home.underline	
+Home	Font	Double Underline	home.doubleUnderline	live	home.doubleUnderline	yes	probe:cmd.home.doubleUnderline	
+Home	Font	Strikethrough	home.strikethrough	live	format.strike	yes	probe:cmd.home.strikethrough	
+Home	Font	Superscript	home.superscript	live	-	no	-	
+Home	Font	Subscript	home.subscript	live	-	no	-	
+Home	Font	Borders	home.borders	live	format.border	yes	smoke:Apply draws them	
+Home	Font	Draw Border	home.drawBorder	live	home.drawBorder	yes	probe:cmd.home.drawBorder	border presets; no pen
+Home	Font	Fill Color	home.fillColor	live	format.fill	yes	smoke:Fill colour opens as an EVGUI dialog	
+Home	Font	Font Color	home.fontColor	live	format.color	yes	smoke:a typed hex and Enter apply the text colour	
+Home	Alignment	Top Align	home.alignTop	live	format.valign	yes	probe:cmd.home.alignTop	
+Home	Alignment	Middle Align	home.alignMiddle	live	format.valign	yes	probe:cmd.home.alignMiddle	
+Home	Alignment	Bottom Align	home.alignBottom	live	format.valign	yes	probe:cmd.home.alignBottom	
+Home	Alignment	Orientation	home.orientation	live	home.orientation	yes	probe:cmd.home.orientation	
+Home	Alignment	Align Left	home.alignLeft	live	format.align	yes	probe:cmd.home.alignLeft	
+Home	Alignment	Center	home.alignCenter	live	format.align	yes	probe:cmd.home.alignCenter	
+Home	Alignment	Align Right	home.alignRight	live	format.align	yes	probe:cmd.home.alignRight	
+Home	Alignment	Decrease Indent	home.decreaseIndent	live	home.decreaseIndent	yes	probe:cmd.home.decreaseIndent	
+Home	Alignment	Increase Indent	home.increaseIndent	live	home.increaseIndent	yes	probe:cmd.home.increaseIndent	
+Home	Alignment	Wrap Text	home.wrapText	live	format.wrap	yes	probe:cmd.home.wrapText	
+Home	Alignment	Merge & Center	home.mergeCenter	live	home.mergeCenter	yes	probe:cmd.home.mergeCenter	
+Home	Alignment	Merge Across	home.mergeAcross	live	home.mergeAcross	yes	probe:cmd.home.mergeAcross	
+Home	Alignment	Merge Cells	home.mergeCells	live	format.merge	yes	probe:cmd.home.mergeCells	
+Home	Alignment	Unmerge Cells	home.unmergeCells	live	home.unmergeCells	yes	probe:cmd.home.unmergeCells	
+Home	Number	Number Format	home.numberFormat	live	format.numfmt	partial	probe:cmd.home.numberFormat	5 presets, no format list or custom codes
+Home	Number	Accounting Number Format	home.accounting	live	format.numfmt	partial	probe:cmd.home.accounting	currency, not accounting alignment
+Home	Number	Percent Style	home.percent	live	format.numfmt	yes	probe:cmd.home.percent	
+Home	Number	Comma Style	home.comma	live	format.numfmt	yes	probe:cmd.home.comma	
+Home	Number	Increase Decimal	home.increaseDecimal	live	format.decimals	yes	probe:cmd.home.increaseDecimal	
+Home	Number	Decrease Decimal	home.decreaseDecimal	live	format.decimals	yes	probe:cmd.home.decreaseDecimal	
+Home	Styles	Conditional Formatting	home.conditionalFormat	live	home.conditionalFormat	yes	probe:cmd.home.conditionalFormat	quick rules by argument (colorScale, greaterThan:N); no argument opens the dialog
+Home	Styles	Clear Rules	home.clearRules	live	home.clearRules	yes	probe:cmd.home.clearRules	
+Home	Styles	Manage Rules	home.manageRules	live	format.conditional	yes	smoke:Delete rule removes it	
+Home	Styles	Format as Table	home.formatAsTable	live	home.formatAsTable	yes	probe:cmd.home.formatAsTable	
+Home	Styles	Cell Styles	home.cellStyle	live	home.cellStyle	yes	probe:cmd.home.cellStyle	Good/Bad/Neutral/Title/Heading 1/Total/Note/Input/Calculation/Warning Text
+Home	Styles	New Cell Style	home.newCellStyle	live	-	no	-	
+Home	Cells	Insert Cells	home.insertCells	live	home.insertCells	partial	probe:cmd.home.insertCells	shifts cells; references into the moved cells are not re-pointed
+Home	Cells	Insert Sheet Rows	home.insertRows	live	insert.row.above	yes	smoke:right click on a row header opens the row menu	
+Home	Cells	Insert Sheet Columns	home.insertColumns	live	insert.column.left	yes	smoke:Insert 1 column left moves C to D	
+Home	Cells	Insert Sheet	home.insertSheet	live	sheet.add	yes	probe:cmd.home.insertSheet	
+Home	Cells	Delete Cells	home.deleteCells	live	home.deleteCells	partial	probe:cmd.home.deleteCells	shifts cells; references into the moved cells are not re-pointed
+Home	Cells	Delete Sheet Rows	home.deleteRows	live	delete.rows	yes	probe:cmd.home.deleteRows	
+Home	Cells	Delete Sheet Columns	home.deleteColumns	live	delete.columns	yes	probe:cmd.home.deleteColumns	
+Home	Cells	Delete Sheet	home.deleteSheet	live	sheet.delete	yes	smoke:…and Delete deletes it	
+Home	Cells	Row Height	home.rowHeight	live	home.rowHeight	yes	probe:cmd.home.rowHeight	
+Home	Cells	AutoFit Row Height	home.autofitRowHeight	live	format.autofit.row	yes	-	
+Home	Cells	Column Width	home.columnWidth	live	home.columnWidth	yes	probe:cmd.home.columnWidth	
+Home	Cells	AutoFit Column Width	home.autofitColumnWidth	live	format.autofit.column	yes	probe:cmd.home.autofitColumnWidth	
+Home	Cells	Default Width	home.defaultWidth	live	home.defaultWidth	yes	probe:cmd.home.defaultWidth	
+Home	Cells	Hide Rows	home.hideRows	live	home.hideRows	yes	probe:cmd.home.hideRows	
+Home	Cells	Hide Columns	home.hideColumns	live	home.hideColumns	yes	probe:cmd.home.hideColumns	
+Home	Cells	Unhide Rows	home.unhideRows	live	home.unhideRows	yes	probe:cmd.home.unhideRows	
+Home	Cells	Unhide Columns	home.unhideColumns	live	home.unhideColumns	yes	probe:cmd.home.unhideColumns	
+Home	Cells	Hide Sheet	sheet.hide	live	sheet.hide	yes	probe:cmd.sheet.hide	
+Home	Cells	Unhide Sheet	sheet.unhide	live	sheet.unhide	yes	probe:cmd.sheet.unhide	
+Home	Cells	Rename Sheet	sheet.rename	live	sheet.rename	yes	smoke:Enter renames and closes	
+Home	Cells	Move or Copy Sheet	sheet.move	live	sheet.move	partial	smoke:dragging a tab reorders the sheets	move by drag or menu, duplicate; no Move or Copy dialog
+Home	Cells	Tab Color	sheet.tabColor	live	sheet.tabColor	yes	probe:cmd.sheet.tabColor	
+Home	Cells	Protect Sheet	review.protectSheet	live	review.protectSheet	yes	probe:cmd.review.protectSheet	locked cells refuse edits; no password
+Home	Cells	Lock Cell	home.lockCell	live	home.lockCell	yes	probe:cmd.home.lockCell	
+Home	Cells	Format Cells	home.formatCells	live	-	no	-	
+Home	Editing	AutoSum	formulas.autoSum	live	formulas.autoSum	yes	probe:cmd.formulas.autoSum	
+Home	Editing	Fill Down	edit.fillDown	live	edit.fillDown	yes	probe:cmd.edit.fillDown	
+Home	Editing	Fill Right	edit.fillRight	live	edit.fillRight	yes	probe:cmd.edit.fillRight	
+Home	Editing	Fill Up	edit.fillUp	live	edit.fillUp	yes	probe:cmd.edit.fillUp	
+Home	Editing	Fill Left	edit.fillLeft	live	edit.fillLeft	yes	probe:cmd.edit.fillLeft	
+Home	Editing	Series	edit.fillSeries	live	edit.fillSeries	yes	probe:cmd.edit.fillSeries	
+Home	Editing	Flash Fill	edit.flashFill	live	-	no	-	
+Home	Editing	Clear All	edit.clearAll	live	edit.clearAll	yes	probe:cmd.edit.clearAll	
+Home	Editing	Clear Formats	edit.clearFormats	live	format.clear	yes	probe:cmd.edit.clearFormats	
+Home	Editing	Clear Contents	edit.clearContents	live	edit.clear	yes	smoke:Backspace clears the selected range	
+Home	Editing	Clear Comments	edit.clearComments	live	edit.clearComments	yes	probe:cmd.edit.clearComments	
+Home	Editing	Clear Hyperlinks	edit.clearHyperlinks	live	edit.clearHyperlinks	yes	probe:cmd.edit.clearHyperlinks	
+Home	Editing	Sort A to Z	data.sortAscending	live	data.sort.asc	yes	probe:cmd.data.sortAscending	
+Home	Editing	Sort Z to A	data.sortDescending	live	data.sort.desc	yes	probe:cmd.data.sortDescending	
+Home	Editing	Custom Sort	data.sort	live	data.sort	partial	probe:cmd.data.sort	one key by argument ("W desc"); no Sort dialog
+Home	Editing	Filter	data.filter	live	data.filter.clear	partial	-	column filter popup in the core; no Filter toggle command
+Home	Editing	Clear Filter	data.clearFilter	live	data.filter.clear	yes	-	
+Home	Editing	Reapply	data.reapply	live	-	no	-	
+Home	Editing	Find	edit.find	live	edit.find	yes	smoke:Enter finds the next match	
+Home	Editing	Replace	edit.replace	live	edit.find	yes	smoke:Ctrl+F opens Find and replace	
+Home	Editing	Go To	edit.goTo	live	edit.goTo	yes	probe:cmd.edit.goTo	
+Home	Editing	Go To Special	edit.goToSpecial	live	edit.goToSpecial	yes	probe:cmd.edit.goToSpecial	
+Home	Add-ins	Add-ins	home.addIns	live	-	no	-	
+Insert	Tables	PivotTable	insert.pivotTable	live	-	no	-	
+Insert	Tables	Recommended PivotTables	insert.recommendedPivotTables	live	-	no	-	
+Insert	Tables	Table	insert.table	live	insert.table	yes	probe:cmd.insert.table	
+Insert	Illustrations	Pictures	insert.picture	live	-	no	-	
+Insert	Illustrations	Shapes	insert.shape	live	-	no	-	
+Insert	Illustrations	Icons	insert.icons	live	-	no	-	
+Insert	Illustrations	SmartArt	insert.smartArt	missing	-	no	-	
+Insert	Illustrations	Screenshot	insert.screenshot	missing	-	no	-	
+Insert	Charts	Recommended Charts	insert.recommendedCharts	live	insert.chart	partial	smoke:…offering only the types the data suits	the chart picker offers types that suit the data
+Insert	Charts	Charts	insert.chart	live	insert.chart	yes	smoke:Insert chart makes the chart and opens its editor	
+Insert	Charts	PivotChart	insert.pivotChart	live	-	no	-	
+Insert	Charts	Maps	insert.map	missing	-	no	-	
+Insert	Sparklines	Sparklines	insert.sparkline	live	-	no	-	
+Insert	Filters	Slicer	insert.slicer	live	-	no	-	
+Insert	Filters	Timeline	insert.timeline	missing	-	no	-	
+Insert	Links	Link	insert.link	live	insert.link	yes	smoke:Enter sets the link and the text	
+Insert	Comments	Comment	review.newComment	live	review.newComment	partial	probe:cmd.review.newComment	a note, not a threaded comment
+Insert	Text	Text Box	insert.textBox	live	-	no	-	
+Insert	Text	Header & Footer	pageLayout.headerFooter	live	pageLayout.headerFooter	yes	probe:cmd.pageLayout.headerFooter	
+Insert	Text	WordArt	insert.wordArt	missing	-	no	-	
+Insert	Text	Signature Line	insert.signatureLine	missing	-	no	-	
+Insert	Text	Object	insert.object	missing	-	no	-	
+Insert	Symbols	Equation	insert.equation	missing	-	no	-	
+Insert	Symbols	Symbol	insert.symbol	live	insert.symbol	yes	probe:cmd.insert.symbol	
+Insert	Cell Controls	Checkbox	insert.checkbox	live	-	no	-	
+Draw	Tools	Pen	draw.pen	live	-	no	-	
+Draw	Tools	Eraser	draw.eraser	live	-	no	-	
+Draw	Tools	Lasso Select	draw.lasso	live	-	no	-	
+Draw	Convert	Ink to Shape	draw.inkToShape	live	-	no	-	
+Page Layout	Themes	Themes	pageLayout.theme	live	-	no	-	
+Page Layout	Themes	Colors	pageLayout.themeColors	live	-	no	-	
+Page Layout	Themes	Fonts	pageLayout.themeFonts	live	-	no	-	
+Page Layout	Themes	Effects	pageLayout.themeEffects	live	-	no	-	
+Page Layout	Page Setup	Margins	pageLayout.margins	live	pageLayout.margins	yes	probe:cmd.pageLayout.margins	
+Page Layout	Page Setup	Orientation	pageLayout.orientation	live	pageLayout.orientation	yes	probe:cmd.pageLayout.orientation	
+Page Layout	Page Setup	Size	pageLayout.size	live	pageLayout.size	yes	probe:cmd.pageLayout.size	
+Page Layout	Page Setup	Print Area	pageLayout.printArea	live	pageLayout.printArea	yes	probe:cmd.pageLayout.printArea	saved as _xlnm.Print_Area
+Page Layout	Page Setup	Breaks	pageLayout.breaks	live	pageLayout.breaks	yes	probe:cmd.pageLayout.breaks	
+Page Layout	Page Setup	Background	pageLayout.background	live	-	no	-	
+Page Layout	Page Setup	Print Titles	pageLayout.printTitles	live	pageLayout.printTitles	yes	probe:cmd.pageLayout.printTitles	
+Page Layout	Page Setup	Page Setup	pageLayout.pageSetup	live	-	no	-	
+Page Layout	Scale to Fit	Scale to Fit	pageLayout.scaleToFit	live	pageLayout.scaleToFit	yes	probe:cmd.pageLayout.scaleToFit	
+Page Layout	Sheet Options	View Gridlines	view.gridlines	live	view.gridlines	yes	probe:cmd.view.gridlines	
+Page Layout	Sheet Options	Print Gridlines	pageLayout.printGridlines	live	pageLayout.printGridlines	yes	probe:cmd.pageLayout.printGridlines	
+Page Layout	Sheet Options	View Headings	view.headings	live	view.headings	yes	probe:cmd.view.headings	
+Page Layout	Sheet Options	Print Headings	pageLayout.printHeadings	live	pageLayout.printHeadings	yes	probe:cmd.pageLayout.printHeadings	
+Page Layout	Arrange	Bring Forward	arrange.bringForward	live	-	no	-	
+Page Layout	Arrange	Send Backward	arrange.sendBackward	live	-	no	-	
+Page Layout	Arrange	Selection Pane	arrange.selectionPane	live	-	no	-	
+Page Layout	Arrange	Align	arrange.align	live	-	no	-	
+Page Layout	Arrange	Group	arrange.group	live	-	no	-	
+Page Layout	Arrange	Rotate	arrange.rotate	live	-	no	-	
+Formulas	Function Library	Insert Function	formulas.insertFunction	live	formulas.insertFunction	partial	probe:cmd.formulas.insertFunction	starts a formula with the function; no search dialog
+Formulas	Function Library	Recently Used	formulas.recentlyUsed	live	formulas.recentlyUsed	partial	probe:cmd.formulas.recentlyUsed	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Function Library	Financial	formulas.financial	live	formulas.financial	partial	probe:cmd.formulas.financial	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Function Library	Logical	formulas.logical	live	formulas.logical	partial	probe:cmd.formulas.logical	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Function Library	Text	formulas.text	live	formulas.text	partial	probe:cmd.formulas.text	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Function Library	Date & Time	formulas.dateTime	live	formulas.dateTime	partial	probe:cmd.formulas.dateTime	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Function Library	Lookup & Reference	formulas.lookupReference	live	formulas.lookupReference	partial	probe:cmd.formulas.lookupReference	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Function Library	Math & Trig	formulas.mathTrig	live	formulas.mathTrig	partial	probe:cmd.formulas.mathTrig	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Function Library	More Functions	formulas.moreFunctions	live	formulas.moreFunctions	partial	probe:cmd.formulas.moreFunctions	starts the formula; the list is in the status bar, not a dropdown
+Formulas	Defined Names	Name Manager	formulas.nameManager	live	-	no	-	
+Formulas	Defined Names	Define Name	formulas.defineName	live	-	no	-	
+Formulas	Defined Names	Use in Formula	formulas.useInFormula	live	-	no	-	
+Formulas	Defined Names	Create from Selection	formulas.createFromSelection	live	-	no	-	
+Formulas	Formula Auditing	Trace Precedents	formulas.tracePrecedents	live	formulas.tracePrecedents	partial	probe:cmd.formulas.tracePrecedents	selects the precedents (Ctrl+[); no arrows drawn
+Formulas	Formula Auditing	Trace Dependents	formulas.traceDependents	live	-	no	-	
+Formulas	Formula Auditing	Remove Arrows	formulas.removeArrows	live	-	no	-	
+Formulas	Formula Auditing	Show Formulas	formulas.showFormulas	live	formulas.showFormulas	yes	probe:cmd.formulas.showFormulas	
+Formulas	Formula Auditing	Error Checking	formulas.errorChecking	live	-	no	-	
+Formulas	Formula Auditing	Evaluate Formula	formulas.evaluateFormula	live	-	no	-	
+Formulas	Formula Auditing	Watch Window	formulas.watchWindow	live	-	no	-	
+Formulas	Calculation	Calculation Options	formulas.calculationOptions	live	-	no	-	
+Formulas	Calculation	Calculate Now	formulas.calculateNow	live	formulas.calculateNow	yes	probe:cmd.formulas.calculateNow	
+Formulas	Calculation	Calculate Sheet	formulas.calculateSheet	live	formulas.calculateSheet	yes	probe:cmd.formulas.calculateSheet	recalculates the workbook
+Data	Get & Transform Data	Get Data	data.getData	live	db.sql.dialog	partial	smoke:the SQL box opens as an EVGUI dialog	SQL query into a sheet
+Data	Get & Transform Data	From Text/CSV	data.fromTextCsv	live	-	no	-	
+Data	Get & Transform Data	From Web	data.fromWeb	missing	-	no	-	
+Data	Get & Transform Data	From Table/Range	data.fromTableRange	live	-	no	-	
+Data	Queries & Connections	Refresh All	data.refreshAll	live	db.refresh	partial	-	database sheets only
+Data	Queries & Connections	Queries & Connections	data.queriesConnections	live	db.connection	partial	smoke:the connection window opens as an EVGUI dialog	database connection, not Power Query
+Data	Data Types	Stocks	data.stocks	missing	-	no	-	
+Data	Data Types	Geography	data.geography	missing	-	no	-	
+Data	Sort & Filter	Sort A to Z	data.sortAscending	live	data.sort.asc	yes	probe:cmd.data.sortAscending	
+Data	Sort & Filter	Sort Z to A	data.sortDescending	live	data.sort.desc	yes	probe:cmd.data.sortDescending	
+Data	Sort & Filter	Sort	data.sort	live	data.sort	partial	probe:cmd.data.sort	one key by argument ("W desc"); no Sort dialog
+Data	Sort & Filter	Filter	data.filter	live	data.filter.clear	partial	-	column filter popup in the core; no Filter toggle command
+Data	Sort & Filter	Clear	data.clearFilter	live	data.filter.clear	yes	-	
+Data	Sort & Filter	Reapply	data.reapply	live	-	no	-	
+Data	Sort & Filter	Advanced	data.advancedFilter	live	-	no	-	
+Data	Data Tools	Text to Columns	data.textToColumns	live	data.textToColumns	yes	probe:cmd.data.textToColumns	
+Data	Data Tools	Flash Fill	data.flashFill	live	-	no	-	
+Data	Data Tools	Remove Duplicates	data.removeDuplicates	live	data.removeDuplicates	yes	probe:cmd.data.removeDuplicates	
+Data	Data Tools	Data Validation	data.validation	live	data.validation	yes	smoke:Add rule puts a list rule on the cell	
+Data	Data Tools	Circle Invalid Data	data.circleInvalid	live	-	no	-	
+Data	Data Tools	Consolidate	data.consolidate	live	-	no	-	
+Data	Data Tools	Relationships	data.relationships	missing	-	no	-	
+Data	Forecast	Scenario Manager	data.scenarioManager	live	-	no	-	
+Data	Forecast	Goal Seek	data.goalSeek	live	-	no	-	
+Data	Forecast	Data Table	data.dataTable	live	-	no	-	
+Data	Forecast	Forecast Sheet	data.forecastSheet	live	-	no	-	
+Data	Outline	Group	data.group	live	-	no	-	
+Data	Outline	Ungroup	data.ungroup	live	-	no	-	
+Data	Outline	Subtotal	data.subtotal	live	-	no	-	
+Data	Outline	Show Detail	data.showDetail	live	-	no	-	
+Data	Outline	Hide Detail	data.hideDetail	live	-	no	-	
+Data	Analysis	Analyze Data	data.analyzeData	missing	-	no	-	
+Data	Analysis	Solver	data.solver	live	-	no	-	
+Data	Analysis	Data Analysis	data.analysisToolPak	live	-	no	-	
+Review	Proofing	Spelling	review.spelling	live	-	no	-	
+Review	Proofing	Thesaurus	review.thesaurus	live	-	no	-	
+Review	Proofing	Workbook Statistics	review.workbookStatistics	live	review.workbookStatistics	yes	probe:cmd.review.workbookStatistics	
+Review	Accessibility	Check Accessibility	review.checkAccessibility	live	-	no	-	
+Review	Insights	Smart Lookup	review.smartLookup	missing	-	no	-	
+Review	Language	Translate	review.translate	missing	-	no	-	
+Review	Comments	New Comment	review.newComment	live	review.newComment	partial	probe:cmd.review.newComment	a note, not a threaded comment
+Review	Comments	Delete Comment	review.deleteComment	live	review.deleteComment	yes	probe:cmd.review.deleteComment	
+Review	Comments	Previous Comment	review.previousComment	live	review.previousComment	yes	probe:cmd.review.previousComment	
+Review	Comments	Next Comment	review.nextComment	live	review.nextComment	yes	probe:cmd.review.nextComment	
+Review	Comments	Show Comments	review.showComments	live	-	no	-	
+Review	Notes	New Note	review.newNote	live	review.newNote	yes	probe:cmd.review.newNote	
+Review	Notes	Show/Hide Note	review.showNote	live	-	no	-	
+Review	Notes	Show All Notes	review.showAllNotes	live	-	no	-	
+Review	Notes	Convert to Comments	review.convertToComments	live	-	no	-	
+Review	Protect	Protect Sheet	review.protectSheet	live	review.protectSheet	yes	probe:cmd.review.protectSheet	locked cells refuse edits; no password
+Review	Protect	Unprotect Sheet	review.unprotectSheet	live	review.unprotectSheet	yes	probe:cmd.review.unprotectSheet	
+Review	Protect	Protect Workbook	review.protectWorkbook	live	review.protectWorkbook	yes	probe:cmd.review.protectWorkbook	structure lock; no password
+Review	Protect	Allow Edit Ranges	review.allowEditRanges	live	-	no	-	
+Review	Changes	Show Changes	review.showChanges	missing	-	no	-	
+View	Workbook Views	Normal	view.normal	live	view.normal	partial	probe:cmd.view.normal	the only view there is
+View	Workbook Views	Page Break Preview	view.pageBreakPreview	live	-	no	-	
+View	Workbook Views	Page Layout	view.pageLayout	live	-	no	-	
+View	Workbook Views	Custom Views	view.customViews	live	-	no	-	
+View	Show	Ruler	view.ruler	live	-	no	-	
+View	Show	Formula Bar	view.formulaBar	live	sx:formulaBar	yes	-	
+View	Show	Gridlines	view.gridlines	live	view.gridlines	yes	probe:cmd.view.gridlines	
+View	Show	Headings	view.headings	live	view.headings	yes	probe:cmd.view.headings	
+View	Zoom	Zoom	view.zoom	live	-	no	-	
+View	Zoom	100%	view.zoom100	live	-	no	-	
+View	Zoom	Zoom to Selection	view.zoomToSelection	live	-	no	-	
+View	Window	New Window	view.newWindow	live	-	no	-	
+View	Window	Arrange All	view.arrangeAll	live	-	no	-	
+View	Window	Freeze Panes	view.freezePanes	live	view.freeze.here	yes	probe:cmd.view.freezePanes	
+View	Window	Freeze Top Row	view.freezeTopRow	live	view.freezeTopRow	yes	probe:cmd.view.freezeTopRow	
+View	Window	Freeze First Column	view.freezeFirstColumn	live	view.freezeFirstColumn	yes	probe:cmd.view.freezeFirstColumn	
+View	Window	Unfreeze Panes	view.unfreezePanes	live	view.freeze.none	yes	probe:cmd.view.unfreezePanes	
+View	Window	Split	view.split	live	-	no	-	
+View	Window	Hide	view.hideWindow	live	-	no	-	
+View	Window	Unhide	view.unhideWindow	live	-	no	-	
+View	Window	Switch Windows	view.switchWindows	live	-	no	-	
+View	Macros	Macros	view.macros	live	-	no	-	
+Automate	Scripting Tools	New Script	automate.newScript	live	script.new	partial	-	report scripts in the core; no menu entry
+Automate	Scripting Tools	All Scripts	automate.allScripts	live	script.open	partial	-	core command only
+Automate	Scripting Tools	Record Actions	automate.recordActions	live	-	no	-	
+Table Design	Properties	Table Name	table.rename	live	table.rename	yes	probe:cmd.table.rename	
+Table Design	Properties	Resize Table	table.resize	live	table.resize	yes	probe:cmd.table.resize	
+Table Design	Tools	Summarize with PivotTable	table.summarizePivot	live	-	no	-	
+Table Design	Tools	Remove Duplicates	table.removeDuplicates	live	table.removeDuplicates	yes	probe:cmd.table.removeDuplicates	
+Table Design	Tools	Convert to Range	table.convertToRange	live	table.convertToRange	yes	probe:cmd.table.convertToRange	
+Table Design	Tools	Insert Slicer	table.insertSlicer	live	-	no	-	
+Table Design	Table Style Options	Header Row	table.headerRow	live	table.headerRow	yes	probe:cmd.table.headerRow	
+Table Design	Table Style Options	Total Row	table.totalRow	live	table.totalRow	yes	probe:cmd.table.totalRow	
+Table Design	Table Style Options	Banded Rows	table.bandedRows	live	table.bandedRows	yes	probe:cmd.table.bandedRows	
+Table Design	Table Style Options	First Column	table.firstColumn	live	table.firstColumn	yes	probe:cmd.table.firstColumn	
+Table Design	Table Style Options	Last Column	table.lastColumn	live	table.lastColumn	yes	probe:cmd.table.lastColumn	
+Table Design	Table Style Options	Banded Columns	table.bandedColumns	live	table.bandedColumns	yes	probe:cmd.table.bandedColumns	
+Table Design	Table Styles	Table Styles	table.style	live	table.style	yes	probe:cmd.table.style	
+Chart Design	Chart Layouts	Add Chart Element	chart.addElement	live	-	no	-	
+Chart Design	Chart Layouts	Quick Layout	chart.quickLayout	live	-	no	-	
+Chart Design	Chart Styles	Change Colors	chart.changeColors	live	-	no	-	
+Chart Design	Chart Styles	Chart Styles	chart.set	live	-	no	-	
+Chart Design	Data	Switch Row/Column	chart.switchRowColumn	live	-	no	-	
+Chart Design	Data	Select Data	chart.selectData	live	-	no	-	
+Chart Design	Type	Change Chart Type	chart.changeType	live	insert.chart	yes	smoke:a type chosen redraws the chart on the sheet	
+Chart Design	Location	Move Chart	chart.move	live	-	no	-	
+Format	Current Selection	Format Selection	chart.formatSelection	live	-	no	-	
+Format	Shape Styles	Shape Fill	chart.shapeFill	live	-	no	-	
+Format	Shape Styles	Shape Outline	chart.shapeOutline	live	-	no	-	
+PivotTable Analyze	Show	Field List	pivot.fieldList	live	-	no	-	
+PivotTable Analyze	Data	Refresh	pivot.refresh	live	-	no	-	
+PivotTable Analyze	Data	Change Data Source	pivot.changeSource	live	-	no	-	
+PivotTable Analyze	Calculations	Fields, Items & Sets	pivot.calculatedField	live	-	no	-	
+PivotTable Design	Layout	Grand Totals	pivot.grandTotals	live	-	no	-	
+PivotTable Design	Layout	Subtotals	pivot.subtotals	live	-	no	-	
+PivotTable Design	Layout	Report Layout	pivot.reportLayout	live	-	no	-	
+PivotTable Design	PivotTable Styles	PivotTable Styles	pivot.style	live	-	no	-	
+PivotTable Analyze	Fields	Add Field	pivot.addField	live	-	no	-	
+PivotTable Analyze	Fields	Remove Field	pivot.removeField	live	-	no	-	
+PivotTable Analyze	Fields	Move Field	pivot.moveField	live	-	no	-	
+PivotTable Analyze	Active Field	Value Field Settings	pivot.valueSettings	live	-	no	-	
+PivotTable Analyze	Filter	Filter	pivot.filter	live	-	no	-	
+PivotTable Analyze	Sort	Sort	pivot.sort	live	-	no	-	
+PivotTable Analyze	Group	Group Field	pivot.group	live	-	no	-	
+PivotTable Analyze	Active Field	Collapse Field	pivot.collapse	live	-	no	-	
+PivotTable Analyze	Actions	Clear All	pivot.delete	live	-	no	-	

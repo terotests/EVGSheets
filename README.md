@@ -129,6 +129,10 @@ python3 -m http.server -d dist 8000
 
 It runs Ranger's `scripts/deps.mjs`, which fetches `lib/evg`.
 
+How close the editor is to Excel is measured by `npm run parity` after a
+build; see [docs/PARITY.md](docs/PARITY.md) and the generated
+[docs/PARITY_REPORT.md](docs/PARITY_REPORT.md).
+
 `.github/workflows/pages.yml` builds from sparse checkouts and runs the smoke
 test. It publishes `dist/` to GitHub Pages from the default branch; Pages must
 be set to deploy from GitHub Actions (Settings → Pages → Source).
