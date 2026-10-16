@@ -21,9 +21,28 @@ Import "XlsxNumberFormat.rgr"
 Import "../../office/editor/OfficeHistory.rgr"
 
 ; Conditional formatting rule (parsed from xlsx cfRule).
+; One sparkline from the worksheet's x14 extension: a tiny chart of `src`
+; (a range on this sheet) drawn inside cell (row, col).
+class Sparkline {
+    def row:int 0
+    def col:int 0
+    def r1:int 0
+    def c1:int 0
+    def r2:int 0
+    def c2:int 0
+    ; "line" (default), "column" or "stacked"
+    def kind:string "line"
+    def color:string "#1F4E79"
+}
+
 class CfRule {
-    ; 0 colorScale | 1 cellIs
+    ; 0 colorScale | 1 cellIs | 2 dataBar | 3 iconSet
     def kind:int 0
+    ; Icon sets: the set's name ("3Arrows", "3TrafficLights1", "5Rating"…)
+    ; and the lower bound of each level above the first, in percent of the
+    ; range (Excel's default cfvo type).
+    def iconSet:string ""
+    def thresholds:[double]
     def r0:int 0
     def c0:int 0
     def r1:int 0
@@ -53,6 +72,12 @@ class CfRule {
         r.color0 = color0
         r.color1 = color1
         r.color2 = color2
+        r.iconSet = iconSet
+        def i:int 0
+        while (i < (array_length thresholds)) {
+            push r.thresholds (itemAt thresholds i)
+            i = (i + 1)
+        }
         return r
     }
 }
@@ -344,6 +369,7 @@ class SpreadsheetModel {
     def sortCol:int -1
     def sortAsc:boolean true
     def cfRules:[CfRule]
+    def sparklines:[Sparkline]
     ; Cell annotations that are not the cell's value: a link to somewhere, a
     ; note about it, and a rule about what may be typed into it. All three are
     ; keyed the same way as a cell, and all three are METADATA — they survive
@@ -360,6 +386,8 @@ class SpreadsheetModel {
     ; beside the value rather than inside it — see RichText.
     ; Pictures floating over this sheet, in the order the drawing listed them.
     def images:[SheetImage]
+    ; Charts the .xlsx carried (anchor + series refs); GridApp opens them.
+    def fileCharts:[SheetImage]
     ; Tables (ListObjects) on this sheet. A table's NAME is workbook-wide, so
     ; the lookup that formulas use lives on WorkbookModel; this is only where
     ; the ones belonging to this sheet are kept.

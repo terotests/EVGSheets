@@ -38,6 +38,13 @@ class SheetImage {
     ; They stay compressed-format here — a PNG is a PNG — and are decoded on
     ; first paint, once, by GridImages.
     def bytes:buffer (buffer_alloc 0)
+    ; A chart anchored here instead of a picture: its part, and what was read
+    ; from it — the kind (ChartKind ids), title and series references.
+    def chartPart:string ""
+    def chartKind:int 0
+    def chartTitle:string ""
+    def catRef:string ""
+    def valRefs:[string]
 
     Constructor () {
     }
@@ -61,6 +68,16 @@ class SheetImage {
         src = o.src
         name = o.name
         bytes = o.bytes
+        chartPart = o.chartPart
+        chartKind = o.chartKind
+        chartTitle = o.chartTitle
+        catRef = o.catRef
+        clear valRefs
+        def vi:int 0
+        while (vi < (array_length o.valRefs)) {
+            push valRefs (itemAt o.valRefs vi)
+            vi = (vi + 1)
+        }
     }
 
     ; What kind of file the pixels are in, from the part name — the package

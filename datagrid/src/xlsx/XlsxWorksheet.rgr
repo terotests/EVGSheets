@@ -495,6 +495,9 @@ class XlsxWorksheet {
                             if (t.name == "conditionalFormatting") {
                                 XlsxWorksheet.readConditionalFormatting(src model)
                             }
+                            if (t.name == "extLst") {
+                                XlsxWorksheet.readSparklines(src model)
+                            }
                         }
                         continue
                     }
@@ -759,6 +762,94 @@ class XlsxWorksheet {
     ;
     ; So both happen, from one place: the span is kept for the writer AND parsed
     ; here for the screen.
+    ; <x14:sparklineGroup type="column"><x14:colorSeries rgb="FF1F4E79"/>
+    ;   <x14:sparklines><x14:sparkline><xm:f>Sales!C10:F10</xm:f><xm:sqref>I10</xm:sqref>
+    ; The extLst itself stays opaque for the writer; this only reads it for
+    ; the screen. Tag names arrive without their namespace prefix.
+    sfn readSparklines:void (src:string model:SpreadsheetModel) {
+        if ((indexOf src "sparklineGroup") < 0) {
+            return
+        }
+        def p:XmlLite (new XmlLite)
+        p.reset(src)
+        def kind:string "line"
+        def color:string "#1F4E79"
+        def f:string ""
+        while true {
+            def t:XmlTag (p.nextTag())
+            if (t.valid == false) {
+                break
+            }
+            if (t.isEnd) {
+                continue
+            }
+            if (t.name == "sparklineGroup") {
+                kind = "line"
+                if (t.has("type")) {
+                    kind = (t.attr("type"))
+                }
+                color = "#1F4E79"
+            }
+            if (t.name == "colorSeries") {
+                def rgb:string (t.attr("rgb"))
+                if ((strlen rgb) == 8) {
+                    color = ("#" + (substring rgb 2 8))
+                }
+            }
+            if ((t.name == "f") && (t.selfClose == false)) {
+                f = (p.readTextUntilEnd("f"))
+            }
+            if ((t.name == "sqref") && (t.selfClose == false)) {
+                def at:string (trim (p.readTextUntilEnd("sqref")))
+                def ref:string f
+                def bang:int -1
+                def bi:int 0
+                while (bi < (strlen ref)) {
+                    if ((charAt ref bi) == 33) {
+                        bang = bi
+                    }
+                    bi = (bi + 1)
+                }
+                if (bang >= 0) {
+                    ref = (substring ref (bang + 1) (strlen ref))
+                }
+                ref = (XlsxWorksheet.stripDollars(ref))
+                def rr1:[int]
+                def cc1:[int]
+                def rr2:[int]
+                def cc2:[int]
+                XlsxWorksheet.parseMergeRef(ref rr1 cc1 rr2 cc2)
+                def ar:[int]
+                def ac:[int]
+                XlsxWorksheet.parseCellRef(at ar ac)
+                if (((array_length rr1) > 0) && ((array_length ar) > 0)) {
+                    def sp (new Sparkline)
+                    sp.row = (itemAt ar 0)
+                    sp.col = (itemAt ac 0)
+                    sp.r1 = (itemAt rr1 0)
+                    sp.c1 = (itemAt cc1 0)
+                    sp.r2 = (itemAt rr2 0)
+                    sp.c2 = (itemAt cc2 0)
+                    sp.kind = kind
+                    sp.color = color
+                    push model.sparklines sp
+                }
+            }
+        }
+    }
+
+    sfn stripDollars:string (s:string) {
+        def out:string ""
+        def i:int 0
+        while (i < (strlen s)) {
+            if ((charAt s i) != 36) {
+                out = (out + (substring s i (i + 1)))
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
     sfn readConditionalFormatting:void (src:string model:SpreadsheetModel) {
         def p:XmlLite (new XmlLite)
         p.reset(src)
@@ -824,6 +915,16 @@ class XlsxWorksheet {
                             push model.cfRules rule
                             colorIdx = 0
                         }
+                        if (typ == "dataBar") {
+                            rule.kind = 2
+                            rule.color0 = "FF638EC6"
+                            push model.cfRules rule
+                        }
+                        if (typ == "iconSet") {
+                            rule.kind = 3
+                            rule.iconSet = "3TrafficLights1"
+                            push model.cfRules rule
+                        }
                         if (typ == "cellIs") {
                             rule.kind = 1
                             rule.op = (ct.attr("operator"))
@@ -831,10 +932,38 @@ class XlsxWorksheet {
                             push model.cfRules rule
                         }
                     }
+                    if ((ct.name == "iconSet") && (ct.isEnd == false)) {
+                        def nis:int (array_length model.cfRules)
+                        if (nis > 0) {
+                            def lastI:CfRule (itemAt model.cfRules (nis - 1))
+                            def setName:string (ct.attr("iconSet"))
+                            if ((lastI.kind == 3) && ((strlen setName) > 0)) {
+                                lastI.iconSet = setName
+                            }
+                        }
+                    }
+                    if ((ct.name == "cfvo") && (ct.isEnd == false)) {
+                        def ncv:int (array_length model.cfRules)
+                        if (ncv > 0) {
+                            def lastV:CfRule (itemAt model.cfRules (ncv - 1))
+                            if (lastV.kind == 3) {
+                                def cv@(optional):double (to_double (ct.attr("val")))
+                                if cv {
+                                    push lastV.thresholds (unwrap cv)
+                                }
+                            }
+                        }
+                    }
                     if ((ct.name == "color") && (ct.isEnd == false)) {
                         def ncf:int (array_length model.cfRules)
                         if (ncf > 0) {
                             def last:CfRule (itemAt model.cfRules (ncf - 1))
+                            if (last.kind == 2) {
+                                def barRgb:string (ct.attr("rgb"))
+                                if ((strlen barRgb) >= 6) {
+                                    last.color0 = barRgb
+                                }
+                            }
                             if (last.kind == 0) {
                                 def rgb:string (ct.attr("rgb"))
                                 if ((strlen rgb) >= 6) {

@@ -43,20 +43,20 @@
    "value": ""
   },
   "wb.dataBars": {
-   "pass": false,
-   "value": "cf kinds read: []"
+   "pass": true,
+   "value": "cf kinds read: [2,3]"
   },
   "wb.iconSets": {
-   "pass": false,
+   "pass": true,
    "value": ""
   },
   "wb.sparklines": {
-   "pass": false,
+   "pass": true,
    "value": ""
   },
   "wb.charts": {
-   "pass": false,
-   "value": "0 chart(s)"
+   "pass": true,
+   "value": "2 chart(s)"
   },
   "wb.border": {
    "pass": true,

@@ -36,10 +36,10 @@ T6	Target workbook	Banded rows	3	yes	yes	probe:wb.banding
 T7	Target workbook	Filter buttons in the table header	3	yes	partial	probe:wb.tableFilters	drawn; a click does not open the filter yet
 T8	Target workbook	Table total row computes (SUBTOTAL over table columns)	3	yes	yes	probe:wb.totalRow	
 T9	Target workbook	Structured references in formulas over the table	2	yes	yes	probe:wb.structuredRefs	
-T10	Target workbook	Data bars	3	yes	no	probe:wb.dataBars	only cellIs and colour-scale rules are read
-T11	Target workbook	Icon sets	3	yes	no	probe:wb.iconSets	
-T12	Target workbook	Sparklines	3	no	no	probe:wb.sparklines	GridCraft has no sparkline contextual tab either
-T13	Target workbook	Charts in the file (column, pie)	3	yes	no	probe:wb.charts	charts are not read from xlsx
+T10	Target workbook	Data bars	3	yes	yes	probe:wb.dataBars	
+T11	Target workbook	Icon sets	3	yes	yes	probe:wb.iconSets	
+T12	Target workbook	Sparklines	3	no	yes	probe:wb.sparklines	GridCraft has no sparkline contextual tab either
+T13	Target workbook	Charts in the file (column, pie)	3	yes	yes	probe:wb.charts	read from the drawing; opened as chart windows
 T14	Target workbook	Cell borders	1	yes	yes	probe:wb.border	
 S1	Sheet tabs	Tabs for the workbook's sheets	1	yes	yes	probe:ui.sheetTabs	
 S2	Sheet tabs	Add sheet (+)	1	yes	yes	probe:ui.addSheet	

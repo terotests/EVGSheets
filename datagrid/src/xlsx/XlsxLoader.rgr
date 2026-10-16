@@ -158,6 +158,16 @@ class XlsxLoader {
                         sheet.addImage(pic)
                         di = (di + 1)
                     }
+                    def ci:int 0
+                    while (ci < (array_length drawing.charts)) {
+                        def ch:SheetImage (itemAt drawing.charts ci)
+                        def chartXml:string (pkg.entryText(ch.chartPart))
+                        if ((strlen chartXml) > 0) {
+                            XlsxDrawing.readChart(ch chartXml)
+                            push sheet.fileCharts ch
+                        }
+                        ci = (ci + 1)
+                    }
                 }
             }
             ; Tables. A sheet can carry several, each behind a relationship of

@@ -428,6 +428,7 @@ class GridApp {
             book.sourcePath = name
             engine = loader.engine
             this.syncActiveModel()
+            this.importFileCharts()
             loadError = ""
             view.status = ("loaded " + name)
             return true
@@ -435,6 +436,120 @@ class GridApp {
         loadError = loader.lastError
         view.status = loadError
         return false
+    }
+
+    ; "Sales!$C$5:$C$10" → [r1 c1 r2 c2], sheet name and dollars dropped.
+    sfn chartRefRange:[int] (ref:string) {
+        def out:[int]
+        def bang:int -1
+        def i:int 0
+        while (i < (strlen ref)) {
+            if ((charAt ref i) == 33) {
+                bang = i
+            }
+            i = (i + 1)
+        }
+        def body:string (XlsxWorksheet.stripDollars((substring ref (bang + 1) (strlen ref))))
+        if ((strlen body) == 0) {
+            return out
+        }
+        def r1:[int]
+        def c1:[int]
+        def r2:[int]
+        def c2:[int]
+        XlsxWorksheet.parseMergeRef(body r1 c1 r2 c2)
+        if ((array_length r1) == 0) {
+            return out
+        }
+        push out (itemAt r1 0)
+        push out (itemAt c1 0)
+        push out (itemAt r2 0)
+        push out (itemAt c2 0)
+        return out
+    }
+
+    ; The charts the workbook carried, opened as chart windows over the same
+    ; ranges where the file anchored them: categories in the first source
+    ; column, each series' values after it, the row above as the names.
+    fn importFileCharts:void () {
+        def si:int 0
+        while (si < (array_length book.sheets)) {
+            def sh:SpreadsheetModel (itemAt book.sheets si)
+            def k:int 0
+            while (k < (array_length sh.fileCharts)) {
+                def fc:SheetImage (itemAt sh.fileCharts k)
+                def spec:GridChart (new GridChart)
+                spec.sheet = si
+                spec.kind = fc.chartKind
+                spec.title = fc.chartTitle
+                def top:int -1
+                def bottom:int -1
+                def lo:int 100000
+                def hi:int -1
+                def cat:[int] (GridApp.chartRefRange(fc.catRef))
+                if ((array_length cat) == 4) {
+                    push spec.sourceCols (itemAt cat 1)
+                    top = (itemAt cat 0)
+                    bottom = (itemAt cat 2)
+                    lo = (itemAt cat 1)
+                    hi = (itemAt cat 1)
+                } {
+                    spec.useHeaderCol = false
+                }
+                def v:int 0
+                while (v < (array_length fc.valRefs)) {
+                    def vr:[int] (GridApp.chartRefRange((itemAt fc.valRefs v)))
+                    if ((array_length vr) == 4) {
+                        def vc:int (itemAt vr 1)
+                        push spec.sourceCols vc
+                        if (top < 0) {
+                            top = (itemAt vr 0)
+                            bottom = (itemAt vr 2)
+                        }
+                        if (vc < lo) {
+                            lo = vc
+                        }
+                        if (vc > hi) {
+                            hi = vc
+                        }
+                    }
+                    v = (v + 1)
+                }
+                if ((top >= 0) && (hi >= 0)) {
+                    spec.useHeaderRow = (top > 0)
+                    if (top > 0) {
+                        top = (top - 1)
+                    }
+                    spec.r0 = top
+                    spec.r1 = bottom
+                    spec.c0 = lo
+                    spec.c1 = hi
+                    def a:GridRect (grid.cellRect(sh fc.fromRow fc.fromCol))
+                    spec.x = (a.x + fc.offX)
+                    spec.y = (a.y + fc.offY)
+                    if fc.stretched {
+                        def b:GridRect (grid.cellRect(sh fc.toRow fc.toCol))
+                        spec.w = ((b.x + fc.toOffX) - spec.x)
+                        spec.h = ((b.y + fc.toOffY) - spec.y)
+                    }
+                    if (spec.w < 160) {
+                        spec.w = 380
+                    }
+                    if (spec.h < 120) {
+                        spec.h = 260
+                    }
+                    if ((spec.x < 0) || (spec.x > (W - 100))) {
+                        spec.x = ((W - spec.w) - 12)
+                    }
+                    if (spec.x < 4) {
+                        spec.x = 4
+                    }
+                    view.chartLayer.add(windows spec)
+                }
+                k = (k + 1)
+            }
+            si = (si + 1)
+        }
     }
 
     fn loadXlsx:boolean (fullPath:string) {
@@ -451,6 +566,7 @@ class GridApp {
             book.sourcePath = fullPath
             engine = loader.engine
             this.syncActiveModel()
+            this.importFileCharts()
             loadError = ""
             view.status = ("loaded " + fullPath)
             return true
