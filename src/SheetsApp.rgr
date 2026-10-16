@@ -1721,9 +1721,23 @@ class SheetsApp {
         if (n == 0) {
             return all
         }
-        def budget:int (to_int (pageW * 0.45))
-        if (budget < 160) {
-            budget = 160
+        ; The room is what the last layout left the tabs: the footer less
+        ; everything else in it but the stats, which give way first.
+        if (footerEl.calculatedWidth <= 0.0) {
+            return all
+        }
+        def others:double 0.0
+        def fi:int 0
+        while (fi < (array_length footerEl.children)) {
+            def kid:EVGElement (itemAt footerEl.children fi)
+            if ((kid.id != "sx-tabs") && (kid.className != "sx-stats") && (kid.className != "sx-spacer")) {
+                others = (others + kid.calculatedWidth + 6.0)
+            }
+            fi = (fi + 1)
+        }
+        def budget:int (to_int ((footerEl.calculatedWidth - others) - 40.0))
+        if (budget < 120) {
+            budget = 120
         }
         def widths:[int]
         def pos:int 0
@@ -1731,7 +1745,7 @@ class SheetsApp {
         while (i < n) {
             def at:int (itemAt all i)
             def sh:SpreadsheetModel (book.sheetAt(at))
-            push widths (((strlen sh.name) * 7) + 28)
+            push widths (((strlen sh.name) * 7) + 30)
             if (at == book.activeIndex) {
                 pos = i
             }

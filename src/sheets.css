@@ -468,8 +468,8 @@
 }
 .ui-tabpanel { display: none; }
 
-.sx-status { color: var(--muted); font-size: 12px; line-height: 16px; padding: 0 6px; }
-.sx-stats { color: var(--text); font-size: 12px; line-height: 16px; padding: 0 6px; }
+.sx-status { color: var(--muted); font-size: 12px; line-height: 16px; padding: 0 6px; flex-shrink: 0; white-space: nowrap; }
+.sx-stats { color: var(--text); font-size: 12px; line-height: 16px; height: 16px; padding: 0 6px; overflow: hidden; white-space: nowrap; }
 
 /* --- the context menu's holder ----------------------------------------------------- */
 
