@@ -157,6 +157,9 @@ class GridApp {
     def formulaRangeFixC1:int 0
     def formulaRangeGrabC:int 0
     def formulaRangeStartedEdit:boolean false
+    ; The heading sizes View > Headings puts back; -1 until first asked.
+    def savedRowHeaderW:int -1
+    def savedColHeaderH:int 0
     def fillR0:int 0
     def fillC0:int 0
     def fillR1:int 0
@@ -331,7 +334,10 @@ class GridApp {
         sel.anchor.col = 0
         sel.active.row = 0
         sel.active.col = 0
-        grid.updateVisible(model)
+        ; A sheet from a file is as big as its used range; fill the window now,
+        ; not at the first input, so the grid never opens stopping short.
+        this.ensureViewportFilled()
+        this.applyHeadings()
     }
 
     fn init:void (fontDir:string) {
@@ -1150,6 +1156,7 @@ class GridApp {
         commands.add("script.zoom.out" "Zoom out" "Script" "-")
         commands.add("script.zoom.fit" "Fit the page" "Script" "0")
         commands.add("script.export.pdf" "Export the report as PDF" "Script" "Ctrl+P")
+        this.buildExcelCommands()
     }
 
     ; A tool the host adds. It appears in the table, and on the status bar, and
@@ -1386,6 +1393,14 @@ class GridApp {
         }
         if editing {
             this.commitEdit()
+        }
+        if (model.sheetProtected && ((GridApp.allowedOnProtected(id)) == false)) {
+            view.status = "The cell or chart you're trying to change is on a protected sheet."
+            return false
+        }
+        if (book.structureProtected && (GridApp.changesSheetList(id))) {
+            view.status = "The workbook's structure is protected."
+            return false
         }
         if (id == "file.new") {
             this.newBlankWorkbook()
@@ -1629,7 +1644,7 @@ class GridApp {
             this.setActiveSheet((book.activeIndex - 1))
             return true
         }
-        return false
+        return (this.runExcelCommand(id arg))
     }
 
     ; --- reports ---------------------------------------------------------------
@@ -5405,6 +5420,1756 @@ class GridApp {
     ; --- formatting -----------------------------------------------------------
     ; `format.*` over the selection. Merge is the odd one: it is a property of
     ; the range rather than of each cell's style, so it goes to the model.
+    ; =========================================================================
+    ; Excel's ribbon, by Excel's own command ids
+    ; =========================================================================
+    ;
+    ; Commands named the way the parity catalog (GridCraft's list of Excel's
+    ; ribbon) names them, so a host, a test and the benchmark all say
+    ; `home.mergeCenter` rather than this program's older private names. The
+    ; older ids stay; these sit beside them.
+    fn buildExcelCommands:void () {
+        commands.add("home.mergeCenter" "Merge & Center" "Home" "")
+        commands.add("home.mergeAcross" "Merge Across" "Home" "")
+        commands.add("home.unmergeCells" "Unmerge Cells" "Home" "")
+        commands.addArg("home.orientation" "Orientation" "Home" "")
+        commands.add("home.increaseIndent" "Increase Indent" "Home" "")
+        commands.add("home.decreaseIndent" "Decrease Indent" "Home" "")
+        commands.add("home.doubleUnderline" "Double Underline" "Home" "")
+        commands.add("home.lockCell" "Lock Cell" "Home" "")
+        commands.addArg("home.formatAsTable" "Format as Table" "Home" "")
+        commands.addArg("home.cellStyle" "Cell Styles" "Home" "")
+        commands.addArg("home.rowHeight" "Row Height…" "Home" "")
+        commands.addArg("home.columnWidth" "Column Width…" "Home" "")
+        commands.addArg("home.defaultWidth" "Default Width…" "Home" "")
+        commands.add("home.hideRows" "Hide Rows" "Home" "")
+        commands.add("home.unhideRows" "Unhide Rows" "Home" "")
+        commands.add("home.hideColumns" "Hide Columns" "Home" "")
+        commands.add("home.unhideColumns" "Unhide Columns" "Home" "")
+        commands.addArg("home.insertCells" "Insert Cells…" "Home" "")
+        commands.addArg("home.deleteCells" "Delete Cells…" "Home" "")
+        commands.add("home.clearRules" "Clear Rules from Selected Cells" "Home" "")
+        commands.addArg("home.conditionalFormat" "Conditional Formatting" "Home" "")
+        commands.addArg("home.drawBorder" "Borders" "Home" "")
+        commands.add("sheet.hide" "Hide Sheet" "Sheet" "")
+        commands.addArg("sheet.unhide" "Unhide Sheet…" "Sheet" "")
+        commands.addArg("sheet.tabColor" "Tab Color" "Sheet" "")
+        commands.add("review.protectSheet" "Protect Sheet" "Review" "")
+        commands.add("review.unprotectSheet" "Unprotect Sheet" "Review" "")
+        commands.add("review.protectWorkbook" "Protect Workbook" "Review" "")
+        commands.addArg("review.newNote" "New Note" "Review" "Shift+F2")
+        commands.addArg("review.newComment" "New Comment" "Review" "")
+        commands.add("review.deleteComment" "Delete" "Review" "")
+        commands.add("review.nextComment" "Next" "Review" "")
+        commands.add("review.previousComment" "Previous" "Review" "")
+        commands.add("review.workbookStatistics" "Workbook Statistics" "Review" "")
+        commands.add("edit.clearAll" "Clear All" "Edit" "")
+        commands.add("edit.clearComments" "Clear Comments and Notes" "Edit" "")
+        commands.add("edit.clearHyperlinks" "Clear Hyperlinks" "Edit" "")
+        commands.add("edit.fillDown" "Fill Down" "Edit" "Ctrl+D")
+        commands.add("edit.fillRight" "Fill Right" "Edit" "Ctrl+R")
+        commands.add("edit.fillUp" "Fill Up" "Edit" "")
+        commands.add("edit.fillLeft" "Fill Left" "Edit" "")
+        commands.addArg("edit.fillSeries" "Fill Series" "Edit" "")
+        commands.addArg("edit.goToSpecial" "Go To Special…" "Edit" "")
+        commands.addArg("edit.goTo" "Go To…" "Edit" "F5")
+        commands.addArg("formulas.autoSum" "AutoSum" "Formulas" "Alt+=")
+        commands.add("formulas.showFormulas" "Show Formulas" "Formulas" "Ctrl+`")
+        commands.add("formulas.calculateNow" "Calculate Now" "Formulas" "F9")
+        commands.add("formulas.calculateSheet" "Calculate Sheet" "Formulas" "Shift+F9")
+        commands.add("formulas.tracePrecedents" "Trace Precedents" "Formulas" "Ctrl+[")
+        commands.addArg("formulas.insertFunction" "Insert Function" "Formulas" "Shift+F3")
+        commands.addArg("formulas.financial" "Financial" "Formulas" "")
+        commands.addArg("formulas.logical" "Logical" "Formulas" "")
+        commands.addArg("formulas.text" "Text" "Formulas" "")
+        commands.addArg("formulas.dateTime" "Date & Time" "Formulas" "")
+        commands.addArg("formulas.lookupReference" "Lookup & Reference" "Formulas" "")
+        commands.addArg("formulas.mathTrig" "Math & Trig" "Formulas" "")
+        commands.addArg("formulas.moreFunctions" "More Functions" "Formulas" "")
+        commands.addArg("formulas.recentlyUsed" "Recently Used" "Formulas" "")
+        commands.add("data.removeDuplicates" "Remove Duplicates" "Data" "")
+        commands.addArg("data.textToColumns" "Text to Columns" "Data" "")
+        commands.addArg("data.sort" "Sort…" "Data" "")
+        commands.add("view.gridlines" "Gridlines" "View" "")
+        commands.add("view.headings" "Headings" "View" "")
+        commands.add("view.freezeTopRow" "Freeze Top Row" "View" "")
+        commands.add("view.freezeFirstColumn" "Freeze First Column" "View" "")
+        commands.add("view.normal" "Normal" "View" "")
+        commands.add("file.exportCsv" "Export CSV" "File" "")
+        commands.add("file.exportHtml" "Export HTML" "File" "")
+        commands.add("file.close" "Close" "File" "Ctrl+W")
+        commands.addArg("insert.table" "Table" "Insert" "Ctrl+T")
+        commands.addArg("insert.symbol" "Symbol" "Insert" "")
+        commands.addArg("table.rename" "Table Name" "Table" "")
+        commands.addArg("table.resize" "Resize Table" "Table" "")
+        commands.add("table.convertToRange" "Convert to Range" "Table" "")
+        commands.add("table.headerRow" "Header Row" "Table" "")
+        commands.add("table.totalRow" "Total Row" "Table" "")
+        commands.add("table.bandedRows" "Banded Rows" "Table" "")
+        commands.add("table.bandedColumns" "Banded Columns" "Table" "")
+        commands.add("table.firstColumn" "First Column" "Table" "")
+        commands.add("table.lastColumn" "Last Column" "Table" "")
+        commands.addArg("table.style" "Table Styles" "Table" "")
+        commands.add("table.removeDuplicates" "Remove Duplicates" "Table" "")
+        commands.addArg("pageLayout.orientation" "Orientation" "Page Layout" "")
+        commands.addArg("pageLayout.size" "Size" "Page Layout" "")
+        commands.addArg("pageLayout.margins" "Margins" "Page Layout" "")
+        commands.addArg("pageLayout.printArea" "Print Area" "Page Layout" "")
+        commands.addArg("pageLayout.printTitles" "Print Titles" "Page Layout" "")
+        commands.add("pageLayout.printGridlines" "Print Gridlines" "Page Layout" "")
+        commands.add("pageLayout.printHeadings" "Print Headings" "Page Layout" "")
+        commands.addArg("pageLayout.scaleToFit" "Scale to Fit" "Page Layout" "")
+        commands.addArg("pageLayout.breaks" "Breaks" "Page Layout" "")
+        commands.addArg("pageLayout.headerFooter" "Header & Footer" "Page Layout" "")
+    }
+
+    ; Commands a protected sheet still allows: moving about, looking, saving,
+    ; and the switches that are not about cells.
+    sfn allowedOnProtected:boolean (id:string) {
+        def pre:[string] ([] _:string ("nav." "select." "view." "file." "review." "sheet." "script." "pageLayout." "formulas.calculate" "formulas.showFormulas" "edit.copy" "edit.find" "edit.goTo" "edit.undo" "edit.redo" "chart.copy"))
+        def i:int 0
+        while (i < (array_length pre)) {
+            def p:string (itemAt pre i)
+            if ((strlen id) >= (strlen p)) {
+                if ((substring id 0 (strlen p)) == p) {
+                    return true
+                }
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    sfn changesSheetList:boolean (id:string) {
+        if ((id == "sheet.add") || (id == "sheet.delete") || (id == "sheet.rename") || (id == "sheet.duplicate")) {
+            return true
+        }
+        if ((id == "sheet.move") || (id == "sheet.move.left") || (id == "sheet.move.right")) {
+            return true
+        }
+        if ((id == "sheet.hide") || (id == "sheet.unhide") || (id == "sheet.tabColor")) {
+            return true
+        }
+        return false
+    }
+
+    ; Whether typing into the active cell is refused by sheet protection.
+    fn activeCellLocked:boolean () {
+        if (model.sheetProtected == false) {
+            return false
+        }
+        def st:CellStyle (model.getCellStyle(sel.active.row sel.active.col))
+        return st.locked
+    }
+
+    ; One cell, as if typed: "=…" is a formula, anything else a value.
+    fn putCellText:void (r:int c:int text:string) {
+        if ((strlen text) > 0) {
+            if ((charAt text 0) == 61) {
+                model.applyEditPlain(r c "" (substring text 1 (strlen text)))
+            } {
+                model.applyEditPlain(r c text "")
+            }
+        } {
+            model.applyEdit(r c "" "")
+        }
+        engine.syncCell(book.activeIndex r c)
+    }
+
+    fn selFirst:CellPos () {
+        def a:CellPos (new CellPos)
+        def b:CellPos (new CellPos)
+        sel.normalized(a b)
+        return a
+    }
+
+    fn selLast:CellPos () {
+        def a:CellPos (new CellPos)
+        def b:CellPos (new CellPos)
+        sel.normalized(a b)
+        return b
+    }
+
+    fn refreshAll:void () {
+        model.version = (model.version + 1)
+        model.rowGeomDirty = true
+        model.colGeomDirty = true
+        sheetView.markDirty()
+        sheetView.rebuild()
+        grid.updateVisible(model)
+    }
+
+    ; Copy (fr, fc) into (r, c) the way a fill does: the formula re-based, the
+    ; style along with it.
+    fn fillCellFrom:void (fr:int fc:int r:int c:int) {
+        def f:string (model.getFormula(fr fc))
+        def st:CellStyle (model.getCellStyle(fr fc))
+        if ((strlen f) > 0) {
+            def moved:string (FormulaParser.translateFormula(f (c - fc) (r - fr)))
+            model.applyEditStyled(r c "" moved st)
+        } {
+            model.applyEditStyled(r c (model.getCell(fr fc)) "" st)
+        }
+        engine.syncCell(book.activeIndex r c)
+    }
+
+    fn fillSelection:boolean (dir:string) {
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        model.beginTx()
+        engine.resetStats()
+        def r:int a.row
+        while (r <= b.row) {
+            def c:int a.col
+            while (c <= b.col) {
+                if ((dir == "down") && (r > a.row)) {
+                    this.fillCellFrom(a.row c r c)
+                }
+                if ((dir == "up") && (r < b.row)) {
+                    this.fillCellFrom(b.row c r c)
+                }
+                if ((dir == "right") && (c > a.col)) {
+                    this.fillCellFrom(r a.col r c)
+                }
+                if ((dir == "left") && (c < b.col)) {
+                    this.fillCellFrom(r b.col r c)
+                }
+                c = (c + 1)
+            }
+            r = (r + 1)
+        }
+        model.endTx()
+        engine.recalcDirty()
+        this.afterCellMutation()
+        return true
+    }
+
+    ; Home > Fill > Series: a linear series from the first cell, down the
+    ; selection when it is taller than wide and across otherwise. The step is
+    ; the argument, or the difference of the first two cells, or 1.
+    fn fillSeries:boolean (arg:string) {
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        def down:boolean ((b.row - a.row) >= (b.col - a.col))
+        def start@(optional):double (to_double (trim (model.getCell(a.row a.col))))
+        if (null? start) {
+            view.status = "Fill Series needs a number in the first cell"
+            return false
+        }
+        def step:double 1.0
+        def given@(optional):double (to_double (trim arg))
+        if (!null? given) {
+            step = (unwrap given)
+        } {
+            def nr:int a.row
+            def nc:int a.col
+            if down {
+                nr = (a.row + 1)
+            } {
+                nc = (a.col + 1)
+            }
+            def second@(optional):double (to_double (trim (model.getCell(nr nc))))
+            if (!null? second) {
+                if ((strlen (model.getCell(nr nc))) > 0) {
+                    step = ((unwrap second) - (unwrap start))
+                }
+            }
+        }
+        model.beginTx()
+        engine.resetStats()
+        def v:double (unwrap start)
+        def r:int a.row
+        while (r <= b.row) {
+            def c:int a.col
+            while (c <= b.col) {
+                def k:int (c - a.col)
+                if down {
+                    k = (r - a.row)
+                }
+                def x:double (v + (step * (to_double k)))
+                def txt:string (to_string x)
+                if ((to_double (to_int x)) == x) {
+                    txt = (to_string (to_int x))
+                }
+                model.applyEditPlain(r c txt "")
+                engine.syncCell(book.activeIndex r c)
+                c = (c + 1)
+            }
+            r = (r + 1)
+        }
+        model.endTx()
+        engine.recalcDirty()
+        this.afterCellMutation()
+        return true
+    }
+
+    ; Home > AutoSum. With one cell selected, the numbers directly above it
+    ; (or, when there are none, to its left) are summed into it. With a block
+    ; selected, each column gets its total in the row underneath.
+    fn autoSum:boolean (arg:string) {
+        def fname:string "SUM"
+        if ((strlen arg) > 0) {
+            fname = (to_uppercase arg)
+        }
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        model.beginTx()
+        engine.resetStats()
+        if ((a.row == b.row) && (a.col == b.col)) {
+            def r:int a.row
+            def c:int a.col
+            def top:int r
+            while ((top > 0) && (this.cellIsNumber((top - 1) c))) {
+                top = (top - 1)
+            }
+            if (top < r) {
+                this.putCellText(r c ("=" + fname + "(" + (SpreadsheetModel.cellLabel(top c)) + ":" + (SpreadsheetModel.cellLabel((r - 1) c)) + ")"))
+            } {
+                def left:int c
+                while ((left > 0) && (this.cellIsNumber(r (left - 1)))) {
+                    left = (left - 1)
+                }
+                if (left < c) {
+                    this.putCellText(r c ("=" + fname + "(" + (SpreadsheetModel.cellLabel(r left)) + ":" + (SpreadsheetModel.cellLabel(r (c - 1))) + ")"))
+                } {
+                    model.endTx()
+                    this.beginEdit(("=" + fname + "(") true)
+                    return true
+                }
+            }
+        } {
+            this.ensureExtent((b.row + 1) b.col)
+            def cc:int a.col
+            while (cc <= b.col) {
+                this.putCellText((b.row + 1) cc ("=" + fname + "(" + (SpreadsheetModel.cellLabel(a.row cc)) + ":" + (SpreadsheetModel.cellLabel(b.row cc)) + ")"))
+                cc = (cc + 1)
+            }
+        }
+        model.endTx()
+        engine.recalcDirty()
+        this.afterCellMutation()
+        return true
+    }
+
+    fn cellIsNumber:boolean (r:int c:int) {
+        def raw:string (trim (model.getCell(r c)))
+        if ((strlen raw) == 0) {
+            return false
+        }
+        def v@(optional):double (to_double raw)
+        return (!null? v)
+    }
+
+    ; Home > Find & Select > Go To Special: the blanks, formulas, constants or
+    ; notes inside the selection (the used range when one cell is selected)
+    ; become the selection.
+    fn goToSpecial:boolean (arg:string) {
+        def kind:string arg
+        if ((strlen kind) == 0) {
+            kind = "blanks"
+        }
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        if ((a.row == b.row) && (a.col == b.col)) {
+            a.row = 0
+            a.col = 0
+            b.row = (model.usedRow())
+            b.col = (model.usedCol())
+        }
+        def hitsR:[int]
+        def hitsC:[int]
+        def r:int a.row
+        while (r <= b.row) {
+            def c:int a.col
+            while (c <= b.col) {
+                def raw:string (model.getCell(r c))
+                def isF:boolean (model.hasFormula(r c))
+                def take:boolean false
+                if (kind == "blanks") {
+                    take = (((strlen raw) == 0) && (isF == false))
+                }
+                if (kind == "formulas") {
+                    take = isF
+                }
+                if (kind == "constants") {
+                    take = (((strlen raw) > 0) && (isF == false))
+                }
+                if (kind == "notes") {
+                    take = (model.hasNote(r c))
+                }
+                if take {
+                    push hitsR r
+                    push hitsC c
+                }
+                c = (c + 1)
+            }
+            r = (r + 1)
+        }
+        def n:int (array_length hitsR)
+        if (n == 0) {
+            view.status = "No cells were found."
+            return false
+        }
+        sel.clearExtra()
+        def i:int 0
+        while (i < (n - 1)) {
+            sel.keepRange((GridRange.create((itemAt hitsR i) (itemAt hitsC i) (itemAt hitsR i) (itemAt hitsC i))))
+            i = (i + 1)
+        }
+        sel.anchor.row = (itemAt hitsR (n - 1))
+        sel.anchor.col = (itemAt hitsC (n - 1))
+        sel.active.row = (itemAt hitsR (n - 1))
+        sel.active.col = (itemAt hitsC (n - 1))
+        view.status = ((to_string n) + " cells")
+        return true
+    }
+
+    ; Formulas > Trace Precedents, as Ctrl+[ does it: the cells the active
+    ; formula reads on this sheet become the selection.
+    fn selectPrecedents:boolean () {
+        def f:string (model.getFormula(sel.active.row sel.active.col))
+        if ((strlen f) == 0) {
+            view.status = "The active cell has no formula."
+            return false
+        }
+        def refs:[string]
+        def cur:string ""
+        def i:int 0
+        def n:int (strlen f)
+        def inStr:boolean false
+        while (i <= n) {
+            def ch:int 32
+            if (i < n) {
+                ch = (charAt f i)
+            }
+            if (ch == 34) {
+                inStr = (inStr == false)
+            }
+            def word:boolean (((ch >= 65) && (ch <= 90)) || ((ch >= 97) && (ch <= 122)) || ((ch >= 48) && (ch <= 57)) || (ch == 36) || (ch == 58))
+            if (word && (inStr == false)) {
+                cur = (cur + (substring f i (i + 1)))
+            } {
+                if (((strlen cur) > 0) && (ch != 40) && (ch != 33)) {
+                    push refs cur
+                }
+                cur = ""
+            }
+            i = (i + 1)
+        }
+        def ranges:[GridRange]
+        def k:int 0
+        while (k < (array_length refs)) {
+            def parts:[string] (strsplit (itemAt refs k) ":")
+            def r0s:[int]
+            def c0s:[int]
+            XlsxWorksheet.parseCellRef((itemAt parts 0) r0s c0s)
+            if (((array_length r0s) > 0) && ((itemAt r0s 0) >= 0) && ((itemAt c0s 0) >= 0)) {
+                def r1:int (itemAt r0s 0)
+                def c1:int (itemAt c0s 0)
+                if ((array_length parts) > 1) {
+                    def r1s:[int]
+                    def c1s:[int]
+                    XlsxWorksheet.parseCellRef((itemAt parts 1) r1s c1s)
+                    if (((array_length r1s) > 0) && ((itemAt r1s 0) >= 0)) {
+                        r1 = (itemAt r1s 0)
+                        c1 = (itemAt c1s 0)
+                    }
+                }
+                push ranges (GridRange.create((itemAt r0s 0) (itemAt c0s 0) r1 c1))
+            }
+            k = (k + 1)
+        }
+        def m:int (array_length ranges)
+        if (m == 0) {
+            view.status = "The formula reads no cells on this sheet."
+            return false
+        }
+        sel.clearExtra()
+        def j:int 0
+        while (j < (m - 1)) {
+            sel.keepRange((itemAt ranges j))
+            j = (j + 1)
+        }
+        def last:GridRange (itemAt ranges (m - 1))
+        sel.anchor.row = last.r0
+        sel.anchor.col = last.c0
+        sel.active.row = last.r1
+        sel.active.col = last.c1
+        return true
+    }
+
+    ; Rows of the block that repeat an earlier row of it (all columns
+    ; compared) are removed and the rest close up. Returns how many went.
+    fn removeDuplicateRows:int (r0:int c0:int r1:int c1:int) {
+        def seen:[string:boolean]
+        def keepRows:[int]
+        def r:int r0
+        while (r <= r1) {
+            def key:string ""
+            def c:int c0
+            while (c <= c1) {
+                key = (key + (model.getCell(r c)) + "\t")
+                c = (c + 1)
+            }
+            if ((has seen key) == false) {
+                set seen key true
+                push keepRows r
+            }
+            r = (r + 1)
+        }
+        def removed:int (((r1 - r0) + 1) - (array_length keepRows))
+        if (removed == 0) {
+            return 0
+        }
+        def vals:[string]
+        def fmls:[string]
+        def sts:[CellStyle]
+        def i:int 0
+        while (i < (array_length keepRows)) {
+            def kr:int (itemAt keepRows i)
+            def kc:int c0
+            while (kc <= c1) {
+                push vals (model.getCell(kr kc))
+                push fmls (model.getFormula(kr kc))
+                push sts (model.getCellStyle(kr kc))
+                kc = (kc + 1)
+            }
+            i = (i + 1)
+        }
+        model.beginTx()
+        engine.resetStats()
+        def w:int 0
+        def wr:int r0
+        while (wr <= r1) {
+            def wc:int c0
+            while (wc <= c1) {
+                if (w < (array_length vals)) {
+                    model.applyEditStyled(wr wc (itemAt vals w) (itemAt fmls w) (itemAt sts w))
+                } {
+                    model.applyEdit(wr wc "" "")
+                }
+                engine.syncCell(book.activeIndex wr wc)
+                w = (w + 1)
+                wc = (wc + 1)
+            }
+            wr = (wr + 1)
+        }
+        model.endTx()
+        engine.recalcDirty()
+        this.afterCellMutation()
+        return removed
+    }
+
+    ; Data > Text to Columns, delimited: each cell of the selection's first
+    ; column is split on the delimiter into the columns to its right.
+    fn textToColumns:boolean (arg:string) {
+        def delim:string arg
+        if ((strlen delim) == 0) {
+            delim = ","
+        }
+        if (delim == "tab") {
+            delim = "\t"
+        }
+        if (delim == "space") {
+            delim = " "
+        }
+        if (delim == "semicolon") {
+            delim = ";"
+        }
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        model.beginTx()
+        engine.resetStats()
+        def r:int a.row
+        while (r <= b.row) {
+            def parts:[string] (strsplit (model.getCell(r a.col)) delim)
+            if ((array_length parts) > 1) {
+                this.ensureExtent(r ((a.col + (array_length parts)) - 1))
+                def i:int 0
+                while (i < (array_length parts)) {
+                    model.applyEditPlain(r (a.col + i) (trim (itemAt parts i)) "")
+                    engine.syncCell(book.activeIndex r (a.col + i))
+                    i = (i + 1)
+                }
+            }
+            r = (r + 1)
+        }
+        model.endTx()
+        engine.recalcDirty()
+        this.afterCellMutation()
+        return true
+    }
+
+    ; --- tables ----------------------------------------------------------------
+
+
+    fn uniqueTableName:string () {
+        def n:int 1
+        while (book.hasTable(("Table" + (to_string n)))) {
+            n = (n + 1)
+        }
+        return ("Table" + (to_string n))
+    }
+
+    ; Header names from the table's first row; an empty or repeated one is
+    ; given a name, as Excel does, and written into the cell.
+    fn tableColumnsFromHeader:void (t:SheetTable) {
+        clear t.columns
+        def seen:[string:boolean]
+        def c:int t.c0
+        while (c <= t.c1) {
+            def nm:string (trim (model.getDisplay(t.r0 c)))
+            if (((strlen nm) == 0) || (has seen nm)) {
+                nm = ("Column" + (to_string ((c - t.c0) + 1)))
+                if t.hasHeader() {
+                    model.applyEditPlain(t.r0 c nm "")
+                }
+            }
+            set seen nm true
+            push t.columns nm
+            c = (c + 1)
+        }
+    }
+
+    ; Home > Format as Table, Insert > Table: the selection (the current
+    ; region, when one cell is selected) becomes a table with a header row.
+    fn createTable:boolean (styleArg:string) {
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        if ((a.row == b.row) && (a.col == b.col)) {
+            ; The current region: grow while the next row/column has data.
+            while ((b.row < (model.usedRow())) && ((strlen (model.getCell((b.row + 1) a.col))) > 0)) {
+                b.row = (b.row + 1)
+            }
+            while ((b.col < (model.usedCol())) && ((strlen (model.getCell(a.row (b.col + 1)))) > 0)) {
+                b.col = (b.col + 1)
+            }
+        }
+        def r:int a.row
+        while (r <= b.row) {
+            def c:int a.col
+            while (c <= b.col) {
+                if ((model.tableIndexAt(r c)) >= 0) {
+                    view.status = "A table cannot overlap another table."
+                    return false
+                }
+                c = (c + 1)
+            }
+            r = (r + 1)
+        }
+        def t:SheetTable (new SheetTable)
+        t.name = (this.uniqueTableName())
+        t.r0 = a.row
+        t.c0 = a.col
+        t.r1 = b.row
+        t.c1 = b.col
+        if (b.row == a.row) {
+            t.r1 = (a.row + 1)
+            this.ensureExtent(t.r1 b.col)
+        }
+        if ((strlen styleArg) > 0) {
+            t.styleName = styleArg
+        }
+        model.beginTx()
+        this.tableColumnsFromHeader(t)
+        model.endTx()
+        model.addTable(t)
+        this.refreshAll()
+        view.status = ("table " + t.name)
+        return true
+    }
+
+    fn runTableCommand:boolean (id:string arg:string) {
+        def ti:int (model.tableIndexAt(sel.active.row sel.active.col))
+        if (ti < 0) {
+            view.status = "Select a cell in a table first."
+            return false
+        }
+        def t:SheetTable (model.tableAt(ti))
+        if (id == "table.rename") {
+            def nm:string (trim arg)
+            if (((strlen nm) == 0) || (book.hasTable(nm))) {
+                view.status = "That table name is empty or already used."
+                return false
+            }
+            t.name = nm
+        }
+        if (id == "table.resize") {
+            def parts:[string] (strsplit arg ":")
+            if ((array_length parts) != 2) {
+                return false
+            }
+            def ra:[int]
+            def ca:[int]
+            def rb:[int]
+            def cb:[int]
+            XlsxWorksheet.parseCellRef((itemAt parts 0) ra ca)
+            XlsxWorksheet.parseCellRef((itemAt parts 1) rb cb)
+            if (((array_length ra) == 0) || ((array_length rb) == 0)) {
+                return false
+            }
+            if (((itemAt ra 0) != t.r0) || ((itemAt rb 0) <= (itemAt ra 0))) {
+                view.status = "The header row has to stay where it is."
+                return false
+            }
+            t.r0 = (itemAt ra 0)
+            t.c0 = (itemAt ca 0)
+            t.r1 = (itemAt rb 0)
+            t.c1 = (itemAt cb 0)
+            this.ensureExtent(t.r1 t.c1)
+            model.beginTx()
+            this.tableColumnsFromHeader(t)
+            model.endTx()
+        }
+        if (id == "table.convertToRange") {
+            ; The look stays, as cell formatting; the table goes.
+            model.beginTx()
+            def r:int t.r0
+            while (r <= t.r1) {
+                def c:int t.c0
+                while (c <= t.c1) {
+                    def st:CellStyle (TableLook.apply(t r c (model.getCellStyle(r c))))
+                    model.applyEditStyled(r c (model.getCell(r c)) (model.getFormula(r c)) st)
+                    c = (c + 1)
+                }
+                r = (r + 1)
+            }
+            model.endTx()
+            def keep:[SheetTable]
+            def i:int 0
+            while (i < (array_length model.tables)) {
+                def other:SheetTable (itemAt model.tables i)
+                if (other.name != t.name) {
+                    push keep other
+                }
+                i = (i + 1)
+            }
+            model.tables = keep
+        }
+        if (id == "table.headerRow") {
+            if (t.hasHeader()) {
+                t.headerRowCount = 0
+                t.r0 = (t.r0 + 1)
+            } {
+                if (t.r0 == 0) {
+                    return false
+                }
+                t.r0 = (t.r0 - 1)
+                t.headerRowCount = 1
+                model.beginTx()
+                def hc:int 0
+                while (hc < (array_length t.columns)) {
+                    model.applyEditPlain(t.r0 (t.c0 + hc) (itemAt t.columns hc) "")
+                    hc = (hc + 1)
+                }
+                model.endTx()
+            }
+        }
+        if (id == "table.totalRow") {
+            model.beginTx()
+            engine.resetStats()
+            if (t.hasTotals()) {
+                def tc:int t.c0
+                while (tc <= t.c1) {
+                    model.applyEdit(t.r1 tc "" "")
+                    engine.syncCell(book.activeIndex t.r1 tc)
+                    tc = (tc + 1)
+                }
+                t.totalsRowCount = 0
+                t.r1 = (t.r1 - 1)
+            } {
+                t.r1 = (t.r1 + 1)
+                t.totalsRowCount = 1
+                this.ensureExtent(t.r1 t.c1)
+                this.putCellText(t.r1 t.c0 "Total")
+                def lastName:string (itemAt t.columns ((array_length t.columns) - 1))
+                if (t.c1 > t.c0) {
+                    this.putCellText(t.r1 t.c1 ("=SUBTOTAL(109,[" + lastName + "])"))
+                }
+            }
+            model.endTx()
+            engine.recalcDirty()
+        }
+        if (id == "table.bandedRows") {
+            t.showRowStripes = (t.showRowStripes == false)
+        }
+        if (id == "table.bandedColumns") {
+            t.showColumnStripes = (t.showColumnStripes == false)
+        }
+        if (id == "table.firstColumn") {
+            t.showFirstColumn = (t.showFirstColumn == false)
+        }
+        if (id == "table.lastColumn") {
+            t.showLastColumn = (t.showLastColumn == false)
+        }
+        if (id == "table.style") {
+            if ((strlen arg) == 0) {
+                return false
+            }
+            t.styleName = arg
+        }
+        if (id == "table.removeDuplicates") {
+            def gone:int (this.removeDuplicateRows((t.dataR0()) t.c0 (t.dataR1()) t.c1))
+            view.status = ((to_string gone) + " duplicate values found and removed")
+        }
+        this.refreshAll()
+        return true
+    }
+
+    ; --- functions by category (Formulas tab) ------------------------------------
+
+    sfn categoryFunctions:string (cat:string) {
+        if (cat == "financial") {
+            return "PMT PV FV NPV IRR RATE NPER IPMT PPMT SLN DB DDB"
+        }
+        if (cat == "logical") {
+            return "IF IFS AND OR NOT XOR IFERROR IFNA SWITCH TRUE FALSE"
+        }
+        if (cat == "text") {
+            return "CONCAT CONCATENATE LEFT RIGHT MID LEN LOWER UPPER PROPER TRIM SUBSTITUTE REPLACE FIND SEARCH TEXT TEXTJOIN VALUE REPT EXACT"
+        }
+        if (cat == "dateTime") {
+            return "DATE DAY MONTH YEAR TODAY NOW WEEKDAY EDATE EOMONTH DATEDIF HOUR MINUTE SECOND TIME NETWORKDAYS WORKDAY"
+        }
+        if (cat == "lookupReference") {
+            return "VLOOKUP HLOOKUP XLOOKUP INDEX MATCH XMATCH CHOOSE OFFSET INDIRECT ROW ROWS COLUMN COLUMNS FILTER SORT UNIQUE TRANSPOSE"
+        }
+        if (cat == "mathTrig") {
+            return "SUM SUMIF SUMIFS SUMPRODUCT ROUND ROUNDUP ROUNDDOWN INT MOD ABS POWER SQRT PRODUCT SUBTOTAL CEILING FLOOR RAND RANDBETWEEN"
+        }
+        if (cat == "moreFunctions") {
+            return "AVERAGE AVERAGEIF COUNT COUNTA COUNTIF COUNTIFS MAX MIN MEDIAN MODE STDEV STDEV.S VAR LARGE SMALL RANK ISBLANK ISNUMBER ISTEXT ISERROR"
+        }
+        return "SUM AVERAGE IF COUNT MAX MIN VLOOKUP XLOOKUP"
+    }
+
+    ; The category's functions this engine knows, space separated.
+    sfn knownInCategory:string (cat:string) {
+        def all:[string] (strsplit (GridApp.categoryFunctions(cat)) " ")
+        def out:string ""
+        def i:int 0
+        while (i < (array_length all)) {
+            def nm:string (itemAt all i)
+            if (FormulaFunctions.isKnown(nm)) {
+                if ((strlen out) > 0) {
+                    out = (out + " ")
+                }
+                out = (out + nm)
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; Pick a function from a category: the cell starts a formula with it, the
+    ; way choosing it from the ribbon's list does. Without a name the status
+    ; bar lists what the category holds.
+    fn insertFunctionFrom:boolean (cat:string arg:string) {
+        def names:string (GridApp.knownInCategory(cat))
+        if ((strlen arg) == 0) {
+            view.status = names
+            return true
+        }
+        def want:string (to_uppercase (trim arg))
+        def ok:boolean false
+        def list:[string] (strsplit names " ")
+        def i:int 0
+        while (i < (array_length list)) {
+            if ((itemAt list i) == want) {
+                ok = true
+            }
+            i = (i + 1)
+        }
+        if (cat == "insert") {
+            ok = (FormulaFunctions.isKnown(want))
+        }
+        if (ok == false) {
+            view.status = (want + " is not in this list")
+            return false
+        }
+        this.beginEdit(("=" + want + "(") true)
+        return true
+    }
+
+    ; --- the dispatcher ------------------------------------------------------------
+
+    fn runExcelCommand:boolean (id:string arg:string) {
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        ; --- Home: alignment and font ---
+        if (id == "home.mergeCenter") {
+            if ((strlen (model.mergeAt(sel.active.row sel.active.col))) > 0) {
+                model.removeMerge(sel.active.row sel.active.col)
+                model.version = (model.version + 1)
+                return true
+            }
+            if ((a.row == b.row) && (a.col == b.col)) {
+                return false
+            }
+            GridFormat.apply(model sel "align" "center")
+            model.addMerge(a.row a.col b.row b.col)
+            this.refreshAll()
+            return true
+        }
+        if (id == "home.mergeAcross") {
+            if (a.col == b.col) {
+                return false
+            }
+            def mr:int a.row
+            while (mr <= b.row) {
+                model.addMerge(mr a.col mr b.col)
+                mr = (mr + 1)
+            }
+            this.refreshAll()
+            return true
+        }
+        if (id == "home.unmergeCells") {
+            def any:boolean false
+            def ur:int a.row
+            while (ur <= b.row) {
+                def uc:int a.col
+                while (uc <= b.col) {
+                    if (model.removeMerge(ur uc)) {
+                        any = true
+                    }
+                    uc = (uc + 1)
+                }
+                ur = (ur + 1)
+            }
+            this.refreshAll()
+            return any
+        }
+        if (id == "home.orientation") {
+            def deg:string arg
+            if ((strlen deg) == 0) {
+                deg = "45"
+            }
+            if (deg == "counterclockwise") {
+                deg = "45"
+            }
+            if (deg == "clockwise") {
+                deg = "135"
+            }
+            if (deg == "up") {
+                deg = "90"
+            }
+            if (deg == "down") {
+                deg = "180"
+            }
+            if (deg == "vertical") {
+                deg = "255"
+            }
+            if (deg == "none") {
+                deg = "0"
+            }
+            def okR:boolean (GridFormat.apply(model sel "rotate" deg))
+            this.afterCellMutation()
+            return okR
+        }
+        if (id == "home.increaseIndent") {
+            GridFormat.apply(model sel "indent" "1")
+            this.afterCellMutation()
+            return true
+        }
+        if (id == "home.decreaseIndent") {
+            GridFormat.apply(model sel "indent" "-1")
+            this.afterCellMutation()
+            return true
+        }
+        if (id == "home.doubleUnderline") {
+            GridFormat.apply(model sel "dunderline" "")
+            this.afterCellMutation()
+            return true
+        }
+        if (id == "home.lockCell") {
+            GridFormat.apply(model sel "locked" "")
+            this.afterCellMutation()
+            return true
+        }
+        if (id == "home.drawBorder") {
+            def spec:string arg
+            if ((strlen spec) == 0) {
+                spec = "all"
+            }
+            return (this.runFormatCommand("format.border" spec))
+        }
+        if ((id == "home.formatAsTable") || (id == "insert.table")) {
+            def styleName:string arg
+            if ((strlen styleName) == 0) {
+                styleName = "TableStyleMedium2"
+            }
+            return (this.createTable(styleName))
+        }
+        if (id == "home.cellStyle") {
+            return (this.applyCellStyle(arg))
+        }
+        ; --- Home: cells ---
+        if (id == "home.rowHeight") {
+            def pt@(optional):double (to_double (trim arg))
+            if (null? pt) {
+                return false
+            }
+            def px:int (to_int ((((unwrap pt) * 96.0) / 72.0) + 0.5))
+            def hr:int a.row
+            while (hr <= b.row) {
+                model.setRowHeight(hr px)
+                hr = (hr + 1)
+            }
+            this.refreshAll()
+            return true
+        }
+        if ((id == "home.columnWidth") || (id == "home.defaultWidth")) {
+            def chars@(optional):double (to_double (trim arg))
+            if (null? chars) {
+                return false
+            }
+            def wpx:int (to_int (((unwrap chars) * 7.0) + 5.5))
+            if (id == "home.defaultWidth") {
+                model.setDefaultGeometry(model.defaultRowH wpx)
+            } {
+                def wc:int a.col
+                while (wc <= b.col) {
+                    model.setColWidth(wc wpx)
+                    wc = (wc + 1)
+                }
+            }
+            this.refreshAll()
+            return true
+        }
+        if ((id == "home.hideRows") || (id == "home.unhideRows")) {
+            def hide:boolean (id == "home.hideRows")
+            def rr:int a.row
+            while (rr <= b.row) {
+                model.setRowHidden(rr hide)
+                rr = (rr + 1)
+            }
+            this.refreshAll()
+            return true
+        }
+        if ((id == "home.hideColumns") || (id == "home.unhideColumns")) {
+            def hideC:boolean (id == "home.hideColumns")
+            def cc:int a.col
+            while (cc <= b.col) {
+                model.setColHidden(cc hideC)
+                cc = (cc + 1)
+            }
+            this.refreshAll()
+            return true
+        }
+        if (id == "home.insertCells") {
+            ; Shift cells down (or right): what is below moves to make room.
+            ; References into the moved cells are not re-pointed.
+            def h:int ((b.row - a.row) + 1)
+            def w:int ((b.col - a.col) + 1)
+            if (arg == "right") {
+                this.moveBlock(a.row a.col b.row (model.usedCol()) a.row (a.col + w))
+            } {
+                this.moveBlock(a.row a.col (model.usedRow()) b.col (a.row + h) a.col)
+            }
+            sel.anchor.row = a.row
+            sel.anchor.col = a.col
+            sel.active.row = b.row
+            sel.active.col = b.col
+            return true
+        }
+        if (id == "home.deleteCells") {
+            def hd:int ((b.row - a.row) + 1)
+            def wd:int ((b.col - a.col) + 1)
+            this.clearRange(a.row a.col b.row b.col)
+            if (arg == "left") {
+                if ((b.col + 1) <= (model.usedCol())) {
+                    this.moveBlock(a.row (b.col + 1) b.row (model.usedCol()) a.row a.col)
+                }
+            } {
+                if ((b.row + 1) <= (model.usedRow())) {
+                    this.moveBlock((b.row + 1) a.col (model.usedRow()) b.col a.row a.col)
+                }
+            }
+            sel.anchor.row = a.row
+            sel.anchor.col = a.col
+            sel.active.row = a.row
+            sel.active.col = a.col
+            return true
+        }
+        if (id == "home.clearRules") {
+            model.clearCfRulesIn(a.row a.col b.row b.col)
+            this.refreshAll()
+            return true
+        }
+        if (id == "home.conditionalFormat") {
+            ; Quick rules: a three-colour scale, or "greaterThan:N" /
+            ; "lessThan:N" highlighted in light red. No argument opens the
+            ; full dialog.
+            if ((strlen arg) == 0) {
+                return (this.runCommand("format.conditional" ""))
+            }
+            def rule:CfRule (new CfRule)
+            rule.r0 = a.row
+            rule.c0 = a.col
+            rule.r1 = b.row
+            rule.c1 = b.col
+            if (arg == "colorScale") {
+                rule.kind = 0
+            } {
+                def kv:[string] (strsplit arg ":")
+                if ((array_length kv) != 2) {
+                    return false
+                }
+                def lim@(optional):double (to_double (trim (itemAt kv 1)))
+                if (null? lim) {
+                    return false
+                }
+                rule.kind = 1
+                rule.op = (itemAt kv 0)
+                rule.v1 = (unwrap lim)
+                rule.fillRgb = "FFC7CE"
+            }
+            model.addCfRule(rule)
+            this.refreshAll()
+            return true
+        }
+        ; --- sheets ---
+        if (id == "sheet.hide") {
+            def visible:int 0
+            def si:int 0
+            while (si < (book.sheetCount())) {
+                def shv:SpreadsheetModel (book.sheetAt(si))
+                if (shv.sheetHidden == false) {
+                    visible = (visible + 1)
+                }
+                si = (si + 1)
+            }
+            if (visible < 2) {
+                view.status = "A workbook must contain at least one visible worksheet."
+                return false
+            }
+            def hiddenIdx:int book.activeIndex
+            model.sheetHidden = true
+            def next:int 0
+            def probe:SpreadsheetModel (book.sheetAt(next))
+            while ((next < ((book.sheetCount()) - 1)) && probe.sheetHidden) {
+                next = (next + 1)
+                probe = (book.sheetAt(next))
+            }
+            this.setActiveSheet(next)
+            view.status = ("hid sheet " + (to_string (hiddenIdx + 1)))
+            return true
+        }
+        if (id == "sheet.unhide") {
+            def ui:int 0
+            while (ui < (book.sheetCount())) {
+                def shu:SpreadsheetModel (book.sheetAt(ui))
+                if (shu.sheetHidden && (((strlen arg) == 0) || (shu.name == arg))) {
+                    shu.sheetHidden = false
+                    this.setActiveSheet(ui)
+                    return true
+                }
+                ui = (ui + 1)
+            }
+            return false
+        }
+        if (id == "sheet.tabColor") {
+            model.tabColor = arg
+            model.dropOpaque("sheetPr")
+            model.version = (model.version + 1)
+            return true
+        }
+        ; --- Review ---
+        if (id == "review.protectSheet") {
+            model.sheetProtected = true
+            model.dropOpaque("sheetProtection")
+            view.status = "Sheet protected"
+            return true
+        }
+        if (id == "review.unprotectSheet") {
+            model.sheetProtected = false
+            model.dropOpaque("sheetProtection")
+            view.status = "Sheet unprotected"
+            return true
+        }
+        if (id == "review.protectWorkbook") {
+            book.structureProtected = (book.structureProtected == false)
+            if book.structureProtected {
+                view.status = "Workbook structure protected"
+            } {
+                view.status = "Workbook structure unprotected"
+            }
+            return true
+        }
+        if ((id == "review.newNote") || (id == "review.newComment")) {
+            def text:string arg
+            if ((strlen text) == 0) {
+                text = (model.noteAt(sel.active.row sel.active.col))
+            }
+            model.setNote(sel.active.row sel.active.col text)
+            model.version = (model.version + 1)
+            return true
+        }
+        if ((id == "review.deleteComment") || (id == "edit.clearComments")) {
+            def nr:int a.row
+            while (nr <= b.row) {
+                def nc:int a.col
+                while (nc <= b.col) {
+                    model.clearNote(nr nc)
+                    nc = (nc + 1)
+                }
+                nr = (nr + 1)
+            }
+            model.version = (model.version + 1)
+            return true
+        }
+        if ((id == "review.nextComment") || (id == "review.previousComment")) {
+            return (this.gotoNote((id == "review.nextComment")))
+        }
+        if (id == "review.workbookStatistics") {
+            def cells:int 0
+            def fcount:int 0
+            def tcount:int 0
+            def ncount:int 0
+            def wi:int 0
+            while (wi < (book.sheetCount())) {
+                def shw:SpreadsheetModel (book.sheetAt(wi))
+                def lr:int (shw.usedRow())
+                def lc:int (shw.usedCol())
+                def r:int 0
+                while (r <= lr) {
+                    def c:int 0
+                    while (c <= lc) {
+                        if ((strlen (shw.getCell(r c))) > 0) {
+                            cells = (cells + 1)
+                        }
+                        c = (c + 1)
+                    }
+                    r = (r + 1)
+                }
+                fcount = (fcount + (array_length shw.formulaKeys))
+                tcount = (tcount + (shw.tableCount()))
+                ncount = (ncount + (shw.noteCount()))
+                wi = (wi + 1)
+            }
+            view.status = ("Sheets " + (to_string (book.sheetCount())) + " · cells with data " + (to_string cells) + " · formulas " + (to_string fcount) + " · tables " + (to_string tcount) + " · notes " + (to_string ncount))
+            return true
+        }
+        ; --- Editing ---
+        if (id == "edit.clearAll") {
+            model.beginTx()
+            def cr:int a.row
+            while (cr <= b.row) {
+                def cc2:int a.col
+                while (cc2 <= b.col) {
+                    model.applyEditStyled(cr cc2 "" "" (CellStyle.createDefault()))
+                    model.clearNote(cr cc2)
+                    model.clearHyperlink(cr cc2)
+                    engine.syncCell(book.activeIndex cr cc2)
+                    cc2 = (cc2 + 1)
+                }
+                cr = (cr + 1)
+            }
+            model.endTx()
+            engine.recalcDirty()
+            this.afterCellMutation()
+            return true
+        }
+        if (id == "edit.clearHyperlinks") {
+            def lr2:int a.row
+            while (lr2 <= b.row) {
+                def lc2:int a.col
+                while (lc2 <= b.col) {
+                    model.clearHyperlink(lr2 lc2)
+                    lc2 = (lc2 + 1)
+                }
+                lr2 = (lr2 + 1)
+            }
+            model.version = (model.version + 1)
+            return true
+        }
+        if (id == "edit.fillDown") {
+            return (this.fillSelection("down"))
+        }
+        if (id == "edit.fillUp") {
+            return (this.fillSelection("up"))
+        }
+        if (id == "edit.fillRight") {
+            return (this.fillSelection("right"))
+        }
+        if (id == "edit.fillLeft") {
+            return (this.fillSelection("left"))
+        }
+        if (id == "edit.fillSeries") {
+            return (this.fillSeries(arg))
+        }
+        if (id == "edit.goToSpecial") {
+            return (this.goToSpecial(arg))
+        }
+        if (id == "edit.goTo") {
+            return (this.gotoCell(arg))
+        }
+        ; --- Formulas ---
+        if (id == "formulas.autoSum") {
+            return (this.autoSum(arg))
+        }
+        if (id == "formulas.showFormulas") {
+            model.showFormulas = (model.showFormulas == false)
+            model.version = (model.version + 1)
+            grid.updateVisible(model)
+            return true
+        }
+        if ((id == "formulas.calculateNow") || (id == "formulas.calculateSheet")) {
+            engine.resetStats()
+            engine.recalcAll()
+            this.afterCellMutation()
+            return true
+        }
+        if (id == "formulas.tracePrecedents") {
+            return (this.selectPrecedents())
+        }
+        if (id == "formulas.insertFunction") {
+            if ((strlen arg) == 0) {
+                this.beginEdit("=" true)
+                return true
+            }
+            return (this.insertFunctionFrom("insert" arg))
+        }
+        if ((strlen id) > 9) {
+            if ((substring id 0 9) == "formulas.") {
+                def cat:string (substring id 9 (strlen id))
+                if ((cat == "financial") || (cat == "logical") || (cat == "text") || (cat == "dateTime") || (cat == "lookupReference") || (cat == "mathTrig") || (cat == "moreFunctions") || (cat == "recentlyUsed")) {
+                    return (this.insertFunctionFrom(cat arg))
+                }
+            }
+        }
+        ; --- Data ---
+        if (id == "data.removeDuplicates") {
+            def gone:int (this.removeDuplicateRows(a.row a.col b.row b.col))
+            view.status = ((to_string gone) + " duplicate values found and removed")
+            return true
+        }
+        if (id == "data.textToColumns") {
+            return (this.textToColumns(arg))
+        }
+        if (id == "data.sort") {
+            ; "C desc": sort by column C, which may be outside the selection's
+            ; first column. No argument sorts ascending by the active column.
+            def parts:[string] (strsplit (trim arg) " ")
+            def scol:int sel.active.col
+            def asc:boolean true
+            if ((strlen (trim arg)) > 0) {
+                def rs:[int]
+                def cs:[int]
+                XlsxWorksheet.parseCellRef(((itemAt parts 0) + "1") rs cs)
+                if (((array_length cs) == 0) || ((itemAt cs 0) < 0)) {
+                    return false
+                }
+                scol = (itemAt cs 0)
+                if ((array_length parts) > 1) {
+                    asc = ((to_lowercase (itemAt parts 1)) != "desc")
+                }
+            }
+            this.applySort(scol asc)
+            return true
+        }
+        ; --- View ---
+        if (id == "view.gridlines") {
+            model.showGridlines = (model.showGridlines == false)
+            model.version = (model.version + 1)
+            grid.updateVisible(model)
+            return true
+        }
+        if (id == "view.headings") {
+            model.showHeadings = (model.showHeadings == false)
+            this.applyHeadings()
+            return true
+        }
+        if (id == "view.freezeTopRow") {
+            model.freezeRows = 1
+            model.freezeCols = 0
+            model.version = (model.version + 1)
+            grid.updateVisible(model)
+            return true
+        }
+        if (id == "view.freezeFirstColumn") {
+            model.freezeRows = 0
+            model.freezeCols = 1
+            model.version = (model.version + 1)
+            grid.updateVisible(model)
+            return true
+        }
+        if (id == "view.normal") {
+            ; The only view this editor has.
+            view.status = "Normal view"
+            return true
+        }
+        ; --- File ---
+        if (id == "file.exportCsv") {
+            fileRequest = "exportCsv"
+            return true
+        }
+        if (id == "file.exportHtml") {
+            fileRequest = "exportHtml"
+            return true
+        }
+        if (id == "file.close") {
+            this.newBlankWorkbook()
+            return true
+        }
+        ; --- Insert ---
+        if (id == "insert.symbol") {
+            if ((strlen arg) == 0) {
+                return false
+            }
+            this.beginEdit(arg false)
+            return true
+        }
+        ; --- Table Design ---
+        if ((strlen id) > 6) {
+            if ((substring id 0 6) == "table.") {
+                return (this.runTableCommand(id arg))
+            }
+        }
+        ; --- Page Layout ---
+        if ((strlen id) > 11) {
+            if ((substring id 0 11) == "pageLayout.") {
+                return (this.runPageLayoutCommand(id arg))
+            }
+        }
+        return false
+    }
+
+    fn gotoNote:boolean (forward:boolean) {
+        def lr:int (model.usedRow())
+        def lc:int (model.usedCol())
+        def total:int ((lr + 1) * (lc + 1))
+        def here:int ((sel.active.row * (lc + 1)) + sel.active.col)
+        def step:int 1
+        while (step <= total) {
+            def k:int (here + step)
+            if (forward == false) {
+                k = (here - step)
+            }
+            k = (k % total)
+            if (k < 0) {
+                k = (k + total)
+            }
+            def r:int (idiv k (lc + 1))
+            def c:int (k % (lc + 1))
+            if (model.hasNote(r c)) {
+                this.moveActive(r c false)
+                return true
+            }
+            step = (step + 1)
+        }
+        view.status = "No notes on this sheet"
+        return false
+    }
+
+    ; Cell Styles: the gallery's built-in looks, as Excel's Office theme draws
+    ; them. "Normal" takes formatting off.
+    fn applyCellStyle:boolean (arg:string) {
+        def name:string arg
+        if ((strlen name) == 0) {
+            name = "Good"
+        }
+        def fill:string ""
+        def text:string ""
+        def bold:boolean false
+        def size:double 0.0
+        def known:boolean true
+        if (name == "Normal") {
+            return (this.runFormatCommand("format.clear" ""))
+        }
+        if (name == "Good") {
+            fill = "#C6EFCE"
+            text = "#006100"
+        } {
+            if (name == "Bad") {
+                fill = "#FFC7CE"
+                text = "#9C0006"
+            } {
+                if (name == "Neutral") {
+                    fill = "#FFEB9C"
+                    text = "#9C5700"
+                } {
+                    if (name == "Title") {
+                        bold = true
+                        size = 18.0
+                        text = "#44546A"
+                    } {
+                        if (name == "Heading 1") {
+                            bold = true
+                            size = 15.0
+                            text = "#44546A"
+                        } {
+                            if (name == "Total") {
+                                bold = true
+                            } {
+                                if (name == "Note") {
+                                    fill = "#FFFFCC"
+                                } {
+                                    if (name == "Input") {
+                                        fill = "#FFCC99"
+                                        text = "#3F3F76"
+                                    } {
+                                        if (name == "Calculation") {
+                                            fill = "#F2F2F2"
+                                            text = "#FA7D00"
+                                            bold = true
+                                        } {
+                                            if (name == "Warning Text") {
+                                                text = "#FF0000"
+                                            } {
+                                                known = false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (known == false) {
+            view.status = ("no cell style " + name)
+            return false
+        }
+        model.beginTx()
+        def gi:int 0
+        while (gi < (sel.rangeCount())) {
+            def g:GridRange (sel.rangeAt(gi))
+            def r:int g.r0
+            while (r <= g.r1) {
+                def c:int g.c0
+                while (c <= g.c1) {
+                    def st:CellStyle ((model.getCellStyle(r c)).copy())
+                    if ((strlen fill) > 0) {
+                        st.hasFill = true
+                        st.fillRgb = fill
+                    }
+                    if ((strlen text) > 0) {
+                        st.textRgb = text
+                    }
+                    if bold {
+                        st.bold = true
+                    }
+                    if (size > 0.0) {
+                        st.fontSizePt = size
+                    }
+                    model.applyEditStyled(r c (model.getCell(r c)) (model.getFormula(r c)) st)
+                    c = (c + 1)
+                }
+                r = (r + 1)
+            }
+            gi = (gi + 1)
+        }
+        model.endTx()
+        if (size > 0.0) {
+            this.fitSelectedRowsToContent(true)
+        }
+        this.afterCellMutation()
+        return true
+    }
+
+    ; View > Headings: the row numbers and column letters, on or off.
+    fn applyHeadings:void () {
+        if (savedRowHeaderW < 0) {
+            savedRowHeaderW = grid.rowHeaderW
+            savedColHeaderH = grid.colHeaderH
+        }
+        if model.showHeadings {
+            grid.rowHeaderW = savedRowHeaderW
+            grid.colHeaderH = savedColHeaderH
+        } {
+            grid.rowHeaderW = 0
+            grid.colHeaderH = 0
+        }
+        grid.updateVisible(model)
+    }
+
+    fn runPageLayoutCommand:boolean (id:string arg:string) {
+        model.modelPrint()
+        def a:CellPos (this.selFirst())
+        def b:CellPos (this.selLast())
+        if (id == "pageLayout.orientation") {
+            if ((arg == "portrait") || (arg == "landscape")) {
+                model.pageOrientation = arg
+            } {
+                if (model.pageOrientation == "portrait") {
+                    model.pageOrientation = "landscape"
+                } {
+                    model.pageOrientation = "portrait"
+                }
+            }
+            view.status = model.pageOrientation
+            return true
+        }
+        if (id == "pageLayout.size") {
+            def code:int 1
+            def s:string (to_lowercase arg)
+            if (s == "a4") {
+                code = 9
+            }
+            if (s == "a3") {
+                code = 8
+            }
+            if (s == "a5") {
+                code = 11
+            }
+            if (s == "legal") {
+                code = 5
+            }
+            if (s == "tabloid") {
+                code = 3
+            }
+            def n@(optional):int (to_int arg)
+            if (!null? n) {
+                if ((unwrap n) > 0) {
+                    code = (unwrap n)
+                }
+            }
+            model.paperSize = code
+            return true
+        }
+        if (id == "pageLayout.margins") {
+            if (arg == "wide") {
+                model.marginLeft = 1.0
+                model.marginRight = 1.0
+                model.marginTop = 1.0
+                model.marginBottom = 1.0
+            } {
+                if (arg == "narrow") {
+                    model.marginLeft = 0.25
+                    model.marginRight = 0.25
+                    model.marginTop = 0.75
+                    model.marginBottom = 0.75
+                } {
+                    model.marginLeft = 0.7
+                    model.marginRight = 0.7
+                    model.marginTop = 0.75
+                    model.marginBottom = 0.75
+                }
+            }
+            return true
+        }
+        if (id == "pageLayout.printArea") {
+            if (arg == "clear") {
+                model.printArea = ""
+            } {
+                model.printArea = ((SpreadsheetModel.cellLabel(a.row a.col)) + ":" + (SpreadsheetModel.cellLabel(b.row b.col)))
+            }
+            return true
+        }
+        if (id == "pageLayout.printTitles") {
+            if ((strlen arg) > 0) {
+                model.printTitleRows = arg
+            } {
+                model.printTitleRows = ((to_string (a.row + 1)) + ":" + (to_string (b.row + 1)))
+            }
+            return true
+        }
+        if (id == "pageLayout.printGridlines") {
+            model.printGridlines = (model.printGridlines == false)
+            return true
+        }
+        if (id == "pageLayout.printHeadings") {
+            model.printHeadings = (model.printHeadings == false)
+            return true
+        }
+        if (id == "pageLayout.scaleToFit") {
+            def wh:[string] (strsplit arg ",")
+            def fw:int 1
+            def fh:int 0
+            if ((array_length wh) == 2) {
+                def pw@(optional):int (to_int (trim (itemAt wh 0)))
+                def ph@(optional):int (to_int (trim (itemAt wh 1)))
+                if (!null? pw) {
+                    fw = (unwrap pw)
+                }
+                if (!null? ph) {
+                    fh = (unwrap ph)
+                }
+            }
+            model.fitToWidth = fw
+            model.fitToHeight = fh
+            model.dropOpaque("sheetPr")
+            return true
+        }
+        if (id == "pageLayout.breaks") {
+            def at:int sel.active.row
+            if (arg == "reset") {
+                clear model.rowBreaks
+                return true
+            }
+            def keep:[int]
+            def i:int 0
+            while (i < (array_length model.rowBreaks)) {
+                if ((itemAt model.rowBreaks i) != at) {
+                    push keep (itemAt model.rowBreaks i)
+                }
+                i = (i + 1)
+            }
+            if ((arg != "remove") && (at > 0)) {
+                push keep at
+            }
+            model.rowBreaks = keep
+            return true
+        }
+        if (id == "pageLayout.headerFooter") {
+            def hf:[string] (strsplit arg "|")
+            model.pageHeader = (itemAt hf 0)
+            if ((array_length hf) > 1) {
+                model.pageFooter = (itemAt hf 1)
+            }
+            return true
+        }
+        return false
+    }
+
+    ; The active sheet as CSV (RFC 4180 quoting), the values as displayed.
+    fn sheetCsv:string () {
+        def out:string ""
+        def lr:int (model.usedRow())
+        def lc:int (model.usedCol())
+        def r:int 0
+        while (r <= lr) {
+            def c:int 0
+            while (c <= lc) {
+                if (c > 0) {
+                    out = (out + ",")
+                }
+                def v:string (model.getDisplay(r c))
+                def q:boolean (((indexOf v ",") >= 0) || ((indexOf v "\"") >= 0) || ((indexOf v "\n") >= 0))
+                if q {
+                    out = (out + "\"" + (join (strsplit v "\"") "\"\"") + "\"")
+                } {
+                    out = (out + v)
+                }
+                c = (c + 1)
+            }
+            out = (out + "\r\n")
+            r = (r + 1)
+        }
+        return out
+    }
+
+    ; The active sheet as a standalone HTML page with one table.
+    fn sheetHtml:string () {
+        def out:string ("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + (GridApp.htmlEscape(model.name)) + "</title></head><body><table border=\"1\" cellspacing=\"0\" cellpadding=\"3\">")
+        def lr:int (model.usedRow())
+        def lc:int (model.usedCol())
+        def r:int 0
+        while (r <= lr) {
+            out = (out + "<tr>")
+            def c:int 0
+            while (c <= lc) {
+                out = (out + (this.cellHtml(r c)))
+                c = (c + 1)
+            }
+            out = (out + "</tr>")
+            r = (r + 1)
+        }
+        return (out + "</table></body></html>")
+    }
+
     fn runFormatCommand:boolean (id:string arg:string) {
         if (id == "format.merge") {
             return (this.toggleMerge())
@@ -6160,6 +7925,7 @@ class GridApp {
         ; BELOW the strip, over the formula bar; widen it and a band of empty
         ; chrome sat where a row used to be.
         this.layoutFrame()
+        this.ensureViewportFilled()
         grid.updateVisible(model)
     }
 
@@ -6883,6 +8649,10 @@ class GridApp {
 
     fn beginEdit:void (seed:string clearFirst:boolean) {
         if readOnly {
+            return
+        }
+        if (this.activeCellLocked()) {
+            view.status = "The cell you're trying to change is on a protected sheet."
             return
         }
         editSelAnchor = -1
@@ -7901,6 +9671,10 @@ class GridApp {
     ; one transaction, so it is one Ctrl+Z.
     fn clearSelection:void () {
         if readOnly {
+            return
+        }
+        if (this.activeCellLocked()) {
+            view.status = "The cell you're trying to change is on a protected sheet."
             return
         }
         model.beginTx()

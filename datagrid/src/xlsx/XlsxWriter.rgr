@@ -286,7 +286,11 @@ class XlsxWriter {
             str_append x "<i/>"
         }
         if st.underline {
-            str_append x "<u/>"
+            if st.doubleUnderline {
+                str_append x "<u val=\"double\"/>"
+            } {
+                str_append x "<u/>"
+            }
         }
         if st.strike {
             str_append x "<strike/>"
@@ -403,6 +407,9 @@ class XlsxWriter {
             if (st.textRotation != 0) {
                 str_append align (" textRotation=\"" + (to_string st.textRotation) + "\"")
             }
+            if (st.indent > 0) {
+                str_append align (" indent=\"" + (to_string st.indent) + "\"")
+            }
             ; Written back out, because it was read in. A property a reader
             ; understands and a writer drops is worse than one neither knows
             ; about: the file changes meaning every time it is saved, and the
@@ -410,10 +417,19 @@ class XlsxWriter {
             if (st.readingOrder != 0) {
                 str_append align (" readingOrder=\"" + (to_string st.readingOrder) + "\"")
             }
+            def prot:string ""
+            if (st.locked == false) {
+                prot = "<protection locked=\"0\"/>"
+                str_append xf " applyProtection=\"1\""
+            }
             if ((strlen align) > 0) {
-                str_append xf (" applyAlignment=\"1\"><alignment" + align + "/></xf>")
+                str_append xf (" applyAlignment=\"1\"><alignment" + align + "/>" + prot + "</xf>")
             } {
-                str_append xf "/>"
+                if ((strlen prot) > 0) {
+                    str_append xf (">" + prot + "</xf>")
+                } {
+                    str_append xf "/>"
+                }
             }
             push xfs xf
             i = (i + 1)
@@ -599,6 +615,17 @@ class XlsxWriter {
         def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
         str_append out "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
         str_append out (this.opaqueXml(m 0))
+        def fitPage:boolean (m.printModelled && ((m.fitToWidth > 0) || (m.fitToHeight > 0)))
+        if (((strlen m.tabColor) > 0) || fitPage) {
+            str_append out "<sheetPr>"
+            if ((strlen m.tabColor) > 0) {
+                str_append out ("<tabColor rgb=\"" + (XlsxWriter.argb(m.tabColor)) + "\"/>")
+            }
+            if fitPage {
+                str_append out "<pageSetUpPr fitToPage=\"1\"/>"
+            }
+            str_append out "</sheetPr>"
+        }
         str_append out ("<dimension ref=\"A1:" + (XlsxWriter.cellRef(lastR lastC)) + "\"/>")
         ; The sheet's own defaults. Everything below states only what DIFFERS
         ; from them — a file that repeated the default for every row and column
@@ -610,7 +637,17 @@ class XlsxWriter {
         str_append out ("<sheetFormatPr defaultRowHeight=\"" + (XlsxWriter.numText(defH)) + "\" defaultColWidth=\"" + (XlsxWriter.numText(defW)) + "\"/>")
 
         ; Freeze panes, as a pane element on the sheet view.
-        str_append out "<sheetViews><sheetView workbookViewId=\"0\">"
+        str_append out "<sheetViews><sheetView"
+        if (m.showGridlines == false) {
+            str_append out " showGridLines=\"0\""
+        }
+        if (m.showHeadings == false) {
+            str_append out " showRowColHeaders=\"0\""
+        }
+        if m.showFormulas {
+            str_append out " showFormulas=\"1\""
+        }
+        str_append out " workbookViewId=\"0\">"
         if ((m.freezeRows + m.freezeCols) > 0) {
             def topLeft:string (XlsxWriter.cellRef(m.freezeRows m.freezeCols))
             str_append out "<pane"
@@ -733,6 +770,9 @@ class XlsxWriter {
             r = (r + 1)
         }
         str_append out "</sheetData>"
+        if m.sheetProtected {
+            str_append out "<sheetProtection sheet=\"1\" objects=\"1\" scenarios=\"1\"/>"
+        }
         str_append out (this.opaqueXml(m 1))
 
         if ((array_length m.merges) > 0) {
@@ -786,6 +826,9 @@ class XlsxWriter {
         def links:string (this.hyperlinksXml(m))
         if ((strlen links) > 0) {
             str_append out links
+        }
+        if m.printModelled {
+            str_append out (XlsxWriter.printXml(m))
         }
         str_append out (this.opaqueXml(m 3))
         ; Tables, last: a `<tableParts>` element points at the table PARTS by
@@ -899,6 +942,13 @@ class XlsxWriter {
     ; One table part. The style is left out on purpose: a table carries a
     ; theme name here that we do not draw, and writing a style we do not honour
     ; would promise Excel a look this program never showed anyone.
+    sfn flag01:string (on:boolean) {
+        if on {
+            return "1"
+        }
+        return "0"
+    }
+
     sfn tableXml:string (t:SheetTable num:int) {
         def ref:string ((XlsxWriter.cellRef(t.r0 t.c0)) + ":" + (XlsxWriter.cellRef(t.r1 t.c1)))
         def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
@@ -911,7 +961,7 @@ class XlsxWriter {
         str_append out ">"
         ; The autoFilter a table carries covers its header and data, never its
         ; totals row.
-        if (t.headerRowCount > 0) {
+        if ((t.headerRowCount > 0) && t.showFilter) {
             def lastData:int (t.dataR1())
             if (lastData < t.r0) {
                 lastData = t.r0
@@ -931,7 +981,11 @@ class XlsxWriter {
             str_append out ("<tableColumn id=\"" + (to_string (i + 1)) + "\" name=\"" + (XlsxWriter.esc(nm)) + "\"/>")
             i = (i + 1)
         }
-        str_append out "</tableColumns></table>"
+        str_append out "</tableColumns>"
+        if ((strlen t.styleName) > 0) {
+            str_append out ("<tableStyleInfo name=\"" + (XlsxWriter.esc(t.styleName)) + "\" showFirstColumn=\"" + (XlsxWriter.flag01(t.showFirstColumn)) + "\" showLastColumn=\"" + (XlsxWriter.flag01(t.showLastColumn)) + "\" showRowStripes=\"" + (XlsxWriter.flag01(t.showRowStripes)) + "\" showColumnStripes=\"" + (XlsxWriter.flag01(t.showColumnStripes)) + "\"/>")
+        }
+        str_append out "</table>"
         return out
     }
 
@@ -990,9 +1044,90 @@ class XlsxWriter {
         return out
     }
 
+    ; Page Layout as the worksheet states it, in the schema's order.
+    sfn printXml:string (m:SpreadsheetModel) {
+        def out:string ""
+        if (m.printGridlines || m.printHeadings) {
+            str_append out "<printOptions"
+            if m.printHeadings {
+                str_append out " headings=\"1\""
+            }
+            if m.printGridlines {
+                str_append out " gridLines=\"1\""
+            }
+            str_append out "/>"
+        }
+        str_append out ("<pageMargins left=\"" + (XlsxWriter.numText(m.marginLeft)) + "\" right=\"" + (XlsxWriter.numText(m.marginRight)) + "\" top=\"" + (XlsxWriter.numText(m.marginTop)) + "\" bottom=\"" + (XlsxWriter.numText(m.marginBottom)) + "\" header=\"0.3\" footer=\"0.3\"/>")
+        str_append out ("<pageSetup paperSize=\"" + (to_string m.paperSize) + "\" orientation=\"" + m.pageOrientation + "\"")
+        if ((m.fitToWidth > 0) || (m.fitToHeight > 0)) {
+            str_append out (" fitToWidth=\"" + (to_string m.fitToWidth) + "\" fitToHeight=\"" + (to_string m.fitToHeight) + "\"")
+        }
+        str_append out "/>"
+        if (((strlen m.pageHeader) > 0) || ((strlen m.pageFooter) > 0)) {
+            str_append out "<headerFooter>"
+            if ((strlen m.pageHeader) > 0) {
+                str_append out ("<oddHeader>&amp;C" + (XlsxWriter.esc(m.pageHeader)) + "</oddHeader>")
+            }
+            if ((strlen m.pageFooter) > 0) {
+                str_append out ("<oddFooter>&amp;C" + (XlsxWriter.esc(m.pageFooter)) + "</oddFooter>")
+            }
+            str_append out "</headerFooter>"
+        }
+        def nb:int (array_length m.rowBreaks)
+        if (nb > 0) {
+            str_append out ("<rowBreaks count=\"" + (to_string nb) + "\" manualBreakCount=\"" + (to_string nb) + "\">")
+            def i:int 0
+            while (i < nb) {
+                str_append out ("<brk id=\"" + (to_string (itemAt m.rowBreaks i)) + "\" max=\"16383\" man=\"1\"/>")
+                i = (i + 1)
+            }
+            str_append out "</rowBreaks>"
+        }
+        return out
+    }
+
+    ; "A1:D10" → "$A$1:$D$10"; "1:2" → "$1:$2".
+    sfn absRange:string (ref:string) {
+        def out:string ""
+        def prevDigit:boolean false
+        def i:int 0
+        def startPart:boolean true
+        while (i < (strlen ref)) {
+            def ch:int (charAt ref i)
+            def isDigit:boolean ((ch >= 48) && (ch <= 57))
+            def isAlpha:boolean (((ch >= 65) && (ch <= 90)) || ((ch >= 97) && (ch <= 122)))
+            if (ch == 58) {
+                out = (out + ":")
+                startPart = true
+                prevDigit = false
+            } {
+                if (startPart && (isAlpha || isDigit)) {
+                    out = (out + "$")
+                    startPart = false
+                } {
+                    if (isDigit && (prevDigit == false)) {
+                        out = (out + "$")
+                    }
+                }
+                out = (out + (substring ref i (i + 1)))
+                prevDigit = isDigit
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    sfn sheetQuoted:string (name:string) {
+        return ("'" + (XlsxWriter.esc(name)) + "'")
+    }
+
     fn workbookXml:string (book:WorkbookModel) {
         def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-        str_append out "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>"
+        str_append out "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+        if book.structureProtected {
+            str_append out "<workbookProtection lockStructure=\"1\"/>"
+        }
+        str_append out "<sheets>"
         def i:int 0
         while (i < (book.sheetCount())) {
             def sh:SpreadsheetModel (book.sheetAt(i))
@@ -1007,7 +1142,27 @@ class XlsxWriter {
             str_append out "/>"
             i = (i + 1)
         }
-        str_append out "</sheets></workbook>"
+        str_append out "</sheets>"
+        def names:string ""
+        def k:int 0
+        while (k < (book.sheetCount())) {
+            def shk:SpreadsheetModel (book.sheetAt(k))
+            def nmk:string shk.name
+            if ((strlen nmk) == 0) {
+                nmk = ("Sheet" + (to_string (k + 1)))
+            }
+            if ((strlen shk.printArea) > 0) {
+                str_append names ("<definedName name=\"_xlnm.Print_Area\" localSheetId=\"" + (to_string k) + "\">" + (XlsxWriter.sheetQuoted(nmk)) + "!" + (XlsxWriter.absRange(shk.printArea)) + "</definedName>")
+            }
+            if ((strlen shk.printTitleRows) > 0) {
+                str_append names ("<definedName name=\"_xlnm.Print_Titles\" localSheetId=\"" + (to_string k) + "\">" + (XlsxWriter.sheetQuoted(nmk)) + "!" + (XlsxWriter.absRange(shk.printTitleRows)) + "</definedName>")
+            }
+            k = (k + 1)
+        }
+        if ((strlen names) > 0) {
+            str_append out ("<definedNames>" + names + "</definedNames>")
+        }
+        str_append out "</workbook>"
         return out
     }
 

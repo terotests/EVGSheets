@@ -113,6 +113,8 @@ const computed = {
   U1: { excel: `${uiTot.max} (100%)`, gridcraft: `${fmt(uiTot.gc)} (${pct(uiTot.gc, uiTot.max)})`, evgsheets: `${fmt(uiTot.ev)} (${pct(uiTot.ev, uiTot.max)})` },
   W1: `${wbIds.filter((k) => probe.results[k].pass).length} of ${wbIds.length}`,
   F1: String(functions.length),
+  // xlsx (read and written by every run) plus each export whose check passed.
+  X1: String(1 + ["cmd.file.exportCsv", "cmd.file.exportHtml"].filter((k) => probe?.results?.[k]?.pass).length),
   T1: `${smoke ? smoke.checks.length : "?"} smoke + ${Object.keys(probe?.results || {}).length} probe`,
 };
 function metricValue(m, col) {

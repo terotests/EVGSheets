@@ -20,6 +20,7 @@ Import "GridTheme.rgr"
 Import "../../office/text/OfficeFont.rgr"
 Import "../../office/text/OfficeText.rgr"
 Import "ConditionalFormat.rgr"
+Import "TableLook.rgr"
 Import "pkg:evg_window/EVGWindow.rgr"
 Import "GridChartView.rgr"
 Import "GridImages.rgr"
@@ -50,6 +51,8 @@ class GridView {
     def themedRevision:int 0
     def themedWindows:int 0
     def status:string ""
+    ; `general` alignment of the cell being painted (see generalSide).
+    def generalSide:string ""
     ; The row the header's (+) would insert at, or -1 when it is not shown.
     ; GridApp sets it from the hover each frame.
     def rowPlusAt:int -1
@@ -442,6 +445,30 @@ class GridView {
         return (to_int first)
     }
 
+    ; Where `general` alignment puts the value of the cell being painted:
+    ; "right" for a number, "center" for TRUE, FALSE and errors, "" for text.
+    ; A text format (@) keeps everything as text.
+    sfn generalSide:string (raw:string numFmt:string) {
+        if ((strlen raw) == 0) {
+            return ""
+        }
+        if (numFmt == "@") {
+            return ""
+        }
+        if (XlsxNumberFormat.wholeNumber(raw)) {
+            return "right"
+        }
+        if ((raw == "TRUE") || (raw == "FALSE")) {
+            return "center"
+        }
+        if ((charAt raw 0) == 35) {
+            if ((raw == "#DIV/0!") || (raw == "#N/A") || (raw == "#NAME?") || (raw == "#NULL!") || (raw == "#NUM!") || (raw == "#REF!") || (raw == "#VALUE!") || (raw == "#SPILL!") || (raw == "#CALC!")) {
+                return "center"
+            }
+        }
+        return ""
+    }
+
     fn alignedX:double (rect:GridRect st:CellStyle textW:int text:string) {
         if st.alignSet {
             if (st.align == "right") {
@@ -450,7 +477,7 @@ class GridView {
             if (st.align == "center") {
                 return (to_double (rect.x + (to_int ((to_double (rect.w - textW)) / 2.0))))
             }
-            return (to_double (rect.x + 4))
+            return (to_double ((rect.x + 4) + (st.indent * 9)))
         }
         ; Nothing stated, which is Excel's `general`: the side comes from the
         ; cell's reading order, and a right-to-left cell belongs against the
@@ -466,6 +493,14 @@ class GridView {
         if (st.readingOrder == 2) {
             return (to_double ((rect.x + rect.w) - textW - 4))
         }
+        ; Excel's `general` also puts numbers on the right, and logical values
+        ; and errors in the middle. `generalSide` is the cell being painted.
+        if (generalSide == "right") {
+            return (to_double ((rect.x + rect.w) - textW - 4))
+        }
+        if (generalSide == "center") {
+            return (to_double (rect.x + (to_int ((to_double (rect.w - textW)) / 2.0))))
+        }
         if (st.readingOrder == 0) {
             if (OfficeText.isRtl(text)) {
                 return (to_double ((rect.x + rect.w) - textW - 4))
@@ -477,6 +512,9 @@ class GridView {
     fn paintDecoration:void (dl:EVGDisplayList st:CellStyle tx:double top:int textW:int cellPx:double col:EVGColor) {
         if st.underline {
             this.pushRect(dl tx (to_double (top + (to_int cellPx))) (to_double textW) 1.0 col)
+            if st.doubleUnderline {
+                this.pushRect(dl tx (to_double ((top + (to_int cellPx)) + 2)) (to_double textW) 1.0 col)
+            }
         }
         if st.strike {
             this.pushRect(dl tx (to_double (top + (to_int (cellPx * 0.55)))) (to_double textW) 1.0 col)
@@ -722,7 +760,7 @@ class GridView {
         if ((textW + 8) > rect.w) {
             def wantsLeft:boolean false
             def wantsRight:boolean false
-            if (st.align == "right") {
+            if ((st.align == "right") || ((st.alignSet == false) && (generalSide == "right"))) {
                 wantsLeft = true
             } {
                 if (st.align == "center") {
@@ -777,6 +815,11 @@ class GridView {
             return
         }
         def st:CellStyle (model.getCellStyle(r c))
+        ; A table's style (header fill, bands, bold totals) under the cell's own.
+        def tblAt:int (model.tableIndexAt(r c))
+        if (tblAt >= 0) {
+            st = (TableLook.apply((model.tableAt(tblAt)) r c st))
+        }
         def cfFill:string (ConditionalFormat.resolveFill(model r c))
         if ((strlen cfFill) > 0) {
             def cfBg:EVGColor (EVGColor.parse(cfFill))
@@ -793,9 +836,18 @@ class GridView {
             }
         }
         def txt:string (model.getDisplay(r c))
+        generalSide = (GridView.generalSide((model.getCell(r c)) st.numFmt))
+        ; Formulas > Show Formulas: the formula itself, on the left.
+        if model.showFormulas {
+            if (model.hasFormula(r c)) {
+                txt = (model.formulaBarText(r c))
+                generalSide = ""
+            }
+        }
         if editing {
             if ((r == sel.active.row) && (c == sel.active.col)) {
                 txt = editBuf
+                generalSide = ""
             }
         }
         ; A cell that links somewhere says so the way every document does: in
@@ -881,6 +933,12 @@ class GridView {
                 }
             }
         }
+        if (tblAt >= 0) {
+            def tb:SheetTable (model.tableAt(tblAt))
+            if (tb.showFilter && (tb.hasHeader()) && (r == tb.r0)) {
+                this.paintFilterButton(dl rect (model.filterActiveOn(c)))
+            }
+        }
         ; A note is marked rather than shown: the text would cover the numbers
         ; it is about. The corner triangle is the mark every spreadsheet uses.
         if (model.hasNote(r c)) {
@@ -893,6 +951,49 @@ class GridView {
                 my = (my + 1)
                 step = (step + 1)
             }
+        }
+    }
+
+    ; The drop-down button at the right end of a table's header cell: a small
+    ; raised box with a downward arrow, the arrow replaced by a funnel mark
+    ; while that column is filtered. `filterButtonRect` is its hit box.
+    sfn filterButtonRect:GridRect (cell:GridRect) {
+        def sz:int (cell.h - 6)
+        if (sz > 16) {
+            sz = 16
+        }
+        if (sz < 9) {
+            sz = 9
+        }
+        def b:GridRect (new GridRect)
+        b.x = ((cell.x + cell.w) - (sz + 3))
+        b.y = (cell.y + (idiv (cell.h - sz) 2))
+        b.w = sz
+        b.h = sz
+        return b
+    }
+
+    fn paintFilterButton:void (dl:EVGDisplayList cell:GridRect filtered:boolean) {
+        def b:GridRect (GridView.filterButtonRect(cell))
+        def edge:EVGColor (EVGColor.rgb(166 166 166))
+        def face:EVGColor (EVGColor.rgb(250 250 250))
+        def ink:EVGColor (EVGColor.rgb(64 64 64))
+        this.pushRect(dl (to_double b.x) (to_double b.y) (to_double b.w) (to_double b.h) edge)
+        this.pushRect(dl (to_double (b.x + 1)) (to_double (b.y + 1)) (to_double (b.w - 2)) (to_double (b.h - 2)) face)
+        ; Arrow: rows of a down-pointing triangle, 7 wide at the top.
+        def aw:int 7
+        def ax:int (b.x + (idiv (b.w - aw) 2))
+        def ay:int (b.y + (idiv b.h 2) - 2)
+        if filtered {
+            ay = (ay - 2)
+        }
+        def i:int 0
+        while (i < 4) {
+            this.pushRect(dl (to_double (ax + i)) (to_double (ay + i)) (to_double (aw - (2 * i))) 1.0 ink)
+            i = (i + 1)
+        }
+        if filtered {
+            this.pushRect(dl (to_double (ax + 3)) (to_double (ay + 4)) 1.0 4.0 ink)
         }
     }
 
@@ -1555,9 +1656,15 @@ class GridView {
         }
         this.paintCellRange(dl model sel grid editing editBuf grid.firstScrollRow grid.lastScrollRow grid.firstScrollCol grid.lastScrollCol)
 
-        ; vertical grid lines (scrollable + frozen) — VIEW indices
+        ; vertical grid lines (scrollable + frozen) — VIEW indices. View >
+        ; Gridlines off draws none; the loops simply run to nothing.
         def vc:int 0
         def vcLast:int grid.lastScrollCol
+        def vrLast:int grid.lastScrollRow
+        if (model.showGridlines == false) {
+            vcLast = -1
+            vrLast = -1
+        }
         while (vc <= vcLast) {
             def mc2:int (grid.mapCol(vc))
             def vr:GridRect (grid.cellRect(model (grid.mapRow(grid.firstScrollRow)) mc2))
@@ -1569,7 +1676,6 @@ class GridView {
             vc = (vc + 1)
         }
         def vr2:int 0
-        def vrLast:int grid.lastScrollRow
         while (vr2 <= vrLast) {
             def mr2:int (grid.mapRow(vr2))
             def rr2:GridRect (grid.cellRect(model mr2 (grid.mapCol(grid.firstScrollCol))))
@@ -1934,6 +2040,9 @@ class GridView {
                         ; show that this one has been picked up.
                         if (si == tabDragFrom) {
                             this.pushRect(dl (to_double tabX) (to_double tabY) (to_double tabW) (to_double grid.sheetTabH) theme.selection)
+                        }
+                        if ((strlen sheet.tabColor) > 0) {
+                            this.pushRect(dl (to_double (tabX + 1)) (to_double ((tabY + grid.sheetTabH) - 4)) (to_double (tabW - 2)) 3.0 (this.colorOr(sheet.tabColor theme.gridLine)))
                         }
                         this.pushText(dl shown (to_double (tabX + tabPad)) (to_double (tabY + 5)) 12.0 theme.headerText)
                         this.pushRect(dl (to_double ((tabX + tabW) - 1)) (to_double tabY) 1.0 (to_double grid.sheetTabH) theme.gridLine)

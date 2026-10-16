@@ -357,6 +357,10 @@ class FormulaParser {
             }
             return inner
         }
+        ; `[Column]` with no table in front: the table the formula sits in.
+        if (ch == 91) {
+            return (this.parseStructured(""))
+        }
         ; name / sheet / cell / function
         if (((ch >= 65) && (ch <= 90)) || ((ch >= 97) && (ch <= 122)) || (ch == 95) || (ch == 36)) {
             return (this.parseNameOrRef())
@@ -1612,6 +1616,7 @@ class FormulaEngine {
     ; `registerFormula` before it collects dependencies.
     def curRow:int 0
     def curCol:int 0
+    def curSheet:int 0
 
     Constructor () {
     }
@@ -1692,6 +1697,7 @@ class FormulaEngine {
         ; this is the other place that has to say which cell that is.
         curRow = row
         curCol = col
+        curSheet = sheetIdx
         this.collectDeps(ast sheetIdx depList)
         def joined:string ""
         def i:int 0
@@ -2146,6 +2152,7 @@ class FormulaEngine {
         }
         curRow = row
         curCol = col
+        curSheet = si
         def v:FormulaValue (this.evalNode(ast si))
         recalculated = (recalculated + 1)
         def _eV:boolean (v.isError())
@@ -2241,12 +2248,25 @@ class FormulaEngine {
     ;           reference is well formed, it just has nothing to point at here
     fn resolveTableRef:TableRange (n:FormulaNode) {
         def out:TableRange (new TableRange)
-        def si:int (book.tableIndexByName(n.tableName))
+        ; `[Q1]` with no table name, as Excel writes it inside a table (its
+        ; totals row, a calculated column), means the table the formula is in.
+        def tname:string n.tableName
+        if ((strlen tname) == 0) {
+            if ((curSheet >= 0) && (curSheet < (book.sheetCount()))) {
+                def host:SpreadsheetModel (book.sheetAt(curSheet))
+                def ht:int (host.tableIndexAt(curRow curCol))
+                if (ht >= 0) {
+                    def hostT:SheetTable (host.tableAt(ht))
+                    tname = hostT.name
+                }
+            }
+        }
+        def si:int (book.tableIndexByName(tname))
         if (si < 0) {
             out.err = "#NAME?"
             return out
         }
-        def t:SheetTable (book.tableByName(n.tableName))
+        def t:SheetTable (book.tableByName(tname))
         out.sheetIdx = si
 
         ; Columns first: a named column narrows the rectangle sideways, and a

@@ -48,6 +48,11 @@ class XlsxTable {
         def p:XmlLite (new XmlLite)
         p.reset(xml)
         def inColumns:boolean false
+        ; A table part with no autoFilter element has no filter buttons, and one
+        ; with no tableStyleInfo is drawn plain.
+        t.showFilter = false
+        t.styleName = ""
+        t.showRowStripes = false
         while (p.pos < p.len) {
             def tag:XmlTag (p.nextTag())
             if (tag.valid == false) {
@@ -73,6 +78,16 @@ class XlsxTable {
                 } {
                     t.totalsRowCount = 0
                 }
+            }
+            if ((tag.name == "autoFilter") && (tag.isEnd == false)) {
+                t.showFilter = true
+            }
+            if ((tag.name == "tableStyleInfo") && (tag.isEnd == false)) {
+                t.styleName = (tag.attr("name"))
+                t.showRowStripes = ((tag.attr("showRowStripes")) == "1")
+                t.showColumnStripes = ((tag.attr("showColumnStripes")) == "1")
+                t.showFirstColumn = ((tag.attr("showFirstColumn")) == "1")
+                t.showLastColumn = ((tag.attr("showLastColumn")) == "1")
             }
             if (tag.name == "tableColumns") {
                 if tag.isEnd {

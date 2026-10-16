@@ -50,6 +50,9 @@ class GridFormat {
         if (op == "border")    { return true }
         if (op == "rotate")    { return true }
         if (op == "clear")     { return true }
+        if (op == "indent")    { return true }
+        if (op == "locked")    { return true }
+        if (op == "dunderline") { return true }
         return false
     }
 
@@ -64,6 +67,8 @@ class GridFormat {
         if (op == "align")     { return (st.align == arg) }
         if (op == "valign")    { return (st.valign == arg) }
         if (op == "numfmt")    { return (st.numFmt == (GridFormat.namedFormat(arg))) }
+        if (op == "locked")    { return st.locked }
+        if (op == "dunderline") { return st.doubleUnderline }
         if (op == "border") {
             if (arg == "none") {
                 return (st.hasBorder == false)
@@ -174,6 +179,7 @@ class GridFormat {
         }
         if (op == "underline") {
             st.underline = on
+            st.doubleUnderline = false
             return
         }
         if (op == "strike") {
@@ -191,6 +197,33 @@ class GridFormat {
         }
         if (op == "valign") {
             st.valign = arg
+            return
+        }
+        if (op == "indent") {
+            def step@(optional):int (to_int arg)
+            if step {
+                def n:int (st.indent + (unwrap step))
+                if (n < 0) {
+                    n = 0
+                }
+                if (n > 15) {
+                    n = 15
+                }
+                st.indent = n
+                if ((n > 0) && ((st.alignSet == false) || (st.align == "center"))) {
+                    st.align = "left"
+                    st.alignSet = true
+                }
+            }
+            return
+        }
+        if (op == "locked") {
+            st.locked = on
+            return
+        }
+        if (op == "dunderline") {
+            st.doubleUnderline = on
+            st.underline = on
             return
         }
         if (op == "rotate") {

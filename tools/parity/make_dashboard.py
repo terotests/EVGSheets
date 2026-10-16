@@ -68,8 +68,7 @@ ws.add_table("B4:I11", {
         {"header": "Q4", "format": money, "total_function": "sum"},
         {"header": "Total", "format": money, "formula": "=SUM(SalesTable[@[Q1]:[Q4]])", "total_function": "sum"},
         {"header": "Growth", "format": pct, "formula": "=SalesTable[@Q4]/SalesTable[@Q1]-1",
-         "total_function": "custom", "total_value": 0.277,
-         "total_formula": "=SUBTOTAL(109,SalesTable[Q4])/SUBTOTAL(109,SalesTable[Q1])-1"},
+         "total_function": "=SUBTOTAL(109,[Q4])/SUBTOTAL(109,[Q1])-1", "total_value": 0.2997},
         {"header": "Trend"},
     ],
 })

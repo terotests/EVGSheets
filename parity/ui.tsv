@@ -17,9 +17,9 @@ F2	Formula bar	Cancel, Enter and Insert Function (fx) buttons	3	yes	no	probe:ui.
 F3	Formula bar	Expand the formula bar	2	yes	no	-	
 F4	Formula bar	Function autocomplete and argument tips	2	yes	no	-	only in the script editor
 F5	Formula bar	Point mode and reference colouring	1	yes	partial	-	references are highlighted; no point mode check
-G1	Grid	Grid fills the window to the right edge	3	yes	no	probe:ui.gridFillsWindow	columns stop after the used range
-G2	Grid	Rows fill the window to the bottom	3	yes	no	probe:ui.rowsFillWindow	rows stop after the used range
-G3	Grid	Numbers right-aligned by default	3	yes	no	probe:wb.numbersRight	
+G1	Grid	Grid fills the window to the right edge	3	yes	yes	probe:ui.gridFillsWindow	
+G2	Grid	Rows fill the window to the bottom	3	yes	yes	probe:ui.rowsFillWindow	
+G3	Grid	Numbers right-aligned by default	3	yes	yes	probe:wb.numbersRight	
 G4	Grid	Typing into a cell, Enter/Tab movement	1	yes	yes	smoke:typing goes into the cell	
 G5	Grid	Context menu on cells	1	yes	yes	smoke:right click opens the context menu	
 G6	Grid	Context menus on row and column headers	1	yes	yes	smoke:right click on a column header opens the column menu	
@@ -31,10 +31,10 @@ T1	Target workbook	Opens the dashboard workbook	1	yes	yes	probe:wb.opens
 T2	Target workbook	Currency formats ($48,200)	1	yes	yes	probe:wb.values	
 T3	Target workbook	Percent formats (28.4%)	1	yes	yes	probe:wb.percent	
 T4	Target workbook	Formatted table read from the file	1	yes	yes	probe:wb.table	
-T5	Target workbook	Table style drawn (header fill)	3	yes	no	probe:wb.tableStyle	
-T6	Target workbook	Banded rows	3	yes	no	probe:wb.banding	
-T7	Target workbook	Filter buttons in the table header	3	yes	no	probe:wb.tableFilters	
-T8	Target workbook	Table total row computes (SUBTOTAL over table columns)	3	yes	no	probe:wb.totalRow	shows $0 and #REF!, so C16 =G10/G11 is #DIV/0!
+T5	Target workbook	Table style drawn (header fill)	3	yes	yes	probe:wb.tableStyle	
+T6	Target workbook	Banded rows	3	yes	yes	probe:wb.banding	
+T7	Target workbook	Filter buttons in the table header	3	yes	partial	probe:wb.tableFilters	drawn; a click does not open the filter yet
+T8	Target workbook	Table total row computes (SUBTOTAL over table columns)	3	yes	yes	probe:wb.totalRow	
 T9	Target workbook	Structured references in formulas over the table	2	yes	yes	probe:wb.structuredRefs	
 T10	Target workbook	Data bars	3	yes	no	probe:wb.dataBars	only cellIs and colour-scale rules are read
 T11	Target workbook	Icon sets	3	yes	no	probe:wb.iconSets	
@@ -46,7 +46,7 @@ S2	Sheet tabs	Add sheet (+)	1	yes	yes	probe:ui.addSheet
 S3	Sheet tabs	Rename, reorder by drag, tab menu	1	yes	yes	smoke:dragging a tab reorders the sheets	
 S4	Sheet tabs	Scroll arrows for many sheets	2	yes	no	probe:ui.tabScroll	
 S5	Sheet tabs	Tab colour, hide and unhide	2	yes	no	-	
-B1	Status bar	Mode indicator (Ready, Enter, Edit)	2	yes	no	probe:ui.statusReady	shows the last action instead
+B1	Status bar	Mode indicator (Ready, Enter, Edit)	2	yes	yes	probe:ui.statusReady	
 B2	Status bar	Sum, Average and Count of the selection	1	yes	yes	probe:ui.statusStats	
 B3	Status bar	Zoom slider and percentage	3	yes	no	probe:ui.zoom	
 B4	Status bar	View buttons (Normal, Page Layout, Page Break Preview)	3	yes	no	probe:ui.viewButtons	

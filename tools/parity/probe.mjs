@@ -17,6 +17,7 @@
  */
 import http from "node:http";
 import fs from "node:fs";
+import zlib from "node:zlib";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -154,7 +155,7 @@ try {
   const q1 = cell("Q1");
   ok("wb.tableFilters", q1 && (await inked(q1, 0.75, 0.97, 0.5)), "");
   // Numbers sit at the right of their cell unless told otherwise.
-  const n48 = cell("$48,200");
+  const n48 = cell("$39,150"); // an unbanded row
   ok("wb.numbersRight", n48 && !(await inked(n48, 0.08, 0.3, 0.5)) && (await inked(n48, 0.7, 0.95, 0.5)), "");
   ok("wb.dataBars", await coloured(cell("$271,960"), 0.05, 0.6, 0.8), "cf kinds read: " + JSON.stringify(m.cf));
   ok("wb.iconSets", await coloured(cell("28.4%"), 0.02, 0.4, 0.5));
@@ -317,11 +318,362 @@ try {
   ok("cmd.data.sortDescending", (await get(0, 0)) === "3", [await get(0, 0), await get(1, 0), await get(2, 0)].join(","));
 
 
+  // --- Excel ribbon commands by their catalog ids ------------------------------
+  // On a fresh sheet, so nothing here leans on the dashboard.
+  const J = (fn, arg) => page.evaluate(fn, arg);
+  const M = (expr) => page.evaluate(new Function("const G = window.sheet.app.grid.app, M = G.model; return (" + expr + ");"));
+  const check = async (id, fn) => {
+    try {
+      const [pass, detail] = await fn();
+      ok("cmd." + id, !!pass, detail === undefined ? "" : String(detail));
+    } catch (e) {
+      ok("cmd." + id, false, String(e && e.message || e).slice(0, 120));
+    }
+  };
+  const sel = async (ref) => {
+    const [a, b] = ref.split(":");
+    await at(a);
+    if (b) await page.evaluate(([b]) => {
+      const G = window.sheet.app.grid.app;
+      const m = /^([A-Z]+)(\d+)$/.exec(b);
+      let c = 0;
+      for (const ch of m[1]) c = c * 26 + ch.charCodeAt(0) - 64;
+      G.sel.active.row = +m[2] - 1;
+      G.sel.active.col = c - 1;
+    }, [b]);
+  };
+  const cellAt = (ref) => page.evaluate(([ref]) => {
+    const G = window.sheet.app.grid.app;
+    const m = /^([A-Z]+)(\d+)$/.exec(ref);
+    let c = 0;
+    for (const ch of m[1]) c = c * 26 + ch.charCodeAt(0) - 64;
+    return G.model.getDisplay(+m[2] - 1, c - 1);
+  }, [ref]);
+  const style = (r, c) => page.evaluate(([r, c]) => {
+    const s = window.sheet.app.grid.app.model.getCellStyle(r, c);
+    return { indent: s.indent, locked: s.locked, dbl: s.doubleUnderline, rot: s.textRotation, fill: s.fillRgb, text: s.textRgb, bold: s.bold, align: s.align, border: s.hasBorder };
+  }, [r, c]);
+  const unzip = (bytes) => {
+    const buf = Buffer.from(bytes);
+    const out = {};
+    let eocd = buf.length - 22;
+    while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+    let p = buf.readUInt32LE(eocd + 16);
+    const n = buf.readUInt16LE(eocd + 10);
+    for (let i = 0; i < n; i++) {
+      const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20);
+      const nl = buf.readUInt16LE(p + 28), xl = buf.readUInt16LE(p + 30), cl = buf.readUInt16LE(p + 32);
+      const local = buf.readUInt32LE(p + 42);
+      const name = buf.toString("utf8", p + 46, p + 46 + nl);
+      const lnl = buf.readUInt16LE(local + 26), lxl = buf.readUInt16LE(local + 28);
+      const data = buf.subarray(local + 30 + lnl + lxl, local + 30 + lnl + lxl + size);
+      out[name] = (method === 8 ? zlib.inflateRawSync(data) : data).toString("utf8");
+      p += 46 + nl + xl + cl;
+    }
+    return out;
+  };
+  const savedXml = async () => unzip(await page.evaluate(() => Array.from(new Uint8Array(window.sheet.saveBytes()))));
+
+  await run("sheet.add");
+  const sheetIdx = (await S()).activeSheet;
+
+  // Home: alignment and font
+  await put("A1", "x");
+  await sel("A1:C1");
+  await run("home.mergeCenter");
+  await check("home.mergeCenter", async () => { await at("A1"); const s = await S(); return [s.merged && s.align === "center", s.merged + "," + s.align]; });
+  await sel("A3:C4");
+  await run("home.mergeAcross");
+  await check("home.mergeAcross", async () => [await M("M.mergeAt(2,0) !== '' && M.mergeAt(3,0) !== '' && M.mergeAt(2,0) !== M.mergeAt(3,0)"), await M("M.mergeAt(2,0) + '|' + M.mergeAt(3,0)")]);
+  await sel("A3:C4");
+  await run("home.unmergeCells");
+  await check("home.unmergeCells", async () => [await M("M.mergeAt(2,0) === '' && M.mergeAt(3,0) === ''")]);
+  await at("B6");
+  await run("home.orientation", "counterclockwise");
+  await check("home.orientation", async () => { const s = await style(5, 1); return [s.rot === 45, s.rot]; });
+  await run("home.increaseIndent");
+  await run("home.increaseIndent");
+  await check("home.increaseIndent", async () => { const s = await style(5, 1); return [s.indent === 2, s.indent]; });
+  await run("home.decreaseIndent");
+  await check("home.decreaseIndent", async () => { const s = await style(5, 1); return [s.indent === 1, s.indent]; });
+  await run("home.doubleUnderline");
+  await check("home.doubleUnderline", async () => { const s = await style(5, 1); return [s.dbl === true, s.dbl]; });
+  await run("home.drawBorder", "all");
+  await check("home.drawBorder", async () => { const s = await style(5, 1); return [s.border === true]; });
+  await at("B7");
+  await run("home.cellStyle", "Bad");
+  await check("home.cellStyle", async () => { const s = await style(6, 1); return [/FFC7CE/i.test(s.fill) && /9C0006/i.test(s.text), s.fill + " " + s.text]; });
+
+  // Home: cells
+  await sel("A8:A9");
+  await run("home.rowHeight", "30");
+  await check("home.rowHeight", async () => { const h = await M("M.rowHeight(7)"); return [h === 40, h]; });
+  await sel("D1:E1");
+  await run("home.columnWidth", "20");
+  await check("home.columnWidth", async () => { const w = await M("M.colWidth(3)"); return [w === 145, w]; });
+  await run("home.defaultWidth", "10");
+  await check("home.defaultWidth", async () => { const w = await M("M.defaultColW"); return [w === 75, w]; });
+  await sel("A10:A11");
+  await run("home.hideRows");
+  await check("home.hideRows", async () => [await M("M.isRowHidden(9) && M.isRowHidden(10)")]);
+  await sel("A9:A12");
+  await run("home.unhideRows");
+  await check("home.unhideRows", async () => [await M("!M.isRowHidden(9) && !M.isRowHidden(10)")]);
+  await sel("F1:G1");
+  await run("home.hideColumns");
+  await check("home.hideColumns", async () => [await M("M.isColHidden(5) && M.isColHidden(6)")]);
+  await sel("E1:H1");
+  await run("home.unhideColumns");
+  await check("home.unhideColumns", async () => [await M("!M.isColHidden(5) && !M.isColHidden(6)")]);
+  await put("H1", "1");
+  await put("H2", "2");
+  await at("H1");
+  await run("home.insertCells", "down");
+  await check("home.insertCells", async () => [(await cellAt("H1")) === "" && (await cellAt("H2")) === "1" && (await cellAt("H3")) === "2", [await cellAt("H1"), await cellAt("H2"), await cellAt("H3")].join(",")]);
+  await at("H1");
+  await run("home.deleteCells", "up");
+  await check("home.deleteCells", async () => [(await cellAt("H1")) === "1" && (await cellAt("H2")) === "2", [await cellAt("H1"), await cellAt("H2")].join(",")]);
+  await sel("H1:H2");
+  const cf0 = await M("M.cfRuleCount()");
+  await run("home.conditionalFormat", "colorScale");
+  await check("home.conditionalFormat", async () => { const n = await M("M.cfRuleCount()"); return [n === cf0 + 1, cf0 + "→" + n]; });
+  await run("home.clearRules");
+  await check("home.clearRules", async () => { const n = await M("M.cfRuleCount()"); return [n === cf0, n]; });
+
+  // Editing
+  await put("J1", "5");
+  await put("J2", "7");
+  await put("K1", "=J1*2");
+  await sel("K1:K3");
+  await run("edit.fillDown");
+  await check("edit.fillDown", async () => [(await M("M.getFormula(1,10)")) === "J2*2" && (await cellAt("K2")) === "14", (await M("M.getFormula(1,10)")) + " = " + (await cellAt("K2"))]);
+  await put("M3", "=J3+1");
+  await sel("M1:M3");
+  await run("edit.fillUp");
+  await check("edit.fillUp", async () => [(await M("M.getFormula(0,12)")) === "J1+1" && (await cellAt("M1")) === "6", (await M("M.getFormula(0,12)")) + " = " + (await cellAt("M1"))]);
+  await put("J5", "a");
+  await sel("J5:L5");
+  await run("edit.fillRight");
+  await check("edit.fillRight", async () => [(await cellAt("L5")) === "a"]);
+  await put("L6", "b");
+  await sel("J6:L6");
+  await run("edit.fillLeft");
+  await check("edit.fillLeft", async () => [(await cellAt("J6")) === "b"]);
+  await put("J8", "10");
+  await sel("J8:J11");
+  await run("edit.fillSeries", "5");
+  await check("edit.fillSeries", async () => [(await cellAt("J11")) === "25", await cellAt("J11")]);
+  await sel("J8:K11");
+  await run("edit.goToSpecial", "blanks");
+  await check("edit.goToSpecial", async () => { const n = await M("G.sel.selectedCount()"); return [n === 4, n]; });
+  await run("edit.goTo", "Z40");
+  await check("edit.goTo", async () => [(await S()).cell === "Z40", (await S()).cell]);
+  await at("J12");
+  await run("formulas.autoSum");
+  await check("formulas.autoSum", async () => [(await M("M.getFormula(11,9)")) === "SUM(J8:J11)" && (await cellAt("J12")) === "70", (await M("M.getFormula(11,9)")) + " = " + (await cellAt("J12"))]);
+  await at("J8");
+  await run("review.newNote", "check this");
+  await check("review.newNote", async () => [(await M("M.noteAt(7,9)")) === "check this"]);
+  await at("J10");
+  await run("review.newComment", "and this");
+  await check("review.newComment", async () => [(await M("M.noteAt(9,9)")) === "and this"]);
+  await at("A1");
+  await run("review.nextComment");
+  await check("review.nextComment", async () => [(await S()).cell === "J8", (await S()).cell]);
+  await run("review.nextComment");
+  await run("review.previousComment");
+  await check("review.previousComment", async () => [(await S()).cell === "J8", (await S()).cell]);
+  await at("J10");
+  await run("review.deleteComment");
+  await check("review.deleteComment", async () => [!(await M("M.hasNote(9,9)"))]);
+  await at("J8");
+  await run("edit.clearComments");
+  await check("edit.clearComments", async () => [!(await M("M.hasNote(7,9)"))]);
+  await page.evaluate(() => window.sheet.app.grid.app.model.setHyperlink(8, 9, "https://example.com"));
+  await at("J9");
+  await run("edit.clearHyperlinks");
+  await check("edit.clearHyperlinks", async () => [!(await M("M.hasHyperlink(8,9)")) && (await cellAt("J9")) === "15", await cellAt("J9")]);
+  await at("B7");
+  await run("edit.clearAll");
+  await check("edit.clearAll", async () => { const s = await style(6, 1); return [s.fill === "" && (await cellAt("B7")) === "", s.fill]; });
+  await run("review.workbookStatistics");
+  await check("review.workbookStatistics", async () => { const s = (await S()).status; return [/formulas \d+/.test(s) && /Sheets \d+/.test(s), s]; });
+
+  // Formulas
+  await at("K1");
+  await run("formulas.showFormulas");
+  await check("formulas.showFormulas", async () => [await M("M.showFormulas === true")]);
+  await run("formulas.showFormulas");
+  await page.evaluate(() => window.sheet.app.grid.app.model.setCellRaw(0, 9, "50"));
+  await run("formulas.calculateNow");
+  await check("formulas.calculateNow", async () => [(await cellAt("K1")) === "100", await cellAt("K1")]);
+  await page.evaluate(() => window.sheet.app.grid.app.model.setCellRaw(0, 9, "60"));
+  await run("formulas.calculateSheet");
+  await check("formulas.calculateSheet", async () => [(await cellAt("K1")) === "120", await cellAt("K1")]);
+  await at("J12");
+  await run("formulas.tracePrecedents");
+  await check("formulas.tracePrecedents", async () => { const n = await M("G.sel.selectedCount()"); return [n === 4 && (await S()).cell === "J11", n + " " + (await S()).cell]; });
+  const fnCats = [["financial", "PMT"], ["logical", "IF"], ["text", "LEFT"], ["dateTime", "DATE"], ["lookupReference", "VLOOKUP"], ["mathTrig", "ROUND"], ["moreFunctions", "AVERAGE"], ["recentlyUsed", "SUM"], ["insertFunction", "SUM"]];
+  for (const [cat, fn] of fnCats) {
+    await at("N20");
+    await run("formulas." + cat, fn);
+    const s = await S();
+    ok("cmd.formulas." + cat, s.editing && s.editText === "=" + fn + "(", s.editText);
+    await page.keyboard.press("Escape");
+  }
+
+  // Data
+  for (const [ref, v] of [["P1", "a"], ["P2", "b"], ["P3", "a"], ["P4", "c"], ["P5", "b"]]) await put(ref, v);
+  await sel("P1:P5");
+  await run("data.removeDuplicates");
+  await check("data.removeDuplicates", async () => { const v = []; for (let i = 1; i <= 5; i++) v.push(await cellAt("P" + i)); return [v.join(",") === "a,b,c,,", v.join(",")]; });
+  await put("R1", "x;y;z");
+  await at("R1");
+  await run("data.textToColumns", "semicolon");
+  await check("data.textToColumns", async () => [(await cellAt("R1")) === "x" && (await cellAt("T1")) === "z", [await cellAt("R1"), await cellAt("S1"), await cellAt("T1")].join(",")]);
+
+  // View
+  await run("view.gridlines");
+  await check("view.gridlines", async () => [await M("M.showGridlines === false")]);
+  await run("view.gridlines");
+  const hw0 = await M("G.grid.rowHeaderW");
+  await run("view.headings");
+  await check("view.headings", async () => { const w = await M("G.grid.rowHeaderW"); return [w === 0 && hw0 > 0, hw0 + "→" + w]; });
+  await run("view.headings");
+  await run("view.freezeTopRow");
+  await check("view.freezeTopRow", async () => { const s = await S(); return [s.freezeRows === 1 && s.freezeCols === 0]; });
+  await run("view.freezeFirstColumn");
+  await check("view.freezeFirstColumn", async () => { const s = await S(); return [s.freezeRows === 0 && s.freezeCols === 1]; });
+  await run("view.freeze.none");
+  await check("view.normal", async () => [await run("view.normal")]);
+
+  // Tables, on a block of their own
+  for (const [ref, v] of [["A20", "Name"], ["B20", "Qty"], ["A21", "a"], ["B21", "1"], ["A22", "b"], ["B22", "2"], ["A23", "a"], ["B23", "1"]]) await put(ref, v);
+  await at("A20");
+  await run("home.formatAsTable", "TableStyleLight9");
+  await check("home.formatAsTable", async () => [(await M("M.tableIndexAt(22,1)")) >= 0 && (await M("M.tableAt(M.tableIndexAt(22,1)).styleName")) === "TableStyleLight9", await M("M.tableCount()")]);
+  await at("A21");
+  await run("table.rename", "Stock");
+  await check("table.rename", async () => [(await M("M.tableAt(M.tableIndexAt(20,0)).name")) === "Stock"]);
+  await run("table.removeDuplicates");
+  await check("table.removeDuplicates", async () => [(await cellAt("A23")) === "" && (await cellAt("A22")) === "b", [await cellAt("A21"), await cellAt("A22"), await cellAt("A23")].join(",")]);
+  await run("table.resize", "A20:B23");
+  await check("table.resize", async () => [(await M("M.tableAt(M.tableIndexAt(20,0)).r1")) === 22]);
+  await run("table.resize", "A20:B22");
+  await run("table.totalRow");
+  await check("table.totalRow", async () => [(await cellAt("A23")) === "Total" && (await cellAt("B23")) === "3", [await cellAt("A23"), await cellAt("B23"), await M("M.getFormula(22,1)")].join(" ")]);
+  for (const [cmd, field] of [["table.bandedRows", "showRowStripes"], ["table.bandedColumns", "showColumnStripes"], ["table.firstColumn", "showFirstColumn"], ["table.lastColumn", "showLastColumn"]]) {
+    await at("A21");
+    const before = await M("M.tableAt(M.tableIndexAt(20,0))." + field);
+    await run(cmd);
+    const after = await M("M.tableAt(M.tableIndexAt(20,0))." + field);
+    ok("cmd." + cmd, before !== after, before + "→" + after);
+  }
+  await at("A21");
+  await run("table.style", "TableStyleDark2");
+  await check("table.style", async () => [(await M("M.tableAt(M.tableIndexAt(20,0)).styleName")) === "TableStyleDark2"]);
+  await run("table.headerRow");
+  await check("table.headerRow", async () => [(await M("M.tableAt(M.tableIndexAt(21,0)).r0")) === 20 && (await M("M.tableAt(M.tableIndexAt(21,0)).headerRowCount")) === 0]);
+  await run("table.headerRow");
+  await at("A21");
+  await run("table.convertToRange");
+  await check("table.convertToRange", async () => { const s = await style(19, 0); return [(await M("M.tableIndexAt(20,0)")) < 0 && s.fill !== "", s.fill]; });
+  for (const [ref, v] of [["D20", "k"], ["D21", "1"]]) await put(ref, v);
+  await sel("D20:D21");
+  await run("insert.table");
+  await check("insert.table", async () => [(await M("M.tableIndexAt(20,3)")) >= 0]);
+  await at("F20");
+  await run("insert.symbol", "€");
+  await check("insert.symbol", async () => { const s = await S(); return [s.editing && s.editText.endsWith("€"), s.editText]; });
+  await page.keyboard.press("Escape");
+
+  // Page Layout, read back from the saved file
+  await sel("A20:B23");
+  await run("pageLayout.printArea");
+  await run("pageLayout.printTitles", "20:20");
+  await run("pageLayout.orientation", "landscape");
+  await run("pageLayout.size", "a4");
+  await run("pageLayout.margins", "narrow");
+  await run("pageLayout.printGridlines");
+  await run("pageLayout.printHeadings");
+  await run("pageLayout.scaleToFit", "1,0");
+  await at("A22");
+  await run("pageLayout.breaks", "insert");
+  await run("pageLayout.headerFooter", "Quarterly|Page &P");
+  await run("sheet.tabColor", "#FF0000");
+  const parts = await savedXml();
+  const sx = Object.keys(parts).filter((k) => /^xl\/worksheets\/[^/]+\.xml$/.test(k)).map((k) => parts[k]).join("\n");
+  const wbx = parts["xl/workbook.xml"] || "";
+  ok("cmd.pageLayout.printArea", /_xlnm\.Print_Area[^>]*>[^<]*\$A\$20:\$B\$23</.test(wbx), (wbx.match(/<definedNames>.*<\/definedNames>/) || [""])[0].slice(0, 120));
+  ok("cmd.pageLayout.printTitles", /_xlnm\.Print_Titles[^>]*>[^<]*\$20:\$20</.test(wbx));
+  ok("cmd.pageLayout.orientation", /<pageSetup[^>]*orientation="landscape"/.test(sx), (sx.match(/<pageSetup[^>]*>/) || [""])[0]);
+  ok("cmd.pageLayout.size", /<pageSetup[^>]*paperSize="9"/.test(sx));
+  ok("cmd.pageLayout.margins", /<pageMargins left="0.25"/.test(sx), (sx.match(/<pageMargins[^>]*>/) || [""])[0]);
+  ok("cmd.pageLayout.printGridlines", /<printOptions[^>]*gridLines="1"/.test(sx));
+  ok("cmd.pageLayout.printHeadings", /<printOptions[^>]*headings="1"/.test(sx));
+  ok("cmd.pageLayout.scaleToFit", /fitToPage="1"/.test(sx) && /fitToWidth="1"/.test(sx), (sx.match(/<sheetPr>.*?<\/sheetPr>/) || [""])[0]);
+  ok("cmd.pageLayout.breaks", /<rowBreaks[^>]*><brk id="21"/.test(sx));
+  ok("cmd.pageLayout.headerFooter", /<oddHeader>&amp;CQuarterly<\/oddHeader>/.test(sx));
+  ok("cmd.sheet.tabColor", /<tabColor rgb="FFFF0000"\/>/.test(sx));
+
+  // Protection
+  await at("H5");
+  await run("home.lockCell");
+  await check("home.lockCell", async () => { const s = await style(4, 7); return [s.locked === false]; });
+  await run("review.protectSheet");
+  await put("H5", "open");
+  await put("H6", "shut");
+  await check("review.protectSheet", async () => [(await cellAt("H5")) === "open" && (await cellAt("H6")) === "" && /<sheetProtection /.test(Object.values(await savedXml()).join("")), [await cellAt("H5"), await cellAt("H6")].join(",")]);
+  await run("review.unprotectSheet");
+  await put("H6", "shut");
+  await check("review.unprotectSheet", async () => [(await cellAt("H6")) === "shut"]);
+  await run("review.protectWorkbook");
+  const nP = (await S()).sheets.length;
+  await run("sheet.add");
+  await check("review.protectWorkbook", async () => [(await S()).sheets.length === nP && /workbookProtection/.test((await savedXml())["xl/workbook.xml"]), (await S()).sheets.length]);
+  await run("review.protectWorkbook");
+
+  // Sheets
+  await run("sheet.add");
+  const nH = (await S()).sheets.length;
+  const hiddenName = (await S()).sheets[(await S()).activeSheet];
+  await run("sheet.hide");
+  await check("sheet.hide", async () => [await M("G.book.sheetAt(" + (nH - 1) + ").sheetHidden === true") && (await S()).activeSheet !== nH - 1]);
+  await run("sheet.unhide", hiddenName);
+  await check("sheet.unhide", async () => [await M("G.book.sheetAt(" + (nH - 1) + ").sheetHidden === false") && (await S()).activeSheet === nH - 1]);
+
+  // Exports
+  await run("view.sheet.prev");
+  for (const [cmd, re] of [["file.exportCsv", /Name,Qty|k\r?\n/], ["file.exportHtml", /<table[\s\S]*<td[^>]*>Total<\/td>/]]) {
+    const dlx = page.waitForEvent("download", { timeout: 5000 }).catch(() => null);
+    await run(cmd);
+    const got = await dlx;
+    const text = got ? fs.readFileSync(await got.path(), "utf8") : "";
+    ok("cmd." + cmd, re.test(text), (got ? got.suggestedFilename() : "no download") + " " + text.length + " chars");
+  }
+
+  // Sorting on a sheet of its own: a sort takes the whole block it is in.
+  await run("sheet.add");
+  for (const [ref, v] of [["V1", "1"], ["W1", "3"], ["V2", "2"], ["W2", "1"], ["V3", "3"], ["W3", "2"]]) await put(ref, v);
+  await sel("V1:W3");
+  await run("data.sort", "W desc");
+  await check("data.sort", async () => [(await cellAt("W1")) === "3" && (await cellAt("V1")) === "1", [await cellAt("V1"), await cellAt("W1")].join(",")]);
+
+
   const dl = page.waitForEvent("download", { timeout: 5000 }).catch(() => null);
   await run("file.saveAs");
   const d = await dl;
   const bytes = d ? fs.readFileSync(await d.path()) : Buffer.alloc(0);
   ok("cmd.file.saveAs", bytes.length > 1000 && bytes[0] === 0x50 && bytes[1] === 0x4b, bytes.length + " bytes");
+
+  await put("A5", "45000");
+  await at("A5");
+  await run("format.numfmt", "date");
+  const nf = await S();
+  ok("cmd.home.numberFormat", /20\d\d|\d+\/\d+\/\d+/.test(nf.display) && nf.numFmt !== "General", nf.numFmt + " → " + nf.display);
+  await run("file.close");
+  const closed = await S();
+  ok("cmd.file.close", closed.sheets.length === 1 && closed.source === "" && (await get(0, 0)) === "", closed.sheets.length + " sheet(s), source '" + closed.source + "'");
 
   ok("ui.noErrors", errors.length === 0, errors.slice(0, 2).join(" | "));
 } catch (e) {

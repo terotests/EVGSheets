@@ -30,6 +30,9 @@ class WorkbookModel {
     ; fills this from the `ranger/` parts and the writer puts it back, so a
     ; script is part of the document rather than something beside it.
     def scripts:[GridScript]
+    ; Review > Protect Workbook: sheets cannot be added, removed, renamed,
+    ; moved, hidden or shown while this is on.
+    def structureProtected:boolean false
 
     Constructor () {
     }

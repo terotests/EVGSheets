@@ -9,6 +9,6 @@ W1	workbook	Target workbook checks that pass	count of 15	higher	15	unmeasured	co
 F1	formulas	Worksheet functions	count of 523	higher	523	513	computed	300	datagrid/src/FormulaFunctions.rgr	names in FormulaFunctions.isKnown
 CH1	charts	Excel chart subtypes drawn	count of ~60	higher	60	25	15	30	datagrid/src/GridChart.rgr	column, bar, stacked, 100% stacked, histogram, line, line with markers, smooth line, area, stacked area, scatter, bubble, pie, doughnut, box and whisker
 CH2	charts	Charts read from an .xlsx	yes/no	higher	1	1	probe:wb.charts	1	tools/parity/probe.mjs	the target workbook's two charts
-X1	formats	File formats read or written (xlsx, csv, tsv, xls, xlsb, ods, pdf, html)	count of 8	higher	8	8	1	3	README	xlsx in and out; TSV only through the clipboard
+X1	formats	File formats read or written (xlsx, csv, tsv, xls, xlsb, ods, pdf, html)	count of 8	higher	8	8	computed	3	probe	xlsx in and out; CSV and HTML out (probe:cmd.file.exportCsv, cmd.file.exportHtml); TSV only through the clipboard
 P1	performance	Open and first paint of the target workbook	ms	lower	unmeasured	unmeasured	unmeasured	500	datagrid/bench	not yet wired into the benchmark
 T1	tests	Browser checks run by the benchmark	count	higher	-	~1930 tests	computed	300	parity/smoke.json + parity/probe.json	smoke checks + probe checks

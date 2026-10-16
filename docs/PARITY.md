@@ -82,6 +82,32 @@ ribbon tabs, a grid that stops at the used range, numbers left-aligned, no
 formula bar buttons, no zoom or view buttons, and the workbook's table style,
 total row, data bars, icon sets, sparklines and charts not drawn.
 
+## Second measurement: 50 % of GridCraft (2026-10-16)
+
+The goal was half of GridCraft's own figures: C1 ≥ 137 (GridCraft 274) and
+U1 ≥ 50.25 (GridCraft 100.5). Result: C1 137.5 of 290, U1 50.5 of 106,
+11 of 15 target-workbook checks.
+
+- Drawing: the grid fills the window on open, numbers and dates right-align
+  under General, tables draw their style (header, bands, first/last column,
+  totals) and their filter buttons, and the status bar leads with Excel's
+  mode word (Ready / Enter / Edit).
+- Formulas: unqualified structured references inside a table (`[Q1]`),
+  SUBTOTAL, STDEV/VAR (sample and population), PMT, PV, FV, NPER, NPV, SLN.
+- About 90 commands under the catalog's own ids (`home.mergeCenter`,
+  `table.totalRow`, `pageLayout.printArea`, …), each with a `cmd.<id>` probe
+  check and a menu entry. New menus: Page Layout, Formulas, Review.
+- Files: indent, unlocked cells, double underline, gridlines/headings/show
+  formulas, tab colour, sheet and workbook protection, page setup, print
+  area and titles, page breaks and header/footer are written to the .xlsx;
+  CSV and HTML export.
+
+Partial (0.5) where Excel does more: Insert/Delete Cells do not re-point
+references into the moved cells, Trace Precedents selects instead of drawing
+arrows, the function-library commands start the formula without a dropdown,
+Sort takes one key by argument, a "comment" is a note. Not done: zoom, ribbon
+tabs, data bars, icon sets, sparklines and charts from the file.
+
 ## Who embeds EVGSheets
 
 Sliqtly's spreadsheet editing is EVGSheets: `web/sheets-live.js` mounts it

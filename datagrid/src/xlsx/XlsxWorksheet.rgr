@@ -526,6 +526,17 @@ class XlsxWorksheet {
             if ((t.name == "dimension") && (t.isEnd == false)) {
                 this.applyDimension(model (t.attr("ref")))
             }
+            if ((t.name == "sheetView") && (t.isEnd == false)) {
+                if ((t.attr("showGridLines")) == "0") {
+                    model.showGridlines = false
+                }
+                if ((t.attr("showRowColHeaders")) == "0") {
+                    model.showHeadings = false
+                }
+                if ((t.attr("showFormulas")) == "1") {
+                    model.showFormulas = true
+                }
+            }
             if ((t.name == "pane") && (t.isEnd == false)) {
                 ; `xSplit` / `ySplit` mean two different things and the `state`
                 ; attribute is what says which.

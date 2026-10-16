@@ -367,18 +367,69 @@ class FormulaFunctions {
         if (n == "IFS") {
             return true
         }
+        if (n == "SUBTOTAL") {
+            return true
+        }
+        if (n == "STDEV") {
+            return true
+        }
+        if (n == "STDEV.S") {
+            return true
+        }
+        if (n == "STDEVP") {
+            return true
+        }
+        if (n == "STDEV.P") {
+            return true
+        }
+        if (n == "VAR") {
+            return true
+        }
+        if (n == "VAR.S") {
+            return true
+        }
+        if (n == "VARP") {
+            return true
+        }
+        if (n == "VAR.P") {
+            return true
+        }
+        if ((n == "PMT") || (n == "PV") || (n == "FV") || (n == "NPER") || (n == "NPV") || (n == "SLN")) {
+            return true
+        }
         return false
     }
 
     ; Every function name this library answers, space-separated — for docs,
     ; hosts, and "what do we actually have?" checks.
     sfn catalog:string () {
-        return "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW"
+        return "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW SUBTOTAL STDEV STDEV.S STDEVP STDEV.P VAR VAR.S VARP VAR.P PMT PV FV NPER NPV SLN"
     }
 
     ; Dispatch by uppercase function name. (`call` is reserved in Ranger.)
     sfn invoke:FormulaValue (name:string args:[FormulaValue]) {
         def n:string (FormulaFunctions.upper(name))
+        if (n == "SUBTOTAL") {
+            return (FormulaFunctions.fnSubtotal(args))
+        }
+        if ((n == "PMT") || (n == "PV") || (n == "FV") || (n == "NPER") || (n == "SLN")) {
+            return (FormulaFunctions.fnTvm(n args))
+        }
+        if (n == "NPV") {
+            return (FormulaFunctions.fnNpv(args))
+        }
+        if ((n == "STDEV") || (n == "STDEV.S")) {
+            return (FormulaFunctions.fnSpread(args true true))
+        }
+        if ((n == "STDEVP") || (n == "STDEV.P")) {
+            return (FormulaFunctions.fnSpread(args false true))
+        }
+        if ((n == "VAR") || (n == "VAR.S")) {
+            return (FormulaFunctions.fnSpread(args true false))
+        }
+        if ((n == "VARP") || (n == "VAR.P")) {
+            return (FormulaFunctions.fnSpread(args false false))
+        }
         if (n == "SUM") {
             return (FormulaFunctions.fnSum(args))
         }
@@ -710,6 +761,281 @@ class FormulaFunctions {
     }
 
     ; --- aggregates ---
+
+    ; Variance and standard deviation of the numbers in args: `sample` divides
+    ; by n - 1 (VAR.S, STDEV.S), otherwise by n (VAR.P, STDEV.P).
+    sfn fnSpread:FormulaValue (args:[FormulaValue] sample:boolean root:boolean) {
+        def err:FormulaValue (FormulaFunctions.firstError(args))
+        def ee:boolean (err.isError())
+        if ee {
+            return err
+        }
+        def vals:[double]
+        FormulaFunctions.collectNumbers(args vals)
+        def n:int (array_length vals)
+        def need:int 1
+        if sample {
+            need = 2
+        }
+        if (n < need) {
+            return (FormulaValue.fromError("#DIV/0!"))
+        }
+        def mean:double 0.0
+        def i:int 0
+        while (i < n) {
+            mean = (mean + (itemAt vals i))
+            i = (i + 1)
+        }
+        mean = (mean / (to_double n))
+        def ss:double 0.0
+        i = 0
+        while (i < n) {
+            def d:double ((itemAt vals i) - mean)
+            ss = (ss + (d * d))
+            i = (i + 1)
+        }
+        def div:double (to_double n)
+        if sample {
+            div = (to_double (n - 1))
+        }
+        def v:double (ss / div)
+        if root {
+            return (FormulaValue.fromNumber((sqrt v)))
+        }
+        return (FormulaValue.fromNumber(v))
+    }
+
+    ; SUBTOTAL(function_num, ref1, …): 1–11 (and 101–111, which also skip
+    ; hidden rows; rows are not known here, so they count the same) pick
+    ; AVERAGE, COUNT, COUNTA, MAX, MIN, PRODUCT, STDEV, STDEVP, SUM, VAR, VARP.
+    ; The time-value-of-money family, on Excel's sign convention (money paid
+    ; out is negative): rate, nper, pmt, pv, fv and type, each solved from the
+    ; others by  pv*(1+r)^n + pmt*(1+r*type)*((1+r)^n - 1)/r + fv = 0.
+    sfn lnD:double (x0:double) {
+        def x:double x0
+        def k:int 0
+        while (x >= 2.718281828459045) {
+            x = (x / 2.718281828459045)
+            k = (k + 1)
+        }
+        while (x < 1.0) {
+            x = (x * 2.718281828459045)
+            k = (k - 1)
+        }
+        def y:double ((x - 1.0) / (x + 1.0))
+        def y2:double (y * y)
+        def term:double y
+        def sum:double y
+        def n:int 1
+        while (n < 40) {
+            term = (term * y2)
+            sum = (sum + (term / (to_double ((2 * n) + 1))))
+            n = (n + 1)
+        }
+        return ((2.0 * sum) + (to_double k))
+    }
+
+    sfn expD:double (x0:double) {
+        ; e^x = (e^(x/2^m))^(2^m), the small power by its series.
+        def x:double x0
+        def m:int 0
+        while ((x > 0.5) || (x < -0.5)) {
+            x = (x / 2.0)
+            m = (m + 1)
+        }
+        def term:double 1.0
+        def sum:double 1.0
+        def n:int 1
+        while (n < 25) {
+            term = ((term * x) / (to_double n))
+            sum = (sum + term)
+            n = (n + 1)
+        }
+        while (m > 0) {
+            sum = (sum * sum)
+            m = (m - 1)
+        }
+        return sum
+    }
+
+    sfn powD:double (b:double e:double) {
+        def ei:int (to_int e)
+        if (((to_double ei) == e) && (ei >= 0) && (ei < 100000)) {
+            def out:double 1.0
+            def i:int 0
+            while (i < ei) {
+                out = (out * b)
+                i = (i + 1)
+            }
+            return out
+        }
+        if (b <= 0.0) {
+            return 0.0
+        }
+        return (FormulaFunctions.expD((e * (FormulaFunctions.lnD(b)))))
+    }
+
+    sfn tvmArg:double (args:[FormulaValue] i:int dflt:double) {
+        if (i >= (array_length args)) {
+            return dflt
+        }
+        def v:FormulaValue (itemAt args i)
+        if (v.isBlank()) {
+            return dflt
+        }
+        return (v.asNumber())
+    }
+
+    sfn fnTvm:FormulaValue (n:string args:[FormulaValue]) {
+        def need:int 3
+        if (n == "SLN") {
+            need = 3
+        }
+        if ((array_length args) < need) {
+            return (FormulaValue.fromError("#VALUE!"))
+        }
+        def ai:int 0
+        while (ai < (array_length args)) {
+            def e:FormulaValue (itemAt args ai)
+            if (e.isError()) {
+                return e
+            }
+            ai = (ai + 1)
+        }
+        if (n == "SLN") {
+            def life:double (FormulaFunctions.tvmArg(args 2 0.0))
+            if (life == 0.0) {
+                return (FormulaValue.fromError("#DIV/0!"))
+            }
+            return (FormulaValue.fromNumber((((FormulaFunctions.tvmArg(args 0 0.0)) - (FormulaFunctions.tvmArg(args 1 0.0))) / life)))
+        }
+        def r:double (FormulaFunctions.tvmArg(args 0 0.0))
+        if (n == "NPER") {
+            def pmtN:double (FormulaFunctions.tvmArg(args 1 0.0))
+            def pvN:double (FormulaFunctions.tvmArg(args 2 0.0))
+            def fvN:double (FormulaFunctions.tvmArg(args 3 0.0))
+            def tN:double (FormulaFunctions.tvmArg(args 4 0.0))
+            if (r == 0.0) {
+                if (pmtN == 0.0) {
+                    return (FormulaValue.fromError("#NUM!"))
+                }
+                return (FormulaValue.fromNumber(((0.0 - (pvN + fvN)) / pmtN)))
+            }
+            def k:double (pmtN * (1.0 + (r * tN)) / r)
+            def num:double (k - fvN)
+            def den:double (k + pvN)
+            if ((den == 0.0) || ((num / den) <= 0.0)) {
+                return (FormulaValue.fromError("#NUM!"))
+            }
+            return (FormulaValue.fromNumber(((FormulaFunctions.lnD((num / den))) / (FormulaFunctions.lnD((1.0 + r))))))
+        }
+        def nper:double (FormulaFunctions.tvmArg(args 1 0.0))
+        def x:double (FormulaFunctions.tvmArg(args 2 0.0))
+        def y:double (FormulaFunctions.tvmArg(args 3 0.0))
+        def t:double (FormulaFunctions.tvmArg(args 4 0.0))
+        def g:double (FormulaFunctions.powD((1.0 + r) nper))
+        def annuity:double nper
+        if (r != 0.0) {
+            annuity = ((1.0 + (r * t)) * (g - 1.0) / r)
+        }
+        if (n == "PMT") {
+            ; PMT(rate, nper, pv, [fv], [type])
+            if (annuity == 0.0) {
+                return (FormulaValue.fromError("#NUM!"))
+            }
+            return (FormulaValue.fromNumber(((0.0 - ((x * g) + y)) / annuity)))
+        }
+        if (n == "PV") {
+            ; PV(rate, nper, pmt, [fv], [type])
+            if (g == 0.0) {
+                return (FormulaValue.fromError("#NUM!"))
+            }
+            return (FormulaValue.fromNumber(((0.0 - ((x * annuity) + y)) / g)))
+        }
+        ; FV(rate, nper, pmt, [pv], [type])
+        return (FormulaValue.fromNumber((0.0 - ((y * g) + (x * annuity)))))
+    }
+
+    ; NPV(rate, value1, …): the values discounted from the end of period 1.
+    sfn fnNpv:FormulaValue (args:[FormulaValue]) {
+        if ((array_length args) < 2) {
+            return (FormulaValue.fromError("#VALUE!"))
+        }
+        def first:FormulaValue (itemAt args 0)
+        if (first.isError()) {
+            return first
+        }
+        def r:double (first.asNumber())
+        def rest:[FormulaValue]
+        def i:int 1
+        while (i < (array_length args)) {
+            push rest (itemAt args i)
+            i = (i + 1)
+        }
+        def vals:[double]
+        FormulaFunctions.collectNumbers(rest vals)
+        def total:double 0.0
+        def k:int 0
+        while (k < (array_length vals)) {
+            total = (total + ((itemAt vals k) / (FormulaFunctions.powD((1.0 + r) (to_double (k + 1))))))
+            k = (k + 1)
+        }
+        return (FormulaValue.fromNumber(total))
+    }
+
+    sfn fnSubtotal:FormulaValue (args:[FormulaValue]) {
+        if ((array_length args) < 2) {
+            return (FormulaValue.fromError("#VALUE!"))
+        }
+        def f0:FormulaValue (itemAt args 0)
+        if (f0.isError()) {
+            return f0
+        }
+        def code:int (to_int (f0.asNumber()))
+        if (code > 100) {
+            code = (code - 100)
+        }
+        def rest:[FormulaValue]
+        def i:int 1
+        while (i < (array_length args)) {
+            push rest (itemAt args i)
+            i = (i + 1)
+        }
+        if (code == 1) {
+            return (FormulaFunctions.fnAverage(rest))
+        }
+        if (code == 2) {
+            return (FormulaFunctions.fnCount(rest))
+        }
+        if (code == 3) {
+            return (FormulaFunctions.fnCountA(rest))
+        }
+        if (code == 4) {
+            return (FormulaFunctions.fnMax(rest))
+        }
+        if (code == 5) {
+            return (FormulaFunctions.fnMin(rest))
+        }
+        if (code == 6) {
+            return (FormulaFunctions.fnProduct(rest))
+        }
+        if (code == 7) {
+            return (FormulaFunctions.fnSpread(rest true true))
+        }
+        if (code == 8) {
+            return (FormulaFunctions.fnSpread(rest false true))
+        }
+        if (code == 9) {
+            return (FormulaFunctions.fnSum(rest))
+        }
+        if (code == 10) {
+            return (FormulaFunctions.fnSpread(rest true false))
+        }
+        if (code == 11) {
+            return (FormulaFunctions.fnSpread(rest false false))
+        }
+        return (FormulaValue.fromError("#VALUE!"))
+    }
 
     sfn fnSum:FormulaValue (args:[FormulaValue]) {
         def err:FormulaValue (FormulaFunctions.firstError(args))

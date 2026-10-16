@@ -371,6 +371,35 @@ class SpreadsheetModel {
     def notes:[string:string]
     def noteKeys:[string]
     def sheetHidden:boolean false
+    ; The sheet view's switches (View tab) and the tab's colour. Written to the
+    ; file as `sheetView` attributes and `sheetPr/tabColor`.
+    def showGridlines:boolean true
+    def showHeadings:boolean true
+    def showFormulas:boolean false
+    def tabColor:string ""
+    ; Review > Protect Sheet: a locked cell (every cell, until Format Cells
+    ; unlocks it) refuses edits while this is on.
+    def sheetProtected:boolean false
+    ; Page Layout. `printModelled` goes up the first time a command touches
+    ; any of these; from then on the writer states them all and the file's own
+    ; `printOptions`/`pageMargins`/`pageSetup`/`headerFooter`/`rowBreaks` are
+    ; dropped, because two of either element would make the file invalid.
+    def printModelled:boolean false
+    def pageOrientation:string "portrait"
+    def paperSize:int 1
+    def marginLeft:double 0.7
+    def marginRight:double 0.7
+    def marginTop:double 0.75
+    def marginBottom:double 0.75
+    def printArea:string ""
+    def printTitleRows:string ""
+    def printGridlines:boolean false
+    def printHeadings:boolean false
+    def fitToWidth:int 0
+    def fitToHeight:int 0
+    def pageHeader:string ""
+    def pageFooter:string ""
+    def rowBreaks:[int]
     ; Worksheet children nothing here models, kept so a save can put them back.
     ; See `SheetOpaque`.
     def opaque:[SheetOpaque]
@@ -1550,6 +1579,46 @@ class SpreadsheetModel {
         version = (version + 1)
     }
 
+    ; The table a cell belongs to, as an index into `tables`, or -1.
+    ; Forget preserved worksheet children of this name: the model states them
+    ; itself from now on.
+    fn dropOpaque:void (elName:string) {
+        def keep:[SheetOpaque]
+        def i:int 0
+        while (i < (array_length opaque)) {
+            def o:SheetOpaque (itemAt opaque i)
+            if (o.name != elName) {
+                push keep o
+            }
+            i = (i + 1)
+        }
+        opaque = keep
+    }
+
+    fn modelPrint:void () {
+        if printModelled {
+            return
+        }
+        printModelled = true
+        this.dropOpaque("printOptions")
+        this.dropOpaque("pageMargins")
+        this.dropOpaque("pageSetup")
+        this.dropOpaque("headerFooter")
+        this.dropOpaque("rowBreaks")
+    }
+
+    fn tableIndexAt:int (row:int col:int) {
+        def i:int 0
+        while (i < (array_length tables)) {
+            def t:SheetTable (itemAt tables i)
+            if (t.contains(row col)) {
+                return i
+            }
+            i = (i + 1)
+        }
+        return -1
+    }
+
     fn tableCount:int () {
         return (array_length tables)
     }
@@ -2115,6 +2184,10 @@ class SpreadsheetModel {
             return false
         }
         return (itemAt colHidden col)
+    }
+
+    fn filterActiveOn:boolean (col:int) {
+        return (filterEnabled && (filterCol == col))
     }
 
     fn setFilter:void (col:int enabled:boolean values:[string]) {

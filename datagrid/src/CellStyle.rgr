@@ -134,6 +134,15 @@ class CellStyle {
     ; a round trip keeps what the file said; `rotationDegrees` is what a
     ; painter wants.
     def textRotation:int 0
+    ; `<alignment indent="n">`: n steps of about three characters in from the
+    ; side the text is aligned to.
+    def indent:int 0
+    ; `<protection locked="0">` unlocks a cell; every cell is locked until
+    ; then, which only matters while the sheet is protected.
+    def locked:boolean true
+    ; `<u val="double"/>`. `underline` stays true as well, so everything that
+    ; only knows about one line still draws one.
+    def doubleUnderline:boolean false
     def numFmt:string "General"
     def hasFill:boolean false
     def hasBorder:boolean false
@@ -199,6 +208,9 @@ class CellStyle {
         o.valign = valign
         o.wrapText = wrapText
         o.textRotation = textRotation
+        o.indent = indent
+        o.locked = locked
+        o.doubleUnderline = doubleUnderline
         o.numFmt = numFmt
         o.hasFill = hasFill
         o.hasBorder = hasBorder
@@ -253,6 +265,15 @@ class CellStyle {
             return false
         }
         if (textRotation != o.textRotation) {
+            return false
+        }
+        if (indent != o.indent) {
+            return false
+        }
+        if (locked != o.locked) {
+            return false
+        }
+        if (doubleUnderline != o.doubleUnderline) {
             return false
         }
         if (numFmt != o.numFmt) {
