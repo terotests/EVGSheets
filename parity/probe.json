@@ -68,11 +68,11 @@
   },
   "ui.ribbonGroups": {
    "pass": true,
-   "value": "16 toolbar groups"
+   "value": "18 toolbar groups"
   },
   "ui.homeControls": {
    "pass": true,
-   "value": "69 ribbon controls (Excel's Home tab: ~60)"
+   "value": "78 ribbon controls (Excel's Home tab: ~60)"
   },
   "ui.nameBox": {
    "pass": true,
@@ -88,7 +88,7 @@
   },
   "ui.rowsFillWindow": {
    "pass": true,
-   "value": "39 row headers"
+   "value": "38 row headers"
   },
   "ui.sheetTabs": {
    "pass": true,
@@ -250,503 +250,65 @@
    "pass": true,
    "value": "3,2,1"
   },
-  "cmd.home.mergeCenter": {
-   "pass": true,
-   "value": "true,center"
-  },
-  "cmd.home.mergeAcross": {
-   "pass": true,
-   "value": "2,0,2,2|3,0,3,2"
-  },
-  "cmd.home.orientation": {
-   "pass": true,
-   "value": "45"
-  },
-  "cmd.home.increaseIndent": {
-   "pass": true,
-   "value": "2"
-  },
-  "cmd.home.decreaseIndent": {
-   "pass": true,
-   "value": "1"
-  },
-  "cmd.home.doubleUnderline": {
-   "pass": true,
-   "value": "true"
-  },
-  "cmd.home.drawBorder": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.home.cellStyle": {
-   "pass": true,
-   "value": "#FFC7CE #9C0006"
-  },
-  "cmd.home.rowHeight": {
-   "pass": true,
-   "value": "40"
-  },
-  "cmd.home.columnWidth": {
-   "pass": true,
-   "value": "145"
-  },
-  "cmd.home.defaultWidth": {
-   "pass": true,
-   "value": "75"
-  },
-  "cmd.home.hideRows": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.home.unhideRows": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.home.hideColumns": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.home.unhideColumns": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.home.insertCells": {
-   "pass": true,
-   "value": ",1,2"
-  },
-  "cmd.home.deleteCells": {
-   "pass": true,
-   "value": "1,2"
-  },
-  "cmd.home.conditionalFormat": {
-   "pass": true,
-   "value": "0→1"
-  },
-  "cmd.home.clearRules": {
-   "pass": true,
-   "value": "0"
-  },
-  "cmd.edit.fillDown": {
-   "pass": true,
-   "value": "J2*2 = 14"
-  },
-  "cmd.edit.fillUp": {
-   "pass": true,
-   "value": "J1+1 = 6"
-  },
-  "cmd.edit.fillRight": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.edit.fillLeft": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.edit.fillSeries": {
-   "pass": true,
-   "value": "25"
-  },
-  "cmd.edit.goToSpecial": {
-   "pass": true,
-   "value": "4"
-  },
-  "cmd.edit.goTo": {
-   "pass": true,
-   "value": "Z40"
-  },
-  "cmd.formulas.autoSum": {
-   "pass": true,
-   "value": "SUM(J8:J11) = 70"
-  },
-  "cmd.review.newNote": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.review.newComment": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.review.nextComment": {
-   "pass": true,
-   "value": "J8"
-  },
-  "cmd.review.previousComment": {
-   "pass": true,
-   "value": "J8"
-  },
-  "cmd.review.deleteComment": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.edit.clearComments": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.edit.clearHyperlinks": {
-   "pass": true,
-   "value": "15"
-  },
-  "cmd.edit.clearAll": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.review.workbookStatistics": {
-   "pass": true,
-   "value": "Sheets 3 · cells with data 87 · formulas 34 · tables 1 · notes 0"
-  },
-  "cmd.formulas.showFormulas": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.formulas.calculateNow": {
-   "pass": true,
-   "value": "100"
-  },
-  "cmd.formulas.calculateSheet": {
-   "pass": true,
-   "value": "120"
-  },
-  "cmd.formulas.tracePrecedents": {
-   "pass": true,
-   "value": "4 J11"
-  },
-  "cmd.formulas.financial": {
-   "pass": true,
-   "value": "=PMT("
-  },
-  "cmd.formulas.logical": {
-   "pass": true,
-   "value": "=IF("
-  },
-  "cmd.formulas.text": {
-   "pass": true,
-   "value": "=LEFT("
-  },
-  "cmd.formulas.dateTime": {
-   "pass": true,
-   "value": "=DATE("
-  },
-  "cmd.formulas.lookupReference": {
-   "pass": true,
-   "value": "=VLOOKUP("
-  },
-  "cmd.formulas.mathTrig": {
-   "pass": true,
-   "value": "=ROUND("
-  },
-  "cmd.formulas.moreFunctions": {
-   "pass": true,
-   "value": "=AVERAGE("
-  },
-  "cmd.formulas.recentlyUsed": {
-   "pass": true,
-   "value": "=SUM("
-  },
-  "cmd.formulas.insertFunction": {
-   "pass": true,
-   "value": "=SUM("
-  },
-  "cmd.data.removeDuplicates": {
-   "pass": true,
-   "value": "a,b,c,,"
-  },
-  "cmd.data.textToColumns": {
-   "pass": true,
-   "value": "x,y,z"
-  },
-  "cmd.view.gridlines": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.view.headings": {
-   "pass": true,
-   "value": "48→0"
-  },
-  "cmd.view.zoom": {
-   "pass": true,
-   "value": "75→113 (raw 75)"
-  },
-  "cmd.view.zoomIn": {
-   "pass": true,
-   "value": "1.6"
-  },
-  "cmd.view.zoomOut": {
-   "pass": true,
-   "value": "1.5"
-  },
-  "cmd.view.zoom100": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.view.zoomToSelection": {
-   "pass": true,
-   "value": "4"
-  },
-  "cmd.view.pageBreakPreview": {
-   "pass": true,
-   "value": "2/pageBreak"
-  },
-  "cmd.view.pageLayout": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.view.normal": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.view.freezeTopRow": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.view.freezeFirstColumn": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.home.formatAsTable": {
-   "pass": true,
-   "value": "1"
-  },
-  "cmd.table.rename": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.table.removeDuplicates": {
-   "pass": true,
-   "value": "a,b,"
-  },
-  "cmd.table.resize": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.table.totalRow": {
-   "pass": true,
-   "value": "Total 3 SUBTOTAL(109,[Qty])"
-  },
-  "cmd.table.bandedRows": {
-   "pass": true,
-   "value": "true→false"
-  },
-  "cmd.table.bandedColumns": {
-   "pass": true,
-   "value": "false→true"
-  },
-  "cmd.table.firstColumn": {
-   "pass": true,
-   "value": "false→true"
-  },
-  "cmd.table.lastColumn": {
-   "pass": true,
-   "value": "false→true"
-  },
-  "cmd.table.style": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.table.headerRow": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.table.convertToRange": {
-   "pass": true,
-   "value": "#262626"
-  },
-  "cmd.insert.table": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.insert.symbol": {
-   "pass": true,
-   "value": "€"
-  },
-  "cmd.pageLayout.printArea": {
-   "pass": true,
-   "value": "<definedNames><definedName name=\"_xlnm.Print_Area\" localSheetId=\"2\">'Sheet3'!$A$20:$B$23</definedName><definedName name="
-  },
-  "cmd.pageLayout.printTitles": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.pageLayout.orientation": {
-   "pass": true,
-   "value": "<pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>"
-  },
-  "cmd.pageLayout.size": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.pageLayout.margins": {
-   "pass": true,
-   "value": "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>"
-  },
-  "cmd.pageLayout.printGridlines": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.pageLayout.printHeadings": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.pageLayout.scaleToFit": {
-   "pass": true,
-   "value": "<sheetPr><tabColor rgb=\"FFFF0000\"/><pageSetUpPr fitToPage=\"1\"/></sheetPr>"
-  },
-  "cmd.pageLayout.breaks": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.pageLayout.headerFooter": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.sheet.tabColor": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.home.lockCell": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.review.protectSheet": {
-   "pass": true,
-   "value": "open,"
-  },
-  "cmd.review.unprotectSheet": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.review.protectWorkbook": {
-   "pass": true,
-   "value": "3"
-  },
-  "cmd.sheet.hide": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.sheet.unhide": {
-   "pass": true,
-   "value": ""
-  },
-  "cmd.file.exportCsv": {
-   "pass": true,
-   "value": "quarterly-sales-dashboard.csv 553 chars"
-  },
-  "cmd.file.exportHtml": {
-   "pass": true,
-   "value": "quarterly-sales-dashboard.html 7693 chars"
-  },
-  "cmd.data.sort": {
-   "pass": true,
-   "value": "1,3"
-  },
-  "cmd.insert.pivotTable": {
-   "pass": true,
-   "value": "Region,Sum of Sales,Sum of Units,North,35,Grand Total,105,11"
-  },
-  "cmd.pivot.fieldList": {
-   "pass": true,
-   "value": "→pivotFields"
-  },
-  "cmd.pivot.valueSettings": {
-   "pass": true,
-   "value": "Average of Sales,11.67"
-  },
-  "cmd.pivot.sort": {
-   "pass": true,
-   "value": "South,70"
-  },
-  "cmd.pivot.filter": {
-   "pass": true,
-   "value": "15,30,45"
-  },
-  "cmd.pivot.addField": {
-   "pass": true,
-   "value": "Row Labels,North,35,   A,15"
-  },
-  "cmd.pivot.subtotals": {
-   "pass": true,
-   "value": "North,,15"
-  },
-  "cmd.pivot.collapse": {
-   "pass": true,
-   "value": "North,South,70"
-  },
-  "cmd.pivot.reportLayout": {
-   "pass": true,
-   "value": "Region,Product"
-  },
-  "cmd.pivot.removeField": {
-   "pass": true,
-   "value": "Sum of Sales,"
-  },
-  "cmd.pivot.moveField": {
-   "pass": true,
-   "value": "Region,A,B,Grand Total,15"
-  },
-  "cmd.pivot.calculatedField": {
-   "pass": true,
-   "value": "Double,70"
-  },
-  "cmd.pivot.grandTotals": {
-   "pass": true,
-   "value": "South,"
-  },
-  "cmd.pivot.style": {
-   "pass": true,
-   "value": "{\"indent\":0,\"locked\":true,\"dbl\":false,\"rot\":0,\"fill\":\"#B4C6E7\",\"text\":\"\",\"bold\":true,\"align\":\"left\",\"border\":false}"
-  },
-  "cmd.pivot.changeSource": {
-   "pass": true,
-   "value": "30"
-  },
-  "cmd.pivot.refresh": {
-   "pass": true,
-   "value": "120"
-  },
-  "cmd.pivot.delete": {
-   "pass": true,
-   "value": ",,"
-  },
-  "cmd.insert.recommendedPivotTables": {
-   "pass": true,
-   "value": "Units,Sum of Sales,1"
-  },
-  "cmd.pivot.group": {
-   "pass": true,
-   "value": "0-1,105,2-3,50"
-  },
-  "cmd.insert.pivotChart": {
-   "pass": true,
-   "value": "3 charts, North"
-  },
-  "cmd.table.summarizePivot": {
-   "pass": true,
-   "value": "Region,125"
-  },
-  "cmd.file.saveAs": {
-   "pass": true,
-   "value": "56304 bytes"
-  },
-  "cmd.home.numberFormat": {
-   "pass": true,
-   "value": "yyyy-mm-dd → 2023-03-15"
-  },
-  "cmd.file.close": {
-   "pass": true,
-   "value": "1 sheet(s), source ''"
-  },
-  "ui.noErrors": {
-   "pass": true,
-   "value": ""
+  "probe.finished": {
+   "pass": false,
+   "value": "Error: DBG     at file:///home/claude/EVGSheets/tools/parity/probe.mjs:1114:11"
   }
  },
  "commands": [
+  "arrange.align",
+  "arrange.bringForward",
+  "arrange.group",
+  "arrange.rotate",
+  "arrange.selectionPane",
+  "arrange.sendBackward",
+  "automate.allScripts",
+  "automate.newScript",
+  "automate.recordActions",
+  "chart.addElement",
+  "chart.changeColors",
   "chart.copy",
+  "chart.formatSelection",
+  "chart.move",
+  "chart.quickLayout",
+  "chart.selectData",
+  "chart.set",
+  "chart.shapeFill",
+  "chart.shapeOutline",
+  "chart.switchRowColumn",
+  "data.advancedFilter",
+  "data.analysisToolPak",
+  "data.analyzeData",
+  "data.circleInvalid",
+  "data.consolidate",
+  "data.customSort",
+  "data.dataTable",
+  "data.filter",
   "data.filter.clear",
+  "data.flashFill",
+  "data.forecastSheet",
+  "data.fromTableRange",
+  "data.fromTextCsv",
+  "data.fromWeb",
+  "data.getData",
+  "data.goalSeek",
+  "data.group",
+  "data.hideDetail",
+  "data.importHtml",
+  "data.queriesConnections",
+  "data.reapply",
+  "data.refreshAll",
+  "data.relationships",
   "data.removeDuplicates",
+  "data.scenarioManager",
+  "data.showDetail",
+  "data.solver",
   "data.sort",
   "data.sort.asc",
   "data.sort.desc",
+  "data.subtotal",
   "data.textToColumns",
+  "data.ungroup",
   "data.validation",
   "db.commit",
   "db.connection",
@@ -761,6 +323,10 @@
   "db.sql.new",
   "delete.columns",
   "delete.rows",
+  "draw.eraser",
+  "draw.inkToShape",
+  "draw.lasso",
+  "draw.pen",
   "edit.clear",
   "edit.clearAll",
   "edit.clearComments",
@@ -773,6 +339,7 @@
   "edit.fillSeries",
   "edit.fillUp",
   "edit.find",
+  "edit.flashFill",
   "edit.formatPainter",
   "edit.goTo",
   "edit.goToSpecial",
@@ -780,12 +347,17 @@
   "edit.pasteSpecial",
   "edit.redo",
   "edit.undo",
+  "file.backstage",
   "file.close",
   "file.exportCsv",
   "file.exportHtml",
+  "file.exportPdf",
+  "file.info",
   "file.new",
   "file.open",
+  "file.options",
   "file.print",
+  "file.properties",
   "file.save",
   "file.saveAs",
   "format.align",
@@ -813,17 +385,28 @@
   "formulas.autoSum",
   "formulas.calculateNow",
   "formulas.calculateSheet",
+  "formulas.calculationOptions",
+  "formulas.createFromSelection",
   "formulas.dateTime",
+  "formulas.defineName",
+  "formulas.errorChecking",
+  "formulas.evaluateFormula",
   "formulas.financial",
   "formulas.insertFunction",
   "formulas.logical",
   "formulas.lookupReference",
   "formulas.mathTrig",
   "formulas.moreFunctions",
+  "formulas.nameManager",
   "formulas.recentlyUsed",
+  "formulas.removeArrows",
   "formulas.showFormulas",
   "formulas.text",
+  "formulas.traceDependents",
   "formulas.tracePrecedents",
+  "formulas.useInFormula",
+  "formulas.watchWindow",
+  "home.addIns",
   "home.cellStyle",
   "home.clearRules",
   "home.columnWidth",
@@ -834,6 +417,7 @@
   "home.doubleUnderline",
   "home.drawBorder",
   "home.formatAsTable",
+  "home.formatCells",
   "home.hideColumns",
   "home.hideRows",
   "home.increaseIndent",
@@ -841,37 +425,59 @@
   "home.lockCell",
   "home.mergeAcross",
   "home.mergeCenter",
+  "home.newCellStyle",
   "home.orientation",
   "home.rowHeight",
+  "home.subscript",
+  "home.superscript",
   "home.unhideColumns",
   "home.unhideRows",
   "home.unmergeCells",
   "insert.chart",
+  "insert.checkbox",
   "insert.column.left",
   "insert.column.right",
+  "insert.equation",
+  "insert.icons",
   "insert.link",
+  "insert.picture",
   "insert.pivotChart",
   "insert.pivotTable",
+  "insert.recommendedCharts",
   "insert.recommendedPivotTables",
   "insert.row.above",
   "insert.row.below",
+  "insert.shape",
+  "insert.signatureLine",
+  "insert.slicer",
+  "insert.smartArt",
+  "insert.sparkline",
   "insert.symbol",
   "insert.table",
+  "insert.textBox",
+  "insert.timeline",
+  "insert.wordArt",
   "move.column.left",
   "move.column.right",
   "move.row.down",
   "move.row.up",
   "nav.goto",
+  "pageLayout.background",
   "pageLayout.breaks",
   "pageLayout.headerFooter",
   "pageLayout.margins",
   "pageLayout.orientation",
+  "pageLayout.pageSetup",
   "pageLayout.printArea",
   "pageLayout.printGridlines",
   "pageLayout.printHeadings",
   "pageLayout.printTitles",
   "pageLayout.scaleToFit",
   "pageLayout.size",
+  "pageLayout.theme",
+  "pageLayout.themeColors",
+  "pageLayout.themeEffects",
+  "pageLayout.themeFonts",
   "pivot.addField",
   "pivot.calculatedField",
   "pivot.changeSource",
@@ -889,6 +495,9 @@
   "pivot.style",
   "pivot.subtotals",
   "pivot.valueSettings",
+  "review.allowEditRanges",
+  "review.checkAccessibility",
+  "review.convertToComments",
   "review.deleteComment",
   "review.newComment",
   "review.newNote",
@@ -896,6 +505,12 @@
   "review.previousComment",
   "review.protectSheet",
   "review.protectWorkbook",
+  "review.showAllNotes",
+  "review.showChanges",
+  "review.showComments",
+  "review.showNote",
+  "review.spelling",
+  "review.thesaurus",
   "review.unprotectSheet",
   "review.workbookStatistics",
   "script.close",
@@ -912,6 +527,11 @@
   "select.all",
   "select.column",
   "select.row",
+  "shape.delete",
+  "shape.fill",
+  "shape.move",
+  "shape.select",
+  "shape.text",
   "sheet.add",
   "sheet.delete",
   "sheet.duplicate",
@@ -919,14 +539,17 @@
   "sheet.move",
   "sheet.move.left",
   "sheet.move.right",
+  "sheet.moveCopy",
   "sheet.rename",
   "sheet.tabColor",
   "sheet.unhide",
+  "slicer.pick",
   "table.bandedColumns",
   "table.bandedRows",
   "table.convertToRange",
   "table.firstColumn",
   "table.headerRow",
+  "table.insertSlicer",
   "table.lastColumn",
   "table.removeDuplicates",
   "table.rename",
@@ -934,20 +557,30 @@
   "table.style",
   "table.summarizePivot",
   "table.totalRow",
+  "view.arrangeAll",
+  "view.customViews",
+  "view.expandFormulaBar",
   "view.freeze.here",
   "view.freeze.none",
   "view.freezeFirstColumn",
   "view.freezeTopRow",
   "view.gridlines",
   "view.headings",
+  "view.hideWindow",
+  "view.macros",
+  "view.newWindow",
   "view.normal",
   "view.pageBreakPreview",
   "view.pageLayout",
   "view.rtl",
+  "view.ruler",
   "view.sheet.next",
   "view.sheet.prev",
+  "view.split",
+  "view.switchWindows",
   "view.theme",
   "view.theme.next",
+  "view.unhideWindow",
   "view.zoom",
   "view.zoom100",
   "view.zoomIn",
@@ -955,18 +588,60 @@
   "view.zoomToSelection"
  ],
  "actions": [
+  "arrange.align",
+  "arrange.bringForward",
+  "arrange.group",
+  "arrange.rotate",
+  "arrange.selectionPane",
+  "arrange.sendBackward",
+  "automate.allScripts",
+  "automate.recordActions",
+  "chart.addElement",
+  "chart.changeColors",
+  "chart.formatSelection",
+  "chart.move",
+  "chart.quickLayout",
+  "chart.selectData",
+  "chart.switchRowColumn",
+  "data.advancedFilter",
+  "data.analysisToolPak",
+  "data.analyzeData",
+  "data.circleInvalid",
+  "data.consolidate",
+  "data.dataTable",
+  "data.filter",
   "data.filter.clear",
+  "data.flashFill",
+  "data.forecastSheet",
+  "data.fromTableRange",
+  "data.fromTextCsv",
+  "data.fromWeb",
+  "data.getData",
+  "data.goalSeek",
+  "data.group",
+  "data.queriesConnections",
+  "data.reapply",
+  "data.refreshAll",
+  "data.relationships",
   "data.removeDuplicates",
+  "data.scenarioManager",
+  "data.solver",
   "data.sort",
   "data.sort.asc",
   "data.sort.desc",
+  "data.subtotal",
   "data.textToColumns",
+  "data.ungroup",
   "data.validation",
   "db.connection",
   "db.refresh",
   "db.sql.dialog",
   "delete.columns",
   "delete.rows",
+  "draw.eraser",
+  "draw.inkToShape",
+  "draw.lasso",
+  "draw.pen",
   "edit.clear",
   "edit.clearAll",
   "edit.copy",
@@ -975,6 +650,7 @@
   "edit.fillRight",
   "edit.fillSeries",
   "edit.find",
+  "edit.flashFill",
   "edit.formatPainter",
   "edit.goTo",
   "edit.goToSpecial",
@@ -1011,23 +687,36 @@
   "formulas.autoSum",
   "formulas.calculateNow",
   "formulas.calculateSheet",
+  "formulas.calculationOptions",
+  "formulas.createFromSelection",
   "formulas.dateTime",
+  "formulas.defineName",
+  "formulas.errorChecking",
+  "formulas.evaluateFormula",
   "formulas.financial",
   "formulas.insertFunction",
   "formulas.logical",
   "formulas.lookupReference",
   "formulas.mathTrig",
   "formulas.moreFunctions",
+  "formulas.nameManager",
   "formulas.recentlyUsed",
+  "formulas.removeArrows",
   "formulas.showFormulas",
   "formulas.text",
+  "formulas.traceDependents",
   "formulas.tracePrecedents",
+  "formulas.useInFormula",
+  "formulas.watchWindow",
+  "home.addIns",
   "home.cellStyle",
   "home.clearRules",
+  "home.conditionalFormat",
   "home.decreaseIndent",
   "home.deleteCells",
   "home.doubleUnderline",
   "home.formatAsTable",
+  "home.formatCells",
   "home.hideColumns",
   "home.hideRows",
   "home.increaseIndent",
@@ -1035,28 +724,52 @@
   "home.lockCell",
   "home.mergeAcross",
   "home.mergeCenter",
+  "home.newCellStyle",
   "home.orientation",
+  "home.subscript",
+  "home.superscript",
   "home.unhideColumns",
   "home.unhideRows",
   "home.unmergeCells",
   "insert.chart",
+  "insert.checkbox",
   "insert.column.left",
   "insert.column.right",
+  "insert.equation",
+  "insert.icons",
   "insert.link",
+  "insert.picture",
   "insert.row.above",
   "insert.row.below",
+  "insert.shape",
+  "insert.signatureLine",
+  "insert.slicer",
+  "insert.smartArt",
+  "insert.sparkline",
   "insert.symbol",
   "insert.table",
+  "insert.textBox",
+  "insert.timeline",
+  "insert.wordArt",
+  "pageLayout.background",
   "pageLayout.breaks",
   "pageLayout.headerFooter",
   "pageLayout.margins",
   "pageLayout.orientation",
+  "pageLayout.pageSetup",
   "pageLayout.printArea",
   "pageLayout.printGridlines",
   "pageLayout.printHeadings",
   "pageLayout.printTitles",
   "pageLayout.scaleToFit",
   "pageLayout.size",
+  "pageLayout.theme",
+  "pageLayout.themeColors",
+  "pageLayout.themeEffects",
+  "pageLayout.themeFonts",
+  "review.allowEditRanges",
+  "review.checkAccessibility",
+  "review.convertToComments",
   "review.deleteComment",
   "review.newComment",
   "review.newNote",
@@ -1064,6 +777,11 @@
   "review.previousComment",
   "review.protectSheet",
   "review.protectWorkbook",
+  "review.showAllNotes",
+  "review.showChanges",
+  "review.showComments",
+  "review.spelling",
+  "review.thesaurus",
   "review.unprotectSheet",
   "review.workbookStatistics",
   "script.new",
@@ -1079,18 +797,39 @@
   "sx:status",
   "sx:tabs",
   "sx:theme",
+  "table.bandedColumns",
+  "table.bandedRows",
+  "table.convertToRange",
+  "table.firstColumn",
+  "table.headerRow",
+  "table.insertSlicer",
+  "table.lastColumn",
+  "table.removeDuplicates",
+  "table.style",
+  "table.summarizePivot",
+  "table.totalRow",
+  "view.arrangeAll",
+  "view.customViews",
+  "view.expandFormulaBar",
   "view.freeze.here",
   "view.freeze.none",
   "view.freezeFirstColumn",
   "view.freezeTopRow",
   "view.gridlines",
   "view.headings",
+  "view.hideWindow",
+  "view.macros",
+  "view.newWindow",
   "view.normal",
   "view.pageBreakPreview",
   "view.pageLayout",
   "view.rtl",
+  "view.ruler",
   "view.sheet.next",
   "view.sheet.prev",
+  "view.split",
+  "view.switchWindows",
+  "view.unhideWindow",
   "view.zoom",
   "view.zoom100",
   "view.zoomIn",

@@ -226,6 +226,11 @@ export async function mountSheets(container, options = {}) {
     const book = app.grid.app.book;
     for (let s = 0; s < book.sheetCount(); s += 1) {
       const sheet = book.sheetAt(s);
+      if (sheet.backgroundSrc === part && sheet.backgroundBytes) {
+        const url = URL.createObjectURL(new Blob([new Uint8Array(sheet.backgroundBytes)], { type: part.endsWith(".png") ? "image/png" : "image/jpeg" }));
+        blobUrls.set(part, url);
+        return url;
+      }
       for (let i = 0; i < sheet.imageCount(); i += 1) {
         const img = sheet.imageAt(i);
         if (img.src !== part || !img.bytes) continue;
@@ -238,14 +243,22 @@ export async function mountSheets(container, options = {}) {
     blobUrls.set(part, "");
     return "";
   }
+  // An image that never finishes loading must not hold every later frame (and
+  // the accessibility mirror updated with it) back: a frame waits a moment for
+  // a new picture, then draws without it and draws again when it arrives.
+  const loadingImages = new Set();
   async function imagesFor(doc) {
     const wanted = new Set(doc.list.cmds.filter((c) => c.k === 2 && c.src).map((c) => c.src));
     for (const src of wanted) {
-      if (imageCache.has(src)) continue;
+      if (imageCache.has(src) || loadingImages.has(src)) continue;
       const url = mediaUrl(src);
       if (!url) { imageCache.set(src, null); continue; }
-      const fetched = await glMod.loadImages({ list: { cmds: [{ k: 2, src: url }] } }, { base: "" });
-      imageCache.set(src, fetched.get(url) || null);
+      loadingImages.add(src);
+      const load = glMod.loadImages({ list: { cmds: [{ k: 2, src: url }] } }, { base: "" })
+        .then((fetched) => imageCache.set(src, fetched.get(url) || null), () => imageCache.set(src, null))
+        .finally(() => loadingImages.delete(src));
+      const done = await Promise.race([load.then(() => true), new Promise((r) => setTimeout(() => r(false), 1500))]);
+      if (!done) load.then(() => draw(true));
     }
     const out = new Map();
     for (const src of wanted) out.set(src, imageCache.get(src) || null);
@@ -264,6 +277,20 @@ export async function mountSheets(container, options = {}) {
       await after();
     },
   });
+
+  // --- proofing: a word list the page supplies (nothing is bundled) ----------
+  if (options.dictionary) {
+    (async () => {
+      try {
+        const words = typeof options.dictionary === "string" && !/\s/.test(options.dictionary)
+          ? await (await fetch(options.dictionary)).text()
+          : String(options.dictionary);
+        app.grid.app.addWords(words);
+      } catch (_) {
+        /* no list: Spelling says so */
+      }
+    })();
+  }
 
   // --- drawing --------------------------------------------------------------
   let lastScene = "";
@@ -339,6 +366,56 @@ export async function mountSheets(container, options = {}) {
       if (options.onSave) options.onSave(raw, name, controller);
       else saveBlob(new Blob([raw], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
       app.grid.markSavedAs(name);
+      return;
+    }
+    if (want === "exportPdf") {
+      const g = app.grid.app;
+      const bytes = g.pdfBytes;
+      if (options.onExport) options.onExport(bytes, g.pdfName, controller);
+      else saveBlob(new Blob([bytes], { type: "application/pdf" }), g.pdfName || "sheet.pdf");
+      return;
+    }
+    if (want === "picture" || want === "importCsv" || want === "background") {
+      // Ask for a file, then hand its bytes or text back to the sheet.
+      const pick = document.createElement("input");
+      pick.type = "file";
+      pick.accept = want === "importCsv" ? ".csv,.txt,text/csv,text/plain" : "image/png,image/jpeg";
+      pick.style.display = "none";
+      wrap.appendChild(pick);
+      pick.addEventListener("change", async () => {
+        const f = pick.files && pick.files[0];
+        pick.remove();
+        if (!f) return;
+        const g = app.grid.app;
+        if (want === "importCsv") app.grid.run("data.fromTextCsv", await f.text());
+        else if (want === "picture") g.insertPictureBytes(await f.arrayBuffer(), f.name);
+        else g.setBackgroundBytes(await f.arrayBuffer());
+        app.sync();
+        await after();
+      });
+      pick.click();
+      return;
+    }
+    if (want === "fromWeb") {
+      // Fetch the page and hand its HTML to the sheet, which reads the first table.
+      const g = app.grid.app;
+      const url = g.webUrl;
+      (async () => {
+        try {
+          const res = await fetch(url);
+          const text = await res.text();
+          app.grid.run("data.importHtml", text);
+        } catch (e) {
+          g.view.status = "From Web: " + (e && e.message ? e.message : "could not fetch");
+        }
+        app.sync();
+        await after();
+      })();
+      return;
+    }
+    if (want === "print") {
+      if (options.onPrint) options.onPrint(controller);
+      else window.print();
       return;
     }
     if (want === "exportCsv" || want === "exportHtml") {

@@ -297,6 +297,11 @@ class XlsxNumberFormat {
                 if (c.zero == "-") {
                     return "-"
                 }
+                ; Accounting's zero is a dash: no digit placeholders, and a
+                ; ? holds a digit's width as a space.
+                if (((indexOf c.zero "0") < 0) && ((indexOf c.zero "#") < 0)) {
+                    return (join (strsplit c.zero "?") " ")
+                }
                 return (XlsxNumberFormat.applyPattern(0.0 c.zero false))
             }
             if (v < 0.0) {
@@ -341,6 +346,14 @@ class XlsxNumberFormat {
         }
         if (XlsxNumberFormat.isTimePattern(p)) {
             return (XlsxNumberFormat.formatTime(v p forceMinus))
+        }
+        ; fraction: "# ?/?", "# ??/??", "?/4"
+        if (((indexOf p "/") > 0) && ((indexOf p "?") >= 0)) {
+            def fr:string (XlsxNumberFormat.formatFraction(v p))
+            if forceMinus {
+                return ("-" + fr)
+            }
+            return fr
         }
         ; percent
         if (XlsxNumberFormat.hasPercent(p)) {
@@ -528,56 +541,264 @@ class XlsxNumberFormat {
 
     ; Excel serial date: days since 1899-12-30 (with Excel's 1900 leap quirk ignored for display).
     sfn formatDate:string (serial:double pat:string forceMinus:boolean) {
+        return (XlsxNumberFormat.formatDateTime(serial pat))
+    }
+
+    sfn formatTime:string (serial:double pat:string forceMinus:boolean) {
+        return (XlsxNumberFormat.formatDateTime(serial pat))
+    }
+
+    sfn monthName:string (m:int) {
+        def names:[string] ([] _:string ("January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"))
+        if ((m < 1) || (m > 12)) {
+            return ""
+        }
+        return (itemAt names (m - 1))
+    }
+
+    sfn dayName:string (wd:int) {
+        def names:[string] ([] _:string ("Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday"))
+        return (itemAt names (wd % 7))
+    }
+
+    ; The run of one letter (case-insensitive) starting at i.
+    sfn runOf:int (p:string i:int) {
+        def ch:int (charAt (XlsxNumberFormat.lower(p)) i)
+        def j:int i
+        def lp:string (XlsxNumberFormat.lower(p))
+        while (j < (strlen lp)) {
+            if ((charAt lp j) != ch) {
+                break
+            }
+            j = (j + 1)
+        }
+        return (j - i)
+    }
+
+    ; Excel's date and time codes, token by token: y, m (month, or minutes
+    ; after an hour or before a second), d, h, s, AM/PM and A/P; anything
+    ; else is literal.
+    sfn formatDateTime:string (serial:double pat:string) {
         def day:int (to_int serial)
         if (day < 1) {
             day = 1
         }
-        ; Convert to Y-M-D via civil from days algorithm (Gregorian), epoch 1899-12-30
         def z:int (day + 2415019)
         def a:int (z + 32044)
-        def b:int (to_int ((4 * a) + 3) / 146097)
-        def c:int (a - (to_int ((b * 146097) / 4)))
-        def d:int (to_int ((4 * c) + 3) / 1461)
-        def e:int (c - (to_int ((1461 * d) / 4)))
-        def m:int (to_int ((5 * e) + 2) / 153)
-        def dayOut:int ((e - (to_int (((153 * m) + 2) / 5))) + 1)
-        def monthOut:int ((m + 3) - (12 * (to_int (m / 10))))
-        def yearOut:int ((((b * 100) + d) - 4800) + (to_int (m / 10)))
-        def ys:string (to_string yearOut)
-        def ms:string (XlsxNumberFormat.pad2(monthOut))
-        def ds:string (XlsxNumberFormat.pad2(dayOut))
-        def pl:string (XlsxNumberFormat.lower(pat))
-        if (pl == "yyyy-mm-dd") {
-            return (((ys + "-") + ms) + "-" + ds)
-        }
-        if (pl == "dd.mm.yyyy") {
-            return (((ds + ".") + ms) + "." + ys)
-        }
-        if (pl == "mm/dd/yyyy") {
-            return (((ms + "/") + ds) + "/" + ys)
-        }
-        ; fallback ISO
-        return (((ys + "-") + ms) + "-" + ds)
-    }
-
-    sfn formatTime:string (serial:double pat:string forceMinus:boolean) {
+        def b:int (idiv ((4 * a) + 3) 146097)
+        def c:int (a - (idiv (b * 146097) 4))
+        def d:int (idiv ((4 * c) + 3) 1461)
+        def e:int (c - (idiv (1461 * d) 4))
+        def m:int (idiv ((5 * e) + 2) 153)
+        def dd:int ((e - (idiv ((153 * m) + 2) 5)) + 1)
+        def mo:int ((m + 3) - (12 * (idiv m 10)))
+        def yy:int ((((b * 100) + d) - 4800) + (idiv m 10))
+        ; Serial 1 (1900-01-01) is a Sunday.
+        def wd:int ((day + 6) % 7)
         def frac:double (serial - (to_double (to_int serial)))
         if (frac < 0.0) {
             frac = (0.0 - frac)
         }
         def totalSec:int (to_int ((frac * 86400.0) + 0.5))
-        def hh:int (to_int (totalSec / 3600))
-        def rem:int (totalSec - (hh * 3600))
-        def mm:int (to_int (rem / 60))
-        def ss:int (rem - (mm * 60))
+        def hh:int (idiv totalSec 3600)
+        def mi:int (idiv (totalSec - (hh * 3600)) 60)
+        def ss:int ((totalSec - (hh * 3600)) - (mi * 60))
         if (hh >= 24) {
-            hh = (hh - ((to_int (hh / 24)) * 24))
+            hh = (hh % 24)
         }
-        def pl:string (XlsxNumberFormat.lower(pat))
-        if (pl == "hh:mm:ss") {
-            return ((((XlsxNumberFormat.pad2(hh)) + ":") + (XlsxNumberFormat.pad2(mm))) + ":" + (XlsxNumberFormat.pad2(ss)))
+        def lp:string (XlsxNumberFormat.lower(pat))
+        def ampm:boolean (((indexOf lp "am/pm") >= 0) || ((indexOf lp "a/p") >= 0))
+        def out:string ""
+        def lastWasHour:boolean false
+        def i:int 0
+        def n:int (strlen pat)
+        while (i < n) {
+            def ch:int (charAt lp i)
+            def run:int (XlsxNumberFormat.runOf(pat i))
+            if (ch == 121) {
+                if (run >= 3) {
+                    out = (out + (to_string yy))
+                } {
+                    out = (out + (XlsxNumberFormat.pad2((yy % 100))))
+                }
+                i = (i + run)
+                lastWasHour = false
+            } {
+                if (ch == 109) {
+                    ; Minutes when an hour came before, or a second follows.
+                    def minutes:boolean lastWasHour
+                    def k:int (i + run)
+                    while ((k < n) && (((charAt lp k) == 58) || ((charAt lp k) == 32))) {
+                        k = (k + 1)
+                    }
+                    if ((k < n) && ((charAt lp k) == 115)) {
+                        minutes = true
+                    }
+                    if (minutes && (run <= 2)) {
+                        if (run == 2) {
+                            out = (out + (XlsxNumberFormat.pad2(mi)))
+                        } {
+                            out = (out + (to_string mi))
+                        }
+                    } {
+                        if (run >= 4) {
+                            out = (out + (XlsxNumberFormat.monthName(mo)))
+                        } {
+                            if (run == 3) {
+                                out = (out + (substring (XlsxNumberFormat.monthName(mo)) 0 3))
+                            } {
+                                if (run == 2) {
+                                    out = (out + (XlsxNumberFormat.pad2(mo)))
+                                } {
+                                    out = (out + (to_string mo))
+                                }
+                            }
+                        }
+                    }
+                    i = (i + run)
+                    lastWasHour = false
+                } {
+                    if (ch == 100) {
+                        if (run >= 4) {
+                            out = (out + (XlsxNumberFormat.dayName(wd)))
+                        } {
+                            if (run == 3) {
+                                out = (out + (substring (XlsxNumberFormat.dayName(wd)) 0 3))
+                            } {
+                                if (run == 2) {
+                                    out = (out + (XlsxNumberFormat.pad2(dd)))
+                                } {
+                                    out = (out + (to_string dd))
+                                }
+                            }
+                        }
+                        i = (i + run)
+                        lastWasHour = false
+                    } {
+                        if (ch == 104) {
+                            def hv:int hh
+                            if ampm {
+                                hv = (hh % 12)
+                                if (hv == 0) {
+                                    hv = 12
+                                }
+                            }
+                            if (run >= 2) {
+                                out = (out + (XlsxNumberFormat.pad2(hv)))
+                            } {
+                                out = (out + (to_string hv))
+                            }
+                            i = (i + run)
+                            lastWasHour = true
+                        } {
+                            if (ch == 115) {
+                                if (run >= 2) {
+                                    out = (out + (XlsxNumberFormat.pad2(ss)))
+                                } {
+                                    out = (out + (to_string ss))
+                                }
+                                i = (i + run)
+                                lastWasHour = false
+                            } {
+                                if ((indexOf (substring lp i n) "am/pm") == 0) {
+                                    if (hh < 12) {
+                                        out = (out + "AM")
+                                    } {
+                                        out = (out + "PM")
+                                    }
+                                    i = (i + 5)
+                                } {
+                                    if ((indexOf (substring lp i n) "a/p") == 0) {
+                                        if (hh < 12) {
+                                            out = (out + "A")
+                                        } {
+                                            out = (out + "P")
+                                        }
+                                        i = (i + 3)
+                                    } {
+                                        if (ch != 91) {
+                                            if (ch != 93) {
+                                                out = (out + (substring pat i (i + 1)))
+                                            }
+                                        }
+                                        i = (i + 1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-        return (((XlsxNumberFormat.pad2(hh)) + ":") + (XlsxNumberFormat.pad2(mm)))
+        return out
+    }
+
+    ; A fraction with up to as many denominator digits as the code has ?s
+    ; after the slash; "# " in front keeps a whole part.
+    sfn formatFraction:string (v:double pat:string) {
+        def slash:int (indexOf pat "/")
+        def after:string (substring pat (slash + 1) (strlen pat))
+        def digits:int 0
+        def fixedDen:int 0
+        def i:int 0
+        while (i < (strlen after)) {
+            def ch:int (charAt after i)
+            if ((ch == 63) || (ch == 35) || (ch == 48)) {
+                digits = (digits + 1)
+            }
+            if ((ch >= 49) && (ch <= 57)) {
+                fixedDen = ((fixedDen * 10) + (ch - 48))
+            }
+            i = (i + 1)
+        }
+        def whole:boolean ((indexOf (trim (substring pat 0 slash)) " ") > 0)
+        def w:int 0
+        def f:double v
+        if whole {
+            w = (to_int v)
+            f = (v - (to_double w))
+        }
+        def maxDen:int 9
+        if (digits >= 2) {
+            maxDen = 99
+        }
+        if (digits >= 3) {
+            maxDen = 999
+        }
+        def bestN:int 0
+        def bestD:int 1
+        def bestErr:double 10.0
+        def den:int 1
+        while (den <= maxDen) {
+            if ((fixedDen == 0) || (den == fixedDen)) {
+                def num:int (to_int ((f * (to_double den)) + 0.5))
+                def err:double ((f - ((to_double num) / (to_double den))))
+                if (err < 0.0) {
+                    err = (0.0 - err)
+                }
+                if (err < (bestErr - 0.0000001)) {
+                    bestErr = err
+                    bestN = num
+                    bestD = den
+                }
+            }
+            den = (den + 1)
+        }
+        if (bestN == bestD) {
+            w = (w + 1)
+            bestN = 0
+        }
+        if (bestN == 0) {
+            if whole {
+                return (to_string w)
+            }
+            return "0"
+        }
+        def frac:string ((to_string bestN) + "/" + (to_string bestD))
+        if (whole && (w != 0)) {
+            return ((to_string w) + " " + frac)
+        }
+        return frac
     }
 
     sfn formatScientific:string (v:double) {

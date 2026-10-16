@@ -51,6 +51,10 @@ class RibbonCtl extends UiCtl {
     def rovingValue:string ""
     ; The value of the button pressed last, until the app takes it.
     def pressed:string ""
+    ; The classes the group and its buttons take: a task pane's list is the
+    ; same controller laid out as rows.
+    def rootClass:string "sx-ribbon"
+    def toolClass:string ""
 
     Constructor () {
         rootEl = (EVGElement.createDiv())
@@ -215,7 +219,7 @@ class RibbonCtl extends UiCtl {
     fn build:void () {
         def root:EVGElement (unwrap rootEl)
         root.id = tid
-        root.className = "sx-ribbon"
+        root.className = rootClass
         UiTree.clearChildren(root)
         def i:int 0
         while (i < (array_length items)) {
@@ -234,6 +238,9 @@ class RibbonCtl extends UiCtl {
                 el.cursor = "pointer"
                 if ((strlen it.text) > 0) {
                     UiTree.addClass(el "sx-tool-text")
+                }
+                if ((strlen toolClass) > 0) {
+                    UiTree.addClass(el toolClass)
                 }
                 if it.disabled {
                     UiTree.addClass(el "sx-tool-disabled")

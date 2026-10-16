@@ -112,7 +112,7 @@ Insert	Illustrations	Shapes	insert.shape	live	-	no	-
 Insert	Illustrations	Icons	insert.icons	live	-	no	-	
 Insert	Illustrations	SmartArt	insert.smartArt	missing	-	no	-	
 Insert	Illustrations	Screenshot	insert.screenshot	missing	-	no	-	
-Insert	Charts	Recommended Charts	insert.recommendedCharts	live	insert.chart	partial	smoke:…offering only the types the data suits	the chart picker offers types that suit the data
+Insert	Charts	Recommended Charts	insert.recommendedCharts	live	insert.recommendedCharts	yes	probe:cmd.insert.recommendedCharts	
 Insert	Charts	Charts	insert.chart	live	insert.chart	yes	smoke:Insert chart makes the chart and opens its editor	
 Insert	Charts	PivotChart	insert.pivotChart	live	insert.pivotChart	yes	probe:cmd.insert.pivotChart	
 Insert	Charts	Maps	insert.map	missing	-	no	-	
@@ -271,17 +271,17 @@ Table Design	Table Style Options	First Column	table.firstColumn	live	table.first
 Table Design	Table Style Options	Last Column	table.lastColumn	live	table.lastColumn	yes	probe:cmd.table.lastColumn	
 Table Design	Table Style Options	Banded Columns	table.bandedColumns	live	table.bandedColumns	yes	probe:cmd.table.bandedColumns	
 Table Design	Table Styles	Table Styles	table.style	live	table.style	yes	probe:cmd.table.style	
-Chart Design	Chart Layouts	Add Chart Element	chart.addElement	live	-	no	-	
-Chart Design	Chart Layouts	Quick Layout	chart.quickLayout	live	-	no	-	
-Chart Design	Chart Styles	Change Colors	chart.changeColors	live	-	no	-	
-Chart Design	Chart Styles	Chart Styles	chart.set	live	-	no	-	
-Chart Design	Data	Switch Row/Column	chart.switchRowColumn	live	-	no	-	
-Chart Design	Data	Select Data	chart.selectData	live	-	no	-	
+Chart Design	Chart Layouts	Add Chart Element	chart.addElement	live	chart.addElement	yes	probe:cmd.chart.addElement	
+Chart Design	Chart Layouts	Quick Layout	chart.quickLayout	live	chart.quickLayout	yes	probe:cmd.chart.quickLayout	
+Chart Design	Chart Styles	Change Colors	chart.changeColors	live	chart.changeColors	yes	probe:cmd.chart.changeColors	
+Chart Design	Chart Styles	Chart Styles	chart.set	live	chart.set	yes	probe:cmd.chart.set	
+Chart Design	Data	Switch Row/Column	chart.switchRowColumn	live	chart.switchRowColumn	yes	probe:cmd.chart.switchRowColumn	
+Chart Design	Data	Select Data	chart.selectData	live	chart.selectData	yes	probe:cmd.chart.selectData	
 Chart Design	Type	Change Chart Type	chart.changeType	live	insert.chart	yes	smoke:a type chosen redraws the chart on the sheet	
-Chart Design	Location	Move Chart	chart.move	live	-	no	-	
-Format	Current Selection	Format Selection	chart.formatSelection	live	-	no	-	
-Format	Shape Styles	Shape Fill	chart.shapeFill	live	-	no	-	
-Format	Shape Styles	Shape Outline	chart.shapeOutline	live	-	no	-	
+Chart Design	Location	Move Chart	chart.move	live	chart.move	yes	probe:cmd.chart.move	
+Format	Current Selection	Format Selection	chart.formatSelection	live	chart.formatSelection	yes	probe:cmd.chart.formatSelection	
+Format	Shape Styles	Shape Fill	chart.shapeFill	live	chart.shapeFill	yes	probe:cmd.chart.shapeFill	
+Format	Shape Styles	Shape Outline	chart.shapeOutline	live	chart.shapeOutline	yes	probe:cmd.chart.shapeOutline	
 PivotTable Analyze	Show	Field List	pivot.fieldList	live	pivot.fieldList	yes	probe:cmd.pivot.fieldList	
 PivotTable Analyze	Data	Refresh	pivot.refresh	live	pivot.refresh	yes	probe:cmd.pivot.refresh	
 PivotTable Analyze	Data	Change Data Source	pivot.changeSource	live	pivot.changeSource	yes	probe:cmd.pivot.changeSource	

@@ -53,6 +53,7 @@ class GridFormat {
         if (op == "indent")    { return true }
         if (op == "locked")    { return true }
         if (op == "dunderline") { return true }
+        if (op == "vertAlign") { return true }
         return false
     }
 
@@ -69,6 +70,7 @@ class GridFormat {
         if (op == "numfmt")    { return (st.numFmt == (GridFormat.namedFormat(arg))) }
         if (op == "locked")    { return st.locked }
         if (op == "dunderline") { return st.doubleUnderline }
+        if (op == "vertAlign") { return (st.vertAlign == arg) }
         if (op == "border") {
             if (arg == "none") {
                 return (st.hasBorder == false)
@@ -89,7 +91,37 @@ class GridFormat {
         if (arg == "comma")    { return "#,##0.00" }
         if (arg == "date")     { return "yyyy-mm-dd" }
         if (arg == "text")     { return "@" }
+        if (arg == "general")  { return "General" }
+        if (arg == "number")   { return "0.00" }
+        if (arg == "accounting") { return "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)" }
+        if (arg == "shortDate") { return "m/d/yyyy" }
+        if (arg == "longDate") { return "dddd, mmmm d, yyyy" }
+        if (arg == "time")     { return "h:mm:ss AM/PM" }
+        if (arg == "fraction") { return "# ?/?" }
+        if (arg == "scientific") { return "0.00E+00" }
+        ; Anything else that looks like a format code is one (Format Cells ›
+        ; Custom): digits, #, ?, @, a date letter or a quoted literal.
+        if (GridFormat.looksLikeCode(arg)) { return arg }
         return "General"
+    }
+
+    sfn looksLikeCode:boolean (arg:string) {
+        if ((strlen arg) == 0) {
+            return false
+        }
+        def i:int 0
+        while (i < (strlen arg)) {
+            def ch:int (charAt arg i)
+            if ((ch == 48) || (ch == 35) || (ch == 63) || (ch == 64) || (ch == 34)) {
+                return true
+            }
+            i = (i + 1)
+        }
+        def l:string (to_lowercase arg)
+        if (((indexOf l "yy") >= 0) || ((indexOf l "dd") >= 0) || ((indexOf l "mm") >= 0) || ((indexOf l "h:") >= 0)) {
+            return true
+        }
+        return false
     }
 
     ; One more (or one fewer) decimal place in a numeric format. Excel's own
@@ -224,6 +256,14 @@ class GridFormat {
         if (op == "dunderline") {
             st.doubleUnderline = on
             st.underline = on
+            return
+        }
+        if (op == "vertAlign") {
+            if on {
+                st.vertAlign = arg
+            } {
+                st.vertAlign = ""
+            }
             return
         }
         if (op == "rotate") {

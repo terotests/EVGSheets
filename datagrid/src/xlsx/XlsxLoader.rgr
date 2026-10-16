@@ -79,6 +79,20 @@ class XlsxLoader {
         return (OpcPackage.joinPartPath(partPath target))
     }
 
+    ; The text of the first <tag>…</tag> in a small part, entities decoded.
+    sfn tagText:string (xml:string tag:string) {
+        def open:int (indexOf xml ("<" + tag + ">"))
+        if (open < 0) {
+            return ""
+        }
+        def from:int ((open + (strlen tag)) + 2)
+        def close:int (indexOf xml ("</" + tag + ">"))
+        if (close < from) {
+            return ""
+        }
+        return (XmlLite.decodeEntities((substring xml from close)))
+    }
+
     fn loadPackage:boolean (pkg:XlsxPackage book:WorkbookModel) {
         book.clear()
         ; Kept so a later save can preserve the parts nothing here models —
@@ -86,9 +100,21 @@ class XlsxLoader {
         book.sourceBytes = pkg.plainBytes
         def wb:XlsxWorkbook (new XlsxWorkbook)
         wb.load(pkg)
+        def ni:int 0
+        while (ni < (array_length wb.nameKeys)) {
+            book.setName((itemAt wb.nameKeys ni) (itemAt wb.nameRefs ni))
+            ni = (ni + 1)
+        }
         if ((wb.sheetCount()) == 0) {
             lastError = "workbook has no sheets"
             return false
+        }
+        if (pkg.hasEntry("docProps/core.xml")) {
+            def core:string (pkg.entryText("docProps/core.xml"))
+            book.propTitle = (XlsxLoader.tagText(core "dc:title"))
+            book.propSubject = (XlsxLoader.tagText(core "dc:subject"))
+            book.propAuthor = (XlsxLoader.tagText(core "dc:creator"))
+            book.propKeywords = (XlsxLoader.tagText(core "cp:keywords"))
         }
         def sst:XlsxSharedStrings (new XlsxSharedStrings)
         if (pkg.hasEntry("xl/sharedStrings.xml")) {

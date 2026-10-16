@@ -49,6 +49,12 @@ const chromePath = () => [process.env.CHROME_PATH, "/opt/pw-browsers/chromium"].
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".ttf": "font/ttf" };
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split("?")[0]);
+  if (url === "/table.html") {
+    // A page with a table, for Data › From Web.
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end("<html><body><h1>Rates</h1><table><tr><th>Name</th><th>Rate</th></tr><tr><td>Alpha &amp; Co</td><td>1.5</td></tr><tr><td>Beta</td><td>2.25</td></tr></table></body></html>");
+    return;
+  }
   const file = url === "/target.xlsx" ? FIXTURE : path.join(DIST, url.endsWith("/") ? url + "index.html" : url);
   if ((file !== FIXTURE && !file.startsWith(DIST)) || !fs.existsSync(file)) {
     res.writeHead(404);
@@ -61,9 +67,13 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(PORT, r));
 
 const results = {};
+let lastAt = Date.now();
 const ok = (id, pass, value = "") => {
   results[id] = { pass: !!pass, value: String(value) };
-  console.log(`  ${pass ? "PASS" : "FAIL"} ${id}${value !== "" ? "  (" + value + ")" : ""}`);
+  const ms = Date.now() - lastAt;
+  lastAt = Date.now();
+  const slow = process.env.PROBE_TIMING ? `  [${ms} ms]` : "";
+  console.log(`  ${pass ? "PASS" : "FAIL"} ${id}${value !== "" ? "  (" + value + ")" : ""}${slow}`);
 };
 
 const { chromium } = loadPlaywright();
@@ -74,6 +84,7 @@ const browser = await chromium.launch({
 const errors = [];
 const page = await browser.newPage({ viewport: { width: W, height: H }, colorScheme: "light", acceptDownloads: true });
 page.on("pageerror", (e) => errors.push(e.message));
+page.on("crash", () => console.log("  page crashed"));
 let commands = [];
 let actions = [];
 try {
@@ -375,6 +386,736 @@ try {
     return out;
   };
   const savedXml = async () => unzip(await page.evaluate(() => Array.from(new Uint8Array(window.sheet.saveBytes()))));
+  // The pane's rows and title as the chrome shows them (the a11y mirror).
+  const paneEls = "[...document.querySelectorAll('button,[role=button]')].filter((e) => ((e.dataset && e.dataset.a11yId) || e.id || '').startsWith('sx-pane-list-'))";
+  const paneRows = () => page.evaluate(new Function("return " + paneEls + ".map((e) => (e.getAttribute('aria-label') || e.textContent || '').trim());"));
+  const pressPaneRow = async (i) => {
+    const r = await page.evaluate(new Function("i", "const els = " + paneEls + "; const b = els[i] && els[i].getBoundingClientRect(); return b ? { x: b.x + 4, y: b.y + b.height / 2 } : null;"), i);
+    if (r) await page.mouse.click(r.x, r.y);
+    return !!r;
+  };
+
+  // Checks added with the task pane and the Review/View/File/Automate panes:
+  // a sheet of their own, so they can also run alone (PROBE_NEW=1).
+  const newChecks = async () => {
+    await run("sheet.add");
+    await run("sheet.rename", "Panes");
+    for (const [ref, v] of [["A1", "Item"], ["B1", "Qty"], ["A2", "Pens"], ["B2", "4"], ["A3", "Ink"], ["B3", "6"]]) await put(ref, v);
+    // Insert Function: the pane lists functions, the search narrows it, a row
+    // starts the formula.
+    await at("D1");
+    await run("formulas.insertFunction");
+    const fnRows = await paneRows();
+    await page.keyboard.type("VLOO");
+    await page.waitForTimeout(50);
+    const fnRows2 = await paneRows();
+    await pressPaneRow(0);
+    const s1 = await S();
+    await check("formulas.insertFunction", async () => [fnRows.length > 50 && fnRows2.length === 1 && s1.editing && s1.editText === "=VLOOKUP(", fnRows.length + " → " + fnRows2.join(",") + " → " + s1.editText]);
+    await page.keyboard.press("Escape");
+    const cats = [["financial", "PMT"], ["logical", "IF"], ["text", "LEFT"], ["dateTime", "DATE"], ["lookupReference", "VLOOKUP"], ["mathTrig", "ROUND"], ["moreFunctions", "AVERAGE"], ["recentlyUsed", "SUM"]];
+    for (const [cat, fn] of cats) {
+      await at("D2");
+      await run("formulas." + cat);
+      const rows = await paneRows();
+      const i = rows.indexOf(fn);
+      if (i >= 0) await pressPaneRow(i);
+      const s2 = await S();
+      ok("cmd.formulas." + cat + ".list", i >= 0 && s2.editing && s2.editText === "=" + fn + "(", rows.length + " listed, " + s2.editText);
+      await page.keyboard.press("Escape");
+    }
+    // Threaded comments, the Comments pane, notes kept open.
+    await at("B2");
+    await run("review.newComment", "Check the count");
+    await run("review.newComment", "Looks right");
+    await check("review.newComment", async () => { const t = await M("M.threadAt(1,1)"); return [t === "You: Check the count\nLooks right".replace("\nLooks", "\nYou: Looks"), t]; });
+    await run("review.showComments");
+    await check("review.showComments", async () => { const rows = await paneRows(); return [(await M("G.paneKind")) === "comments" && rows.some((r) => /B2: You: Looks right/.test(r)), rows.join(" | ")]; });
+    await at("A3");
+    await run("review.newNote", "ink is low");
+    await run("review.showNote");
+    await at("A1");
+    await check("review.showNote", async () => [await M("M.noteShown(2,0)")]);
+    await run("review.showAllNotes");
+    await check("review.showAllNotes", async () => [await M("M.showAllNotes && M.noteShown(2,0)")]);
+    await run("review.showAllNotes");
+    await run("review.convertToComments");
+    await check("review.convertToComments", async () => [await M("!M.hasNote(2,0) && M.threadAt(2,0) === 'You: ink is low'"), await M("M.threadAt(2,0)")]);
+    // Allow Edit Ranges: B2:B3 stays editable under protection.
+    await run("review.allowEditRanges", "B2:B3");
+    await run("review.protectSheet");
+    await put("B3", "7");
+    await put("A2", "Pencils");
+    await run("review.unprotectSheet");
+    await check("review.allowEditRanges", async () => [(await cellAt("B3")) === "7" && (await cellAt("A2")) === "Pens", (await cellAt("B3")) + "," + (await cellAt("A2"))]);
+    await run("review.checkAccessibility");
+    await check("review.checkAccessibility", async () => { const rows = await paneRows(); return [(await M("G.paneKind")) === "accessibility" && rows.some((r) => /alt text/.test(r)) && rows.some((r) => /default sheet name/.test(r)), rows.slice(0, 3).join(" | ")]; });
+    // Custom Views: zoom and a hidden column come back.
+    await run("view.zoom", "150");
+    await at("C1");
+    await run("home.hideColumns");
+    await run("view.customViews", "add:Wide");
+    await run("view.zoom", "100");
+    await run("home.unhideColumns");
+    await run("view.customViews");
+    const cvRows = await paneRows();
+    await pressPaneRow(0);
+    await check("view.customViews", async () => [cvRows[0] === "Wide" && (await M("M.zoom")) === 1.5 && (await M("M.isColHidden(2)")), cvRows.join(",") + " zoom " + (await M("M.zoom"))]);
+    await run("view.zoom", "100");
+    await at("C1");
+    await run("home.unhideColumns");
+    // Record Actions, then play it back from Macros.
+    await run("automate.recordActions");
+    await put("E1", "rec");
+    await at("E1");
+    await run("format.bold");
+    await run("automate.recordActions", "stop:Stamp");
+    await at("F1");
+    await run("view.macros");
+    const mRows = await paneRows();
+    await at("E1");
+    await run("edit.clearAll");
+    await pressPaneRow(mRows.indexOf("Macro: Stamp"));
+    await check("automate.recordActions", async () => [mRows.includes("Macro: Stamp") && (await cellAt("E1")) === "rec" && (await style(0, 4)).bold, await M("G.macros.get ? G.macros.get('Stamp') : ''")]);
+    await check("view.macros", async () => [mRows.includes("Macro: Stamp"), mRows.join(",")]);
+    await run("automate.allScripts");
+    await check("automate.allScripts", async () => [(await M("G.paneKind")) === "macros"]);
+    const nScripts = await M("G.book.scriptCount()");
+    await run("automate.newScript", "probe");
+    await check("automate.newScript", async () => [(await M("G.book.scriptCount()")) === nScripts + 1]);
+    await run("script.close");
+    // File: properties, options, PDF, print.
+    await run("file.properties", "title=Quarterly");
+    await run("file.properties", "author=Tero");
+    await check("file.properties", async () => { const x = await savedXml(); const core = x["docProps/core.xml"] || ""; return [/<dc:title>Quarterly<\/dc:title>/.test(core) && /<dc:creator>Tero/.test(core), core.slice(0, 80)]; });
+    await run("file.options");
+    const oRows = await paneRows();
+    await pressPaneRow(0);
+    await check("file.options", async () => [/^Gridlines: on/.test(oRows[0]) && (await M("M.showGridlines")) === false, oRows[0]]);
+    await run("file.options", "gridlines");
+    await run("file.exportPdf");
+    await check("file.exportPdf", async () => { const h = await M("(() => { const p = G.pdfBytes; const b = p instanceof Uint8Array ? p : new Uint8Array(p || []); return String.fromCharCode(...Array.from(b.slice(0, 5))) + ' ' + b.length; })()"); return [/^%PDF-/.test(h), h + ' ' + (await M("G.view.status"))]; });
+    await page.evaluate(() => { window.__printed = 0; window.print = () => { window.__printed++; }; });
+    await run("file.print");
+    await check("file.print", async () => [(await page.evaluate(() => window.__printed)) === 1]);
+    await run("file.info");
+    await check("file.info", async () => { const rows = await paneRows(); return [rows[0] === "Title: Quarterly" && rows.includes("Export to PDF"), rows.slice(0, 2).join(" | ")]; });
+    // Data: filters, What-If, outline, analysis, import.
+    await run("sheet.add");
+    await run("sheet.rename", "DataTools");
+    const rows = [["Region", "Rep", "Sales"], ["East", "ann smith", "10"], ["East", "bob jones", "20"], ["West", "cy young", "30"], ["West", "di lee", "40"], ["West", "ed kim", "50"]];
+    for (let r = 0; r < rows.length; r++) for (let c = 0; c < 3; c++) await put(String.fromCharCode(65 + c) + (r + 1), rows[r][c]);
+    await at("B2");
+    await run("data.filter", "A=West");
+    await check("data.filter", async () => [await M("M.rowSuppressed[1] && !M.rowSuppressed[3] && !M.rowSuppressed[0]"), await M("[0,1,2,3,4,5].map((r) => M.rowSuppressed[r] ? 'h' : 's').join('')")]);
+    await put("A2", "West");
+    await run("data.reapply");
+    await check("data.reapply", async () => [await M("!M.rowSuppressed[1] && M.rowSuppressed[2]"), await M("[0,1,2,3,4,5].map((r) => M.rowSuppressed[r] ? 'h' : 's').join('')")]);
+    await run("data.filter");
+    await put("A2", "East");
+    for (const [ref, v] of [["E1", "Sales"], ["E2", ">25"]]) await put(ref, v);
+    await at("A1");
+    await run("data.advancedFilter", "criteria=E1:E2;copyTo=G1");
+    await check("data.advancedFilter", async () => { const v = [await cellAt("G1"), await cellAt("I2"), await cellAt("I4"), await cellAt("I5")]; return [v.join(",") === "Region,30,50,", v.join(",")]; });
+    // Flash Fill: the first name from "ann smith", capitalised.
+    await put("D1", "First");
+    await put("D2", "Ann");
+    await at("D2");
+    await run("data.flashFill");
+    await check("data.flashFill", async () => { const v = [await cellAt("D3"), await cellAt("D6")]; return [v.join(",") === "Bob,Ed", v.join(",")]; });
+    await put("D3", "");
+    await put("D4", "");
+    await at("D2");
+    await run("edit.flashFill");
+    await check("edit.flashFill", async () => [(await cellAt("D4")) === "Cy", await cellAt("D4")]);
+    // Custom Sort: Region descending, then Sales descending.
+    await at("A2");
+    await run("data.customSort", "A desc, C desc");
+    await check("data.sort", async () => { const v = [await cellAt("A2"), await cellAt("C2"), await cellAt("C4")]; return [v.join(",") === "West,50,30", v.join(",")]; });
+    // Circle Invalid Data.
+    await at("C2");
+    await run("data.validation", "whole:0:45");
+    await sel("C2:C6");
+    await run("data.validation", "whole:0:45");
+    await run("data.circleInvalid");
+    await check("data.circleInvalid", async () => [(await M("M.invalidCircles.length")) === 2, await M("Array.from(M.invalidCircles).join(',')")]);
+    await run("data.circleInvalid", "clear");
+    // Goal Seek and Solver on K1 = K2 * 3.
+    await put("K2", "1");
+    await put("K1", "=K2*3");
+    await at("K1");
+    await run("data.goalSeek", "set=K1;to=90;by=K2");
+    await check("data.goalSeek", async () => [Math.abs(Number(await cellAt("K2")) - 30) < 0.001, await cellAt("K2")]);
+    await put("L2", "1");
+    await put("L1", "=-(L2-7)*(L2-7)+4");
+    await run("data.solver", "set=L1;max;by=L2;limits=L2<=20");
+    await check("data.solver", async () => [Math.abs(Number(await cellAt("L2")) - 7) < 0.01, await cellAt("L2") + " → " + (await cellAt("L1"))]);
+    // Scenarios.
+    await run("data.scenarioManager", "add:Best:K2=100");
+    await run("data.scenarioManager", "add:Worst:K2=5");
+    await run("data.scenarioManager");
+    const scRows = await paneRows();
+    await pressPaneRow(1);
+    await check("data.scenarioManager", async () => [scRows.join(",") === "Best,Worst" && (await cellAt("K1")) === "15", scRows.join(",") + " K1=" + (await cellAt("K1"))]);
+    // Data Table: N2:N4 inputs into K2, O1 reads K1.
+    for (const [ref, v] of [["N2", "1"], ["N3", "2"], ["N4", "3"], ["O1", "=K1"]]) await put(ref, v);
+    await sel("N1:O4");
+    await run("data.dataTable", "col=K2");
+    await check("data.dataTable", async () => { const v = [await cellAt("O2"), await cellAt("O3"), await cellAt("O4"), await cellAt("K2")]; return [v.join(",") === "3,6,9,5", v.join(",")]; });
+    // Consolidate two blocks by label.
+    for (const [ref, v] of [["Q1", "a"], ["R1", "1"], ["Q2", "b"], ["R2", "2"], ["Q4", "b"], ["R4", "5"], ["Q5", "c"], ["R5", "7"]]) await put(ref, v);
+    await at("T1");
+    await run("data.consolidate", "sum:Q1:R2;Q4:R5");
+    await check("data.consolidate", async () => { const v = [await cellAt("T1"), await cellAt("U1"), await cellAt("T2"), await cellAt("U2"), await cellAt("T3"), await cellAt("U3")]; return [v.join(",") === "a,1,b,7,c,7", v.join(",")]; });
+    // Group, hide and show detail.
+    await sel("A3:A4");
+    await run("data.group");
+    await at("A3");
+    await run("data.hideDetail");
+    const hid = await M("M.isRowHidden(2) && M.isRowHidden(3)");
+    await run("data.showDetail");
+    await check("data.group", async () => [(await M("M.rowLevels.get ? M.rowLevels.get(2) : M.rowLevels[2]")) === 1]);
+    await check("data.hideDetail", async () => [hid]);
+    await check("data.showDetail", async () => [await M("!M.isRowHidden(2) && !M.isRowHidden(3)")]);
+    await sel("A3:A4");
+    await run("data.ungroup");
+    await check("data.ungroup", async () => [(await M("M.rowLevels.get ? M.rowLevels.get(2) : M.rowLevels[2]")) === 0]);
+    // Subtotal: by Region, sum of Sales.
+    await at("A1");
+    await run("data.customSort", "A asc");
+    await run("data.subtotal", "at=A;fn=sum;cols=C");
+    await check("data.subtotal", async () => { const v = [await cellAt("A4"), await cellAt("C4"), await cellAt("A9"), await cellAt("C9")]; return [v.join(",") === "East Total,30,Grand Total,150", v.join(",") + " " + (await M("M.getFormula(8,2)"))]; });
+    // Analysis ToolPak: descriptive statistics of Sales.
+    await run("sheet.add");
+    for (const [ref, v] of [["A1", "Score"], ["A2", "2"], ["A3", "4"], ["A4", "4"], ["A5", "6"]]) await put(ref, v);
+    await sel("A1:A5");
+    await run("data.analysisToolPak");
+    await check("data.analysisToolPak", async () => { const v = [(await S()).sheets.slice(-1)[0], await cellAt("A1"), await cellAt("B3"), await cellAt("B6"), await cellAt("B13")]; return [v.slice(1).join(",") === "Score,4,4,4" && /Descriptive/.test(v[0]), v.join(",")]; });
+    // Forecast Sheet.
+    await run("sheet.add");
+    for (const [ref, v] of [["A1", "Month"], ["B1", "Units"], ["A2", "1"], ["B2", "10"], ["A3", "2"], ["B3", "20"], ["A4", "3"], ["B4", "30"]]) await put(ref, v);
+    await sel("A1:B4");
+    const charts0 = await M("G.view.chartLayer.count()");
+    await run("data.forecastSheet", "n=2");
+    await check("data.forecastSheet", async () => { const v = [await cellAt("A6"), await cellAt("C6"), await M("G.view.chartLayer.count()") - charts0]; return [v.join(",") === "5,50,1" && /Forecast/.test((await S()).sheets.slice(-1)[0]), v.join(",")]; });
+    // Import: CSV text, and a table loaded as a query that Refresh All rereads.
+    await run("data.fromTextCsv", 'Name,City\n"Smith, J",Oslo\nLee,Rome');
+    await check("data.fromTextCsv", async () => { const v = [await cellAt("A2"), await cellAt("B3")]; return [v.join("|") === "Smith, J|Rome", v.join("|")]; });
+    await at("A1");
+    await run("data.fromTableRange");
+    const qSheet = (await S()).sheets.slice(-1)[0];
+    await check("data.fromTableRange", async () => [(await cellAt("A2")) === "Smith, J" && /Query/.test(qSheet), qSheet]);
+    await run("view.sheet.prev");
+    await put("B3", "Paris");
+    await run("data.refreshAll");
+    await run("view.sheet.next");
+    await check("data.refreshAll", async () => [(await cellAt("B3")) === "Paris", await cellAt("B3")]);
+    await run("data.queriesConnections");
+    await check("data.queriesConnections", async () => { const rows = await paneRows(); return [rows.some((r) => /^Query: .*Query/.test(r)), rows.join(" | ")]; });
+    await run("data.getData");
+    await check("data.getData", async () => { const rows = await paneRows(); return [rows.includes("From Text/CSV") && rows.includes("From Database (SQL)"), rows.join(" | ")]; });
+
+    // ✕ closes the pane.
+    await page.evaluate(() => { const b = [...document.querySelectorAll("button,[role=button]")].find((e) => (e.dataset && e.dataset.a11yId) === "sx-pane-head-pane-close"); window.__closeRect = b ? JSON.stringify(b.getBoundingClientRect()) : ""; });
+    const cr = JSON.parse((await page.evaluate(() => window.__closeRect)) || "null");
+    if (cr) await page.mouse.click(cr.x + cr.width / 2, cr.y + cr.height / 2);
+    await check("pane.close", async () => [(await M("G.paneKind")) === "", await M("G.paneKind")]);
+  };
+
+  // Drawing objects, Page Layout themes, Home extras, windows, proofing:
+  // a sheet of their own (PROBE_NEW2=1 runs only these).
+  const PNG4x3 = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGM4IScHRww4OQD1xwwxB+utmQAAAABJRU5ErkJggg==";
+  const PNG8 = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGN49uwXVsQwtCQAVdOxgZwiRwkAAAAASUVORK5CYII=";
+  // Page coordinates of a point in the grid's own space.
+  const toPage = (x, y) => page.evaluate(([x, y]) => { const A = window.sheet.app; const c = document.querySelector("canvas").getBoundingClientRect(); return { x: c.left + A.gx + x, y: c.top + A.gy + y }; }, [x, y]);
+  const shapeCentre = async (i) => { const r = await M("(() => { const r = G.shapeScreenRect(" + i + "); return [r.x, r.y, r.w, r.h]; })()"); return toPage(r[0] + r[2] / 2, r[1] + r[3] / 2); };
+  const cellCentre = async (r, c) => { const g = await M("(() => { const q = G.grid.cellRect(G.model, " + r + ", " + c + "); return [q.x, q.y, q.w, q.h]; })()"); return toPage(g[0] + g[2] / 2, g[1] + g[3] / 2); };
+  const drag = async (pts) => { await page.mouse.move(pts[0].x, pts[0].y); await page.mouse.down(); for (const p of pts.slice(1)) await page.mouse.move(p.x, p.y, { steps: 2 }); await page.mouse.up(); await page.waitForTimeout(30); };
+  const shapes = () => M("Array.from(G.model.shapes).map((s) => s.kind + ':' + s.name + ':' + s.text + ':' + s.rotation + ':' + s.groupId)");
+  const newChecks2 = async () => {
+    await run("sheet.add");
+    await run("sheet.rename", "Shapes");
+    for (const [ref, v] of [["A1", "Region"], ["B1", "Sales"], ["A2", "East"], ["B2", "10"], ["A3", "West"], ["B3", "20"], ["A4", "East"], ["B4", "30"]]) await put(ref, v);
+    // Insert › Shapes: an ellipse at C2, picked by a click and moved by a drag.
+    await at("C6");
+    await run("insert.shape", "ellipse");
+    await page.keyboard.press("Escape");
+    const p0 = await shapeCentre(0);
+    await page.mouse.click(p0.x, p0.y);
+    const picked = await M("Array.from(G.view.selShapes).join(',')");
+    const off0 = await M("G.model.shapes[0].offX");
+    await drag([p0, { x: p0.x + 15, y: p0.y }, { x: p0.x + 30, y: p0.y + 10 }]);
+    const off1 = await M("G.model.shapes[0].offX");
+    await check("insert.shape", async () => { const k = await shapes(); return [k[0].startsWith("ellipse:") && picked === "0" && off1 - off0 >= 25, k[0] + " picked=" + picked + " moved " + (off1 - off0)]; });
+    await at("F2");
+    await run("insert.textBox", "Hello box");
+    await run("insert.icons", "heart");
+    await run("insert.wordArt", "Big title");
+    await run("insert.signatureLine", "Tero T");
+    await run("insert.equation", "x^2+y_1");
+    await run("insert.smartArt", "Plan;Do;Check");
+    const all = await shapes();
+    await check("insert.textBox", async () => [all.some((k) => k.startsWith("textBox:") && k.includes(":Hello box:")), all[1]]);
+    await check("insert.icons", async () => [await M("G.model.shapes[2].kind === 'icon' && G.model.shapes[2].icon === 'heart'"), all[2]]);
+    await check("insert.wordArt", async () => [all[3].startsWith("wordArt:") && all[3].includes("Big title"), all[3]]);
+    await check("insert.signatureLine", async () => [all[4].startsWith("signature:") && all[4].includes("Tero T"), all[4]]);
+    await check("insert.equation", async () => [all[5].includes(":x²+y₁:"), all[5]]);
+    await check("insert.smartArt", async () => { const sa = all.slice(6); const g = new Set(sa.map((k) => k.split(":").pop())); return [sa.filter((k) => k.startsWith("roundRect:")).length === 3 && sa.filter((k) => k.startsWith("arrow:")).length === 2 && g.size === 1 && !g.has("0"), sa.length + " shapes, groups " + [...g].join(",")]; });
+    // Arrange: z-order, rotate, group, align, the selection pane.
+    await run("shape.select", "0");
+    await run("arrange.bringForward");
+    const afterFwd = (await shapes())[1];
+    await check("arrange.bringForward", async () => [afterFwd.startsWith("ellipse:") && (await M("G.view.selShapes[0]")) === 1, afterFwd]);
+    await run("arrange.sendBackward");
+    await check("arrange.sendBackward", async () => { const k = await shapes(); return [k[0].startsWith("ellipse:"), k[0]]; });
+    await run("arrange.rotate", "right");
+    await check("arrange.rotate", async () => [await M("G.model.shapes[0].rotation") === 90, await M("G.model.shapes[0].rotation")]);
+    await run("shape.select", "0");
+    await run("shape.select", "+1");
+    await run("arrange.align", "left");
+    await check("arrange.align", async () => { const xs = await M("[0, 1].map((i) => G.shapeScreenRect(i).x)"); return [xs[0] === xs[1], xs.join(",")]; });
+    await run("arrange.group");
+    await check("arrange.group", async () => { const g = await M("[G.model.shapes[0].groupId, G.model.shapes[1].groupId]"); await page.keyboard.press("Escape"); const p = await shapeCentre(1); await page.mouse.click(p.x, p.y); const n = await M("G.view.selShapes.length"); return [g[0] > 0 && g[0] === g[1] && n === 2, g.join(",") + " click selects " + n]; });
+    await run("arrange.selectionPane");
+    const selRows = await paneRows();
+    const tbRow = selRows.findIndex((r) => /^Shape: TextBox/.test(r));
+    await pressPaneRow(tbRow);
+    await check("arrange.selectionPane", async () => [tbRow >= 0 && (await M("Array.from(G.view.selShapes).some((i) => G.model.shapes[i].kind === 'textBox')")), selRows[tbRow] + " sel " + (await M("Array.from(G.view.selShapes).join(',')"))]);
+    await page.keyboard.press("Escape");
+    // Draw: a pen stroke, Ink to Shape, the eraser and the lasso.
+    await run("view.zoom", "100");
+    const base = await cellCentre(14, 2);
+    await run("draw.pen");
+    await drag([base, { x: base.x + 40, y: base.y + 5 }, { x: base.x + 90, y: base.y + 12 }]);
+    const ring = [];
+    for (let i = 0; i <= 16; i++) { const a = (Math.PI * 2 * i) / 16; ring.push({ x: base.x + 200 + 40 * Math.cos(a), y: base.y + 30 * Math.sin(a) }); }
+    await drag(ring);
+    const scrib = { x: base.x, y: base.y + 80 };
+    await drag([scrib, { x: scrib.x + 50, y: scrib.y + 3 }, { x: scrib.x + 90, y: scrib.y + 6 }]);
+    await run("draw.pen");
+    const inks = await M("G.model.shapes.filter((s) => s.kind === 'ink').length");
+    await check("draw.pen", async () => [inks === 3, inks + " strokes"]);
+    await run("draw.eraser");
+    await page.mouse.click(scrib.x + 45, scrib.y + 3);
+    await run("draw.eraser");
+    await check("draw.eraser", async () => { const n = await M("G.model.shapes.filter((s) => s.kind === 'ink').length"); return [n === 2, n + " strokes left"]; });
+    await run("draw.inkToShape");
+    await check("draw.inkToShape", async () => { const k = (await shapes()).slice(-2).map((x) => x.split(":")[0]); return [k.join(",") === "line,ellipse", k.join(",")]; });
+    await run("draw.lasso");
+    const lq = await M("(() => { const r = G.shapeScreenRect(G.model.shapes.length - 1); return [r.x, r.y, r.w, r.h]; })()");
+    const la = await toPage(lq[0] - 8, lq[1] - 8), lb = await toPage(lq[0] + lq[2] + 8, lq[1] + lq[3] + 8);
+    await drag([la, { x: (la.x + lb.x) / 2, y: (la.y + lb.y) / 2 }, lb]);
+    await run("draw.lasso");
+    await check("draw.lasso", async () => { const s = await M("Array.from(G.view.selShapes).join(',')"); const last = await M("G.model.shapes.length - 1"); return [s === String(last), s]; });
+    await page.keyboard.press("Escape");
+    // Pictures, checkboxes, sparklines.
+    await at("J2");
+    const imgs0 = await M("M.images.length");
+    await run("insert.picture", "data:image/png;base64," + PNG4x3);
+    await check("insert.picture", async () => { const v = await M("[M.images.length, M.images[M.images.length - 1].widthPx, M.images[M.images.length - 1].heightPx].join(',')"); return [v === (imgs0 + 1) + ",4,3", v]; });
+    await sel("H24:H25");
+    await run("insert.checkbox");
+    const cbBefore = await cellAt("H24");
+    const cbPt = await cellCentre(23, 7);
+    await page.mouse.click(cbPt.x, cbPt.y);
+    await check("insert.checkbox", async () => { const v = [cbBefore, await M("M.getCell(23, 7)"), await M("M.isCheckbox(24, 7)")]; return [v.join(",") === "FALSE,TRUE,true", v.join(",")]; });
+    await at("E2");
+    await run("insert.sparkline", "column:B2:B4");
+    await check("insert.sparkline", async () => { const v = await M("(() => { const s = M.sparklines[M.sparklines.length - 1]; return [s.row, s.col, s.kind, s.r1, s.r2].join(','); })()"); return [v === "1,4,column,1,3", v]; });
+    // A slicer over Region: picking West hides the East rows.
+    await at("A1");
+    await run("insert.slicer", "Region");
+    const sl = await M("G.model.shapes.length - 1");
+    const sr = await M("(() => { const r = G.shapeScreenRect(" + sl + "); return [r.x, r.y, r.w, r.h]; })()");
+    const items = await M("Array.from(G.model.shapes[" + sl + "].items).join(',')");
+    const wi = items.split(",").indexOf("West");
+    const wp = await toPage(sr[0] + 40, sr[1] + 30 + 24 * wi + 10);
+    await page.mouse.click(wp.x, wp.y);
+    await check("insert.slicer", async () => { const h = await M("[1, 2, 3].map((r) => M.rowSuppressed[r] ? 'h' : 's').join('')"); return [items === "East,West" && h === "hsh", items + " → " + h]; });
+    await run("slicer.pick", "West");
+    // Timeline: months of a date column.
+    for (const [ref, v] of [["C1", "Date"], ["C2", "=DATE(2026,1,5)"], ["C3", "=DATE(2026,2,7)"], ["C4", "=DATE(2026,1,20)"]]) await put(ref, v);
+    await at("A1");
+    await run("insert.timeline", "Date");
+    const tl = await M("G.model.shapes.length - 1");
+    await run("slicer.pick", "2026-02");
+    await check("insert.timeline", async () => { const v = await M("Array.from(G.model.shapes[" + tl + "].items).join(',') + ' ' + [1, 2, 3].map((r) => M.rowSuppressed[r] ? 'h' : 's').join('')"); return [v === "2026-01,2026-02 hsh", v]; });
+    await run("slicer.pick", "2026-02");
+    // A table's own slicer.
+    for (const [ref, v] of [["L1", "Team"], ["M1", "Pts"], ["L2", "Red"], ["M2", "3"], ["L3", "Blue"], ["M3", "5"], ["L4", "Red"], ["M4", "1"]]) await put(ref, v);
+    await sel("L1:M4");
+    await run("insert.table");
+    await at("L2");
+    await run("table.insertSlicer", "Team");
+    await check("table.insertSlicer", async () => { const v = await M("(() => { const s = G.model.shapes[G.model.shapes.length - 1]; return s.kind + ' ' + Array.from(s.items).join(',') + ' col ' + s.column; })()"); return [v === "slicer Red,Blue col 11", v]; });
+
+    // Page Layout › Themes.
+    await run("pageLayout.theme", "Facet");
+    await check("pageLayout.theme", async () => { const v = await M("[G.themeAccent, G.book.themeName, M.getCellStyle(60, 60).fontName].join(',')"); return [v === "#90C226,Facet,Trebuchet MS", v]; });
+    await run("pageLayout.themeColors", "Blue");
+    await at("N8");
+    await run("insert.shape", "rect");
+    await check("pageLayout.themeColors", async () => { const v = await M("G.model.shapes[G.model.shapes.length - 1].fill"); return [v === "#0F6FC6", v]; });
+    await page.keyboard.press("Escape");
+    await run("pageLayout.themeFonts", "Georgia");
+    await check("pageLayout.themeFonts", async () => { const v = await M("M.getCellStyle(60, 60).fontName"); return [v === "Georgia", v]; });
+    await run("pageLayout.themeEffects", "Intense");
+    await check("pageLayout.themeEffects", async () => [await M("G.view.shapeEffect") === 3, await M("G.view.shapeEffect")]);
+    await run("pageLayout.theme", "Office");
+    await run("pageLayout.themeEffects", "None");
+    await run("pageLayout.background", "data:image/png;base64," + PNG8);
+    const bg = await M("[M.backgroundSrc !== '', M.bgWidth, M.bgHeight].join(',')");
+    await run("pageLayout.background", "delete");
+    await check("pageLayout.background", async () => [bg === "true,8,8" && (await M("M.backgroundSrc")) === "", bg]);
+    await run("pageLayout.pageSetup");
+    const psRows = await paneRows();
+    await pressPaneRow(0);
+    await run("pageLayout.pageSetup", "size=a4;margins=wide");
+    await check("pageLayout.pageSetup", async () => { const v = await M("[M.pageOrientation, M.paperSize, M.marginLeft].join(',')"); return [/^Orientation: Portrait/.test(psRows[0]) && psRows.some((r) => /^Paper size:/.test(r)) && v === "landscape,9,1", psRows.slice(0, 3).join(" | ") + " → " + v]; });
+    await run("pageLayout.orientation", "portrait");
+    await run("pageLayout.margins", "normal");
+    await run("pageLayout.size", "letter");
+
+    // Home: super/subscript, number formats, styles, Format Cells, cells.
+    await at("A2");
+    await run("home.superscript");
+    const sup = await M("M.getCellStyle(1, 0).vertAlign");
+    await run("home.subscript");
+    await check("home.superscript", async () => [sup === "superscript", sup]);
+    await check("home.subscript", async () => { const v = await M("M.getCellStyle(1, 0).vertAlign"); return [v === "subscript", v]; });
+    await run("home.subscript");
+    await at("B2");
+    await run("format.numfmt", "0.000");
+    const custom = await cellAt("B2");
+    await run("format.numfmt", "longDate");
+    const longD = await cellAt("B2");
+    await check("home.numberFormat", async () => [custom === "10.000" && /^[A-Z][a-z]+day, January 9, 1900$/.test(longD), custom + " | " + longD]);
+    await run("format.numfmt", "accounting");
+    await check("home.accounting", async () => { const v = await cellAt("B2"); return [/^ \$\s*10\.00 $/.test(v), JSON.stringify(v)]; });
+    await run("format.numfmt", "general");
+    await at("A1");
+    await run("format.bold");
+    await run("format.fill", "#FFE699");
+    await run("home.newCellStyle", "Banner");
+    await at("H9");
+    await run("home.cellStyle", "Banner");
+    await check("home.newCellStyle", async () => { const s = await style(8, 7); return [s.bold && s.fill === "#FFE699", JSON.stringify(s)]; });
+    await at("H10");
+    await run("home.formatCells");
+    const fcRows = await paneRows();
+    await pressPaneRow(fcRows.findIndex((r) => /^Bold:/.test(r)));
+    await run("home.formatCells", "fill=#C6EFCE;border=all;numfmt=0.0");
+    await check("home.formatCells", async () => { const s = await style(9, 7); const want = ["Number:", "Alignment:", "Font:", "Border:", "Fill:", "Locked:"]; return [want.every((w) => fcRows.some((r) => r.startsWith(w))) && s.bold && s.fill === "#C6EFCE" && s.border, fcRows.length + " rows; " + JSON.stringify(s)]; });
+    await put("G1", "5");
+    await put("H1", "=G1*2");
+    await at("G1");
+    await run("home.insertCells");
+    const ins = [await cellAt("G2"), await M("M.getFormula(0, 7)"), await cellAt("H1")];
+    await check("home.insertCells", async () => [ins.join("|") === "5|G2*2|10", ins.join("|")]);
+    await at("G1");
+    await run("home.deleteCells");
+    await check("home.deleteCells", async () => { const v = [await cellAt("G1"), await M("M.getFormula(0, 7)"), await cellAt("H1")]; return [v.join("|") === "5|G1*2|10", v.join("|")]; });
+    const order0 = (await S()).sheets.join(",");
+    await run("sheet.move", "before:Sales");
+    const order1 = (await S()).sheets;
+    await check("sheet.move", async () => [order1[0] === "Shapes", order0 + " → " + order1.join(",")]);
+    await run("sheet.move", "end");
+    await run("home.addIns");
+    const aiRows = await paneRows();
+    await pressPaneRow(aiRows.findIndex((r) => /^Inquire/.test(r)));
+    await check("home.addIns", async () => { const r2 = await paneRows(); return [aiRows.includes("Analysis ToolPak: on") && r2.includes("Inquire: on"), r2.join(" | ")]; });
+
+    // Review › Proofing, Show Changes; Data › Analyze Data, Relationships, From Web.
+    await run("review.spelling", "words:the cat sat on a mat ten run runner runs");
+    await put("A10", "teh cat sat");
+    await run("review.spelling");
+    const spRows = await paneRows();
+    const spRow = spRows.findIndex((r) => /^A10: teh → the/.test(r));
+    if (spRow >= 0) await pressPaneRow(spRow);
+    await check("review.spelling", async () => { const v = await cellAt("A10"); return [spRow >= 0 && v === "the cat sat", spRows[Math.max(spRow, 0)] + " → " + v]; });
+    await put("A11", "running");
+    await at("A11");
+    await run("review.thesaurus");
+    const thRows = await paneRows();
+    await pressPaneRow(thRows.indexOf("runner"));
+    await check("review.thesaurus", async () => { const v = await cellAt("A11"); return [thRows.includes("runner") && v === "runner", thRows.join(",") + " → " + v]; });
+    await run("review.showChanges");
+    await check("review.showChanges", async () => { const r = await paneRows(); return [/Shapes!A11: "" → "running"/.test(r[0]), r[0]]; });
+    await at("A2");
+    await run("data.analyzeData");
+    await check("data.analyzeData", async () => { const r = await paneRows(); return [r.some((x) => /^Sales: total 60, average 20/.test(x)) && r.some((x) => /highest 30 \(East\)/.test(x)), r.slice(0, 2).join(" | ")]; });
+    for (const [ref, v] of [["P1", "Customer"], ["Q1", "City"], ["P2", "Ann"], ["Q2", "Oslo"], ["P3", "Bo"], ["Q3", "Rome"], ["S1", "Customer"], ["T1", "Amount"], ["S2", "Ann"], ["T2", "5"], ["S3", "Ann"], ["T3", "7"], ["S4", "Bo"], ["T4", "2"]]) await put(ref, v);
+    await sel("P1:Q3");
+    await run("insert.table");
+    await sel("S1:T4");
+    await run("insert.table");
+    await run("data.relationships");
+    await check("data.relationships", async () => { const r = await paneRows(); return [r.some((x) => /\[Customer\] → .*\[Customer\]/.test(x)), r.join(" | ")]; });
+    await run("data.fromWeb", "http://localhost:" + PORT + "/table.html");
+    await page.waitForFunction(() => window.sheet.state().sheets.some((n) => /^Web/.test(n)), null, { timeout: 10000 }).catch(() => {});
+    await check("data.fromWeb", async () => { const v = [await cellAt("A1"), await cellAt("A2"), await cellAt("B3")]; return [v.join("|") === "Name|Alpha & Co|2.25", v.join("|")]; });
+
+    // View › Window.
+    await run("view.newWindow");
+    await check("view.newWindow", async () => { const v = await M("[G.windowSheets.length, G.curWindow].join(',')"); return [v === "2,1", v]; });
+    await run("view.sheet.prev");
+    await run("view.switchWindows", "1");
+    const w1 = (await S()).activeSheet;
+    await run("view.switchWindows", "2");
+    const w2 = (await S()).activeSheet;
+    await check("view.switchWindows", async () => [w1 !== w2 && (await M("G.curWindow")) === 1, w1 + " / " + w2]);
+    await run("view.arrangeAll", "vertical");
+    await check("view.arrangeAll", async () => { const v = await M("[G.arranged, G.secondPane.paneX > 100, G.grid.w < G.W, G.secondSheet !== G.book.activeIndex].join(',')"); return [v === "true,true,true,true", v]; });
+    const sp = await M("(() => { const q = G.secondPane; return [q.paneX + 80, q.paneY + 60]; })()");
+    const spPt = await toPage(sp[0], sp[1]);
+    await page.mouse.click(spPt.x, spPt.y);
+    const paneSel = await M("G.secondPane.sel.active.row + ',' + G.secondPane.sel.active.col");
+    await run("view.arrangeAll", "off");
+    await run("view.split");
+    await check("view.split", async () => { const v = await M("[G.arranged, G.splitOn, G.secondSheet === G.book.activeIndex].join(',')"); return [v === "true,true,true" && paneSel !== "0,0", v + " pane click " + paneSel]; });
+    await run("view.split");
+    await run("view.hideWindow");
+    const hid = await M("Array.from(G.windowHidden).join(',') + ' ' + G.curWindow");
+    await run("view.unhideWindow");
+    const unRows = await paneRows();
+    await pressPaneRow(0);
+    await check("view.hideWindow", async () => [hid === "false,true 0", hid]);
+    await check("view.unhideWindow", async () => { const v = await M("Array.from(G.windowHidden).join(',') + ' ' + G.curWindow"); return [unRows.length === 1 && v === "false,false 1", unRows.join(",") + " → " + v]; });
+    await run("view.pageLayout");
+    const rulerOn = await M("M.showRuler");
+    await run("view.ruler");
+    await check("view.ruler", async () => [rulerOn === true && (await M("M.showRuler")) === false, rulerOn]);
+    await run("view.ruler");
+    await run("view.normal");
+    await run("view.switchWindows", "1");
+  };
+  // The UI checklist rows that need a pointer or keys: QAT, File view,
+  // galleries, contextual tabs, the formula bar, the grid's gestures, sheet
+  // tabs, the zoom slider and the task panes (PROBE_UI=1 runs only these).
+  const axNow = () => page.evaluate(() => [...document.querySelectorAll("[role],button,input")].map((e) => ({
+    id: (e.dataset && e.dataset.a11yId) || "",
+    role: e.getAttribute("role") || (e.tagName === "BUTTON" ? "button" : "textbox"),
+    name: (e.getAttribute("aria-label") || e.textContent || "").trim().slice(0, 80),
+    r: (({ x, y, width, height }) => ({ x, y, w: width, h: height }))(e.getBoundingClientRect()),
+  })));
+  const byId = async (id) => (await axNow()).find((n) => n.id === id && n.r.w > 0);
+  const clickNode = async (n, opts = {}) => { await page.mouse.click(n.r.x + n.r.w / 2, n.r.y + n.r.h / 2, opts); await page.waitForTimeout(80); };
+  // The chrome's own rectangle for a control, in page coordinates.
+  const tidRect = (tid) => page.evaluate((t) => { const r = window.sheet.app.rectOf(t); if (!r) return null; const [x, y, w, h] = r.split(",").map(Number); const c = document.querySelector("canvas").getBoundingClientRect(); return { r: { x: c.left + x, y: c.top + y, w, h } }; }, tid);
+  const clickTid = async (tid, opts = {}) => { const n = await tidRect(tid); if (!n) throw new Error("no " + tid); await clickNode(n, opts); };
+  const clickId = async (id) => { const n = await byId(id); if (!n) throw new Error("no " + id); await clickNode(n); };
+  const uiCheck = async (id, fn) => {
+    try {
+      const [pass, detail] = await fn();
+      ok("ui." + id, !!pass, detail === undefined ? "" : String(detail));
+    } catch (e) {
+      ok("ui." + id, false, String(e && e.message || e).slice(0, 160));
+    }
+  };
+  const closePane = () => page.evaluate(async () => { window.sheet.app.grid.app.closePane(); window.sheet.app.sync(); await window.sheet.redraw(); });
+  const uiChecks2 = async () => {
+    console.log("== ui");
+    await closePane();
+    // The target workbook's own table and charts, on Sales.
+    await page.evaluate(async () => { window.sheet.app.showSheet("Sales"); window.sheet.app.sync(); await window.sheet.redraw(); });
+    await uiCheck("homeGroups", async () => {
+      const names = (await axNow()).filter((n) => n.role === "toolbar").map((n) => n.name);
+      const want = ["Clipboard", "Font", "Alignment", "Number", "Styles", "Cells", "Editing"];
+      return [want.every((w) => names.includes(w)), names.join(", ")];
+    });
+    await uiCheck("tableFilterButton", async () => {
+      const r = await M("(() => { const t = M.tableAt(0); const c = G.grid.cellRect(M, t.r0, t.c0); return [c.x, c.y, c.w, c.h, t.r0, t.c0]; })()");
+      const p = await toPage(r[0] + r[2] - 8, r[1] + r[3] / 2);
+      await page.mouse.click(p.x, p.y);
+      await page.waitForTimeout(80);
+      const rows = await paneRows();
+      const kind = await M("G.paneKind");
+      const north = rows.findIndex((x) => /^☑ North/.test(x));
+      if (north >= 0) await pressPaneRow(north);
+      const hidden = await M("(() => { const t = M.tableAt(0); let n = 0; for (let r = t.r0 + 1; r <= t.r1; r++) if (M.rowSuppressed[r]) n++; return n; })()");
+      const rows2 = await paneRows();
+      await pressPaneRow(2);
+      const back = await M("(() => { const t = M.tableAt(0); let n = 0; for (let r = t.r0 + 1; r <= t.r1; r++) if (M.rowSuppressed[r]) n++; return n; })()");
+      return [kind === "tableFilter" && north >= 0 && hidden === 1 && rows2[north] === "☐ North" && back === 0, kind + " " + rows.slice(0, 6).join(",") + " hidden " + hidden + " → " + back];
+    });
+    await closePane();
+    await uiCheck("contextTabs", async () => {
+      await at("B5");
+      const tabsIn = (await axNow()).filter((n) => n.role === "tab").map((n) => n.name);
+      if (tabsIn.includes("Table Design")) await clickTid("sx-ribtabs-tab-tabledesign");
+      await page.evaluate(() => window.sheet.redraw());
+      await page.waitForTimeout(80);
+      const groups = (await axNow()).filter((n) => n.role === "toolbar").map((n) => n.name);
+      await at("B30");
+      const tabsOut = (await axNow()).filter((n) => n.role === "tab").map((n) => n.name);
+      // A chart: a click on it brings Chart Design.
+      const cr = await M("(() => { const w = G.view.chartLayer.panelAt(0).win; return [w.x, w.y, w.w, w.h]; })()");
+      const cp = await toPage(cr[0] + cr[2] / 2, cr[1] + cr[3] / 2);
+      await page.mouse.click(cp.x, cp.y);
+      await page.waitForTimeout(80);
+      await page.evaluate(() => window.sheet.redraw());
+      await page.waitForTimeout(80);
+      const tabsChart = (await axNow()).filter((n) => n.role === "tab").map((n) => n.name);
+      await at("B30");
+      return [tabsIn.includes("Table Design") && groups.includes("Table Style Options") && !tabsOut.includes("Table Design") && tabsChart.includes("Chart Design"), "in table: " + tabsIn.includes("Table Design") + ", groups " + groups.filter((g) => /Table/.test(g)).join("/") + ", outside: " + tabsOut.includes("Table Design") + ", chart: " + tabsChart.includes("Chart Design")];
+    });
+    await run("sheet.add");
+    await run("sheet.rename", "UI");
+    await uiCheck("qat", async () => {
+      const ns = (await axNow()).filter((n) => n.id.startsWith("sx-qat-") && n.role === "button").map((n) => n.name);
+      await put("A1", "qat");
+      await clickId("sx-qat-qat-undo");
+      const v = await cellAt("A1");
+      return [["Save", "Undo", "Redo"].every((x) => ns.includes(x)) && v === "", ns.join(",") + " A1 after undo=" + JSON.stringify(v)];
+    });
+    await uiCheck("backstage", async () => {
+      await clickTid("sx-ribtabs-tab-file");
+      const title = await M("G.paneTitle()");
+      const rows = await paneRows();
+      await pressPaneRow(rows.indexOf("Info"));
+      const kind = await M("G.paneKind");
+      const want = ["Info", "New", "Open…", "Save As (.xlsx)", "Print", "Export to PDF"];
+      return [title === "File" && want.every((x) => rows.includes(x)) && kind === "info", title + ": " + rows.join(",") + " → " + kind];
+    });
+    await closePane();
+    await uiCheck("galleries", async () => {
+      await at("C3");
+      await clickId("sx-stylegallery-trigger");
+      const good = await byId("sx-stylegallery-item-cs-1");
+      if (good) await clickNode(good);
+      const fill = (await style(2, 2)).fill;
+      await at("C4");
+      await clickId("sx-tablegallery-trigger");
+      const items = (await axNow()).filter((n) => n.id.startsWith("sx-tablegallery-item-")).map((n) => n.name);
+      await page.keyboard.press("Escape");
+      await clickId("sx-cfgallery-trigger");
+      const cf = (await axNow()).filter((n) => n.id.startsWith("sx-cfgallery-item-")).map((n) => n.name);
+      await page.keyboard.press("Escape");
+      return [fill === "#C6EFCE" && items.includes("Medium 2") && cf.some((x) => /Data Bars/.test(x)), "Good fill " + fill + "; tables " + items.length + "; cf " + cf.length];
+    });
+    await uiCheck("expandFormulaBar", async () => {
+      await at("A2");
+      await page.keyboard.type("one");
+      await page.keyboard.press("Enter");
+      const ex0 = await byId("app/fx-expand");
+      await clickId("app/fx-expand");
+      const h1 = await M("G.grid.formulaBarH");
+      const st1 = JSON.stringify(ex0 && ex0.r) + " fb " + (await M("[G.view.fbFieldX, G.view.fbFieldW, G.editing].join(',')"));
+      const name = (await axNow()).find((n) => n.id === "app/fx-expand").name;
+      await clickId("app/fx-expand");
+      const h2 = await M("G.grid.formulaBarH");
+      return [h1 > 60 && h2 === 32 && /Collapse/.test(name), h1 + " → " + h2 + " (" + name + ") " + st1];
+    });
+    await uiCheck("autocomplete", async () => {
+      await at("B2");
+      await page.keyboard.type("=VLO");
+      const list = await M("Array.from(G.view.acItems)");
+      await page.keyboard.press("Tab");
+      const buf = await M("G.editBuf");
+      const tip = await M("G.view.acTip");
+      await page.keyboard.type("A1,");
+      const arg = await M("G.view.acTipArg");
+      await page.keyboard.press("Escape");
+      return [list[0] === "VLOOKUP" && buf === "=VLOOKUP(" && /^VLOOKUP\|lookup_value\|table_array/.test(tip) && arg === 1, list.join(",") + " → " + buf + " tip " + tip + " arg " + arg];
+    });
+    await uiCheck("pointMode", async () => {
+      await put("C10", "5");
+      await put("C11", "7");
+      await at("D10");
+      await page.keyboard.type("=");
+      await page.keyboard.press("ArrowLeft");
+      const one = await M("G.editBuf");
+      await page.keyboard.press("Shift+ArrowDown");
+      const two = await M("G.editBuf");
+      await page.keyboard.press("Enter");
+      const f = await M("M.getFormula(9, 3)");
+      return [one === "=C10" && two === "=C10:C11" && f.replace(/^=/, "") === "C10:C11", one + " → " + two + " → " + f];
+    });
+    await uiCheck("multiArea", async () => {
+      const a = await cellCentre(14, 1), b = await cellCentre(16, 3);
+      await page.mouse.click(a.x, a.y);
+      await page.keyboard.down("Control");
+      await page.mouse.click(b.x, b.y);
+      await page.keyboard.up("Control");
+      await page.waitForTimeout(60);
+      const n = await M("G.sel.rangeCount()");
+      return [n === 2, n + " ranges"];
+    });
+    await uiCheck("fillHandle", async () => {
+      await put("E20", "1");
+      await put("E21", "2");
+      await sel("E20:E21");
+      const r = await M("(() => { const q = G.grid.cellRect(M, 20, 4); return [q.x, q.y, q.w, q.h]; })()");
+      const h = await toPage(r[0] + r[2] - 1, r[1] + r[3] - 1);
+      const end = await cellCentre(23, 4);
+      await drag([h, { x: h.x, y: (h.y + end.y) / 2 }, { x: h.x, y: end.y }]);
+      const v = [await cellAt("E22"), await cellAt("E23"), await cellAt("E24")];
+      return [v[0] === "3" && v[1] === "4", v.join(",")];
+    });
+    await uiCheck("columnResize", async () => {
+      const w0 = await M("M.colWidth(5)");
+      const hx = await M("(() => { const q = G.grid.cellRect(M, 0, 5); return [q.x + q.w, G.grid.headerTop() + 6]; })()");
+      const a = await toPage(hx[0], hx[1]);
+      await drag([a, { x: a.x + 20, y: a.y }, { x: a.x + 40, y: a.y }]);
+      const w1 = await M("M.colWidth(5)");
+      await put("F2", "a much longer piece of text here");
+      const b = await toPage(...(await M("(() => { const q = G.grid.cellRect(M, 0, 5); return [q.x + q.w, G.grid.headerTop() + 6]; })()")));
+      await page.mouse.dblclick(b.x, b.y);
+      await page.waitForTimeout(80);
+      const w2 = await M("M.colWidth(5)");
+      return [w1 > w0 + 20 && w2 > w1, w0 + " → " + w1 + " → " + w2];
+    });
+    await uiCheck("sheetTabs", async () => {
+      await run("sheet.tabColor", "FF0000");
+      const at0 = await M("G.book.activeIndex");
+      const shown = await page.evaluate((i) => window.sheet.app.tabColourShown(i), at0);
+      await clickTid("sx-tabs-tab-" + at0, { button: "right" });
+      const items = (await axNow()).filter((n) => n.role === "menuitem").map((n) => n.name);
+      const hide = (await axNow()).find((n) => n.role === "menuitem" && n.name === "Hide");
+      if (hide) await clickNode(hide);
+      const tabs1 = (await axNow()).filter((n) => n.role === "tab").map((n) => n.name);
+      await run("sheet.unhide", "UI");
+      const tabs2 = (await axNow()).filter((n) => n.role === "tab").map((n) => n.name);
+      return [shown === "#FF0000" && items.includes("Tab Color") && !tabs1.includes("UI") && tabs2.includes("UI"), "colour " + shown + "; menu " + items.filter((x) => /Tab|Hide|Unhide/.test(x)).join(",") + "; hidden " + !tabs1.includes("UI") + "; back " + tabs2.includes("UI")];
+    });
+    await uiCheck("zoomSlider", async () => {
+      const tr = await tidRect("sx-zoomslider-track");
+      await page.mouse.click(tr.r.x + tr.r.w * 0.5, tr.r.y + tr.r.h / 2);
+      await page.waitForTimeout(80);
+      const z = await M("Math.round(M.zoom * 100)");
+      const slider = (await axNow()).find((n) => n.role === "slider");
+      await run("view.zoom", "100");
+      return [!!slider && z > 150 && z < 260, "slider " + !!slider + " zoom " + z];
+    });
+    await uiCheck("formatCellsPane", async () => {
+      await run("home.formatCells");
+      const rows = await paneRows();
+      const want = ["Number", "Alignment", "Font", "Border", "Fill", "Locked"];
+      await closePane();
+      return [want.every((w) => rows.some((r) => r.startsWith(w + ":"))), rows.map((r) => r.split(":")[0]).join(",")];
+    });
+    await uiCheck("taskPanes", async () => {
+      const seen = [];
+      for (const [cmd, kind] of [["review.showComments", "comments"], ["formulas.watchWindow", "watch"], ["arrange.selectionPane", "selection"]]) {
+        await run(cmd);
+        seen.push((await M("G.paneKind")) + ":" + (await page.evaluate(() => window.sheet.app.paneBuilt)));
+        await closePane();
+      }
+      return [seen.join(",") === "comments:comments,watch:watch,selection:selection", seen.join(",")];
+    });
+  };
+  if (process.env.PROBE_UI) {
+    await uiChecks2();
+    throw new Error("PROBE_UI: only the UI checks ran");
+  }
+  if (process.env.PROBE_NEW2) {
+    await newChecks2();
+    throw new Error("PROBE_NEW2: only the second batch ran");
+  }
+  if (process.env.PROBE_NEW) {
+    await newChecks();
+    throw new Error("PROBE_NEW: only the new checks ran");
+  }
 
   await run("sheet.add");
   const sheetIdx = (await S()).activeSheet;
@@ -514,7 +1255,9 @@ try {
   await check("formulas.calculateSheet", async () => [(await cellAt("K1")) === "120", await cellAt("K1")]);
   await at("J12");
   await run("formulas.tracePrecedents");
-  await check("formulas.tracePrecedents", async () => { const n = await M("G.sel.selectedCount()"); return [n === 4 && (await S()).cell === "J11", n + " " + (await S()).cell]; });
+  await check("formulas.tracePrecedents", async () => { const n = await M("G.sel.selectedCount()"), arrows = await M("G.view.traceArrows.length"); return [n === 4 && (await S()).cell === "J11" && arrows >= 4, n + " cells, " + arrows / 4 + " arrows"]; });
+  await run("formulas.removeArrows");
+  await check("formulas.removeArrows", async () => [await M("G.view.traceArrows.length === 0")]);
   const fnCats = [["financial", "PMT"], ["logical", "IF"], ["text", "LEFT"], ["dateTime", "DATE"], ["lookupReference", "VLOOKUP"], ["mathTrig", "ROUND"], ["moreFunctions", "AVERAGE"], ["recentlyUsed", "SUM"], ["insertFunction", "SUM"]];
   for (const [cat, fn] of fnCats) {
     await at("N20");
@@ -754,6 +1497,78 @@ try {
   await run("table.summarizePivot");
   await check("table.summarizePivot", async () => { const v = await pv(["A3", "B4"]); return [v === "Region,125", v]; });
 
+  // Charts: Chart Design and Format, checked on the chart and on the spec it draws.
+  await run("sheet.add");
+  for (const [ref, v] of [["A1", "Month"], ["B1", "Sales"], ["C1", "Cost"], ["A2", "Jan"], ["B2", "10"], ["C2", "4"], ["A3", "Feb"], ["B3", "14"], ["C3", "6"], ["A4", "Mar"], ["B4", "9"], ["C4", "5"]]) await put(ref, v);
+  await at("A1");
+  const nCharts = await M("G.view.chartLayer.panels.length");
+  await run("insert.recommendedCharts");
+  const chartState = async () => { await page.waitForTimeout(120); return M(`(() => { const L = G.view.chartLayer, p = L.panels[G.activeChartPanel()], r = L.view.cached(p.chart.id); return { kind: p.chart.kind, title: p.chart.title, legend: p.chart.showLegend, labels: p.chart.dataLabels, grid: p.chart.gridlines, style: p.chart.style, t: p.chart.transposed, r0: p.chart.r0, r1: p.chart.r1, c1: p.chart.c1, sheet: p.chart.sheet, x: p.chart.x, spec: r.key || "", ok: r.ok, cats: L.view.data.cats.join(",") }; })()`); };
+  await check("insert.recommendedCharts", async () => { const n = await M("G.view.chartLayer.panels.length"), c = await chartState(); return [n === nCharts + 1 && c.ok, n + " charts, kind " + c.kind]; });
+  await run("chart.addElement", "title:Sales by month");
+  await run("chart.addElement", "dataLabels");
+  await check("chart.addElement", async () => { const c = await chartState(); return [c.ok && c.title === "Sales by month" && /"layer":\[/.test(c.spec) && /"type":"text"/.test(c.spec), c.title + " " + c.ok]; });
+  await run("chart.quickLayout", "3");
+  await check("chart.quickLayout", async () => { const c = await chartState(); return [c.ok && c.title === "" && c.legend && !c.labels, JSON.stringify([c.title, c.legend, c.labels])]; });
+  await run("chart.changeColors", "4");
+  await check("chart.changeColors", async () => { const c = await chartState(); return [c.style === 4 && /category10/.test(c.spec), c.style]; });
+  await run("chart.set", "Line");
+  await check("chart.set", async () => { const c = await chartState(); return [c.ok && c.kind === 6 && /"mark":"line"/.test(c.spec), c.kind]; });
+  await run("chart.switchRowColumn");
+  await check("chart.switchRowColumn", async () => { const c = await chartState(); return [c.ok && c.t && c.cats === "Sales,Cost", c.cats]; });
+  await run("chart.switchRowColumn");
+  await run("chart.selectData", "A1:B3");
+  await check("chart.selectData", async () => { const c = await chartState(); return [c.ok && c.r1 === 2 && c.c1 === 1 && c.cats === "Jan,Feb", c.cats]; });
+  await run("chart.shapeFill", "#C00000");
+  await check("chart.shapeFill", async () => { const c = await chartState(); return [c.ok && /#C00000/.test(c.spec), c.ok]; });
+  await run("chart.shapeOutline", "#000000");
+  await check("chart.shapeOutline", async () => { const c = await chartState(); return [c.ok && /"stroke":"#000000"/.test(c.spec), c.ok]; });
+  await run("chart.formatSelection");
+  await check("chart.formatSelection", async () => [await M("G.paneKind === 'formatChart'")]);
+  await run("chart.move", "300,200");
+  await check("chart.move", async () => { const c = await chartState(); return [c.x === 300, c.x]; });
+
+  // Names, auditing, evaluation, the watch window and manual calculation.
+  await run("sheet.add");
+  for (const [ref, v] of [["A1", "Price"], ["B1", "Qty"], ["A2", "10"], ["B2", "3"], ["A3", "20"], ["B3", "1"], ["C2", "=A2*B2"], ["C3", "=A3*B3"], ["D2", "=1/0"]]) await put(ref, v);
+  await sel("A2:A3");
+  await run("formulas.defineName", "Prices");
+  await put("E1", "=SUM(Prices)");
+  await check("formulas.defineName", async () => { const v = await cellAt("E1"), r = await M("G.book.nameRef('Prices')"); return [v === "30" && /\$A\$2:\$A\$3$/.test(r), v + " " + r]; });
+  await at("E2");
+  await run("formulas.useInFormula", "Prices");
+  await check("formulas.useInFormula", async () => { const s2 = await S(); return [s2.editing && s2.editText === "=Prices", s2.editText]; });
+  await page.keyboard.press("Escape");
+  await sel("A1:B3");
+  await run("formulas.createFromSelection");
+  await put("E3", "=SUM(Qty)");
+  await check("formulas.createFromSelection", async () => { const v = await cellAt("E3"); return [v === "4", v]; });
+  await run("formulas.nameManager");
+  const nmPane = await M("G.paneKind");
+  await run("formulas.nameManager", "delete:Qty");
+  await check("formulas.nameManager", async () => { const v = await cellAt("E3"); return [nmPane === "names" && /NAME/.test(v), nmPane + " " + v]; });
+  await at("A2");
+  await run("formulas.traceDependents");
+  await check("formulas.traceDependents", async () => { const a = await M("Array.from(G.view.traceArrows).join(',')"); return [/^1,0,1,2/.test(a), a]; });
+  await run("formulas.removeArrows");
+  await at("A1");
+  await run("formulas.errorChecking");
+  await check("formulas.errorChecking", async () => { const s2 = await S(); return [s2.cell === "D2" && /DIV/.test(s2.status), s2.cell + " " + s2.status]; });
+  await at("C2");
+  await run("formulas.evaluateFormula");
+  await check("formulas.evaluateFormula", async () => { const st = await M("Array.from(G.evalSteps).join(' | ')"); return [st === "=A2*B2 | =10*3 | 30", st]; });
+  await run("formulas.watchWindow");
+  await check("formulas.watchWindow", async () => { const w = await M("Array.from(G.watches).join(',') + ' ' + G.paneKind"); return [/!C2 watch$/.test(w), w]; });
+  await run("formulas.calculationOptions", "manual");
+  await put("A2", "100");
+  const manualVal = await cellAt("C2");
+  await run("formulas.calculationOptions", "automatic");
+  await check("formulas.calculationOptions", async () => { const v = await cellAt("C2"); return [manualVal === "30" && v === "300", manualVal + "→" + v]; });
+
+  await newChecks();
+  await newChecks2();
+  await uiChecks2();
+
   const dl = page.waitForEvent("download", { timeout: 5000 }).catch(() => null);
   await run("file.saveAs");
   const d = await dl;
@@ -784,6 +1599,6 @@ const out = {
   commands: [...new Set(commands)].sort(),
   actions: [...new Set(actions)].sort(),
 };
-fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
+if (!process.env.PROBE_NEW && !process.env.PROBE_NEW2 && !process.env.PROBE_UI) fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
 const passed = Object.values(results).filter((r) => r.pass).length;
 console.log(`\n${passed}/${Object.keys(results).length} probe checks pass (a failure is a measured gap, not a broken run)`);

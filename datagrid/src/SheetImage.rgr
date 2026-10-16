@@ -34,6 +34,8 @@ class SheetImage {
     ; The package part the pixels are in, e.g. "xl/media/image1.png".
     def src:string ""
     def name:string ""
+    ; Alt text (a picture's description for a screen reader).
+    def altText:string ""
     ; The media file's own bytes, taken out of the package while it was open.
     ; They stay compressed-format here — a PNG is a PNG — and are decoded on
     ; first paint, once, by GridImages.

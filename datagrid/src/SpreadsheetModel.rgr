@@ -16,6 +16,7 @@ Import "CellStyle.rgr"
 Import "DataValidation.rgr"
 Import "RichText.rgr"
 Import "SheetImage.rgr"
+Import "SheetShape.rgr"
 Import "SheetTable.rgr"
 Import "XlsxNumberFormat.rgr"
 Import "../../office/editor/OfficeHistory.rgr"
@@ -343,6 +344,9 @@ class SpreadsheetModel {
     ; sheet a tenth too large, and — since a row is as tall as the type in it
     ; — a tenth too tall as well.
     def defaultFontPt:double 11.0
+    ; The theme's body font (Page Layout › Fonts), for cells with no font of
+    ; their own; "" keeps the view's.
+    def defaultFontName:string ""
     def freezeRows:int 0
     def freezeCols:int 0
     ; Cell values, sparse by row then column. Was a flat `"row,col"` string map:
@@ -398,6 +402,34 @@ class SpreadsheetModel {
     def linkKeys:[string]
     def notes:[string:string]
     def noteKeys:[string]
+    ; Threaded comments (Review › New Comment): a cell's thread is one
+    ; "Author: text" line per reply. Notes are the older single-text kind.
+    def threads:[string:string]
+    def threadKeys:[string]
+    ; Notes kept open (Show/Hide Note, Show All Notes) instead of only on the
+    ; selected cell.
+    def shownNotes:[string:boolean]
+    def showAllNotes:boolean false
+    ; Allow Edit Ranges: "A1:B4" ranges a protected sheet still lets you type in.
+    def editRanges:[string]
+    ; Circle Invalid Data: row, col pairs drawn with a red ring.
+    def invalidCircles:[int]
+    ; Data › Group: each row's and column's outline level (0 = none), and
+    ; whether a group's detail is hidden.
+    def rowLevels:[int:int]
+    def colLevels:[int:int]
+    ; Drawing objects over the sheet (shapes, text boxes, ink, slicers),
+    ; bottom of the z-order first.
+    def shapes:[SheetShape]
+    ; In-cell checkboxes, by cell key.
+    def checkboxes:[string:boolean]
+    ; Page Layout › Background: a picture tiled under the cells.
+    def backgroundSrc:string ""
+    def backgroundBytes:buffer (buffer_alloc 0)
+    def bgWidth:int 0
+    def bgHeight:int 0
+    ; View › Ruler, shown in Page Layout view.
+    def showRuler:boolean true
     def sheetHidden:boolean false
     ; The sheet view's switches (View tab) and the tab's colour. Written to the
     ; file as `sheetView` attributes and `sheetPr/tabColor`.
@@ -518,6 +550,7 @@ class SpreadsheetModel {
         c.defaultRowH = defaultRowH
         c.defaultColW = defaultColW
         c.defaultFontPt = defaultFontPt
+        c.defaultFontName = defaultFontName
         c.freezeRows = freezeRows
         c.freezeCols = freezeCols
         c.filterCol = filterCol
@@ -638,6 +671,13 @@ class SpreadsheetModel {
             pc.copyFrom(pic)
             push c.images pc
             im = (im + 1)
+        }
+        def shi:int 0
+        while (shi < (array_length shapes)) {
+            def shp (new SheetShape)
+            shp.copyFrom((itemAt shapes shi))
+            push c.shapes shp
+            shi = (shi + 1)
         }
         def rk:int 0
         while (rk < (array_length richKeys)) {
@@ -1586,6 +1626,9 @@ class SpreadsheetModel {
         }
         def plain:CellStyle (CellStyle.createDefault())
         plain.fontSizePt = defaultFontPt
+        if ((strlen defaultFontName) > 0) {
+            plain.fontName = defaultFontName
+        }
         return plain
     }
 
@@ -1604,6 +1647,41 @@ class SpreadsheetModel {
 
     fn imageCount:int () {
         return (array_length images)
+    }
+
+    fn isCheckbox:boolean (row:int col:int) {
+        def k:string (this.cellKey(row col))
+        if (has checkboxes k) {
+            return (unwrap (get checkboxes k))
+        }
+        return false
+    }
+
+    ; A slicer's filter: rows r0.. take the flags given (true = hidden).
+    fn setRowsSuppressed:void (r0:int flags:[boolean]) {
+        this.ensureGeometry()
+        if ((array_length rowSuppressed) != rowCount) {
+            clear rowSuppressed
+            def hi:int 0
+            while (hi < rowCount) {
+                push rowSuppressed false
+                hi = (hi + 1)
+            }
+        }
+        def i:int 0
+        while (i < (array_length flags)) {
+            def r:int (r0 + i)
+            if ((r >= 0) && (r < rowCount)) {
+                set_at rowSuppressed r (itemAt flags i)
+            }
+            i = (i + 1)
+        }
+        rowGeomDirty = true
+        version = (version + 1)
+    }
+
+    fn shapeCount:int () {
+        return (array_length shapes)
     }
 
     ; --- tables ---------------------------------------------------------------
@@ -1898,6 +1976,61 @@ class SpreadsheetModel {
             i = (i + 1)
         }
         return n
+    }
+
+    ; --- threaded comments --------------------------------------------------------
+    fn threadAt:string (row:int col:int) {
+        def k:string (this.cellKey(row col))
+        if (has threads k) {
+            return (unwrap (get threads k))
+        }
+        return ""
+    }
+
+    fn hasThread:boolean (row:int col:int) {
+        return ((strlen (this.threadAt(row col))) > 0)
+    }
+
+    fn addReply:void (row:int col:int author:string text:string) {
+        def k:string (this.cellKey(row col))
+        def was:string (this.threadAt(row col))
+        if ((has threads k) == false) {
+            push threadKeys k
+        }
+        def line:string (author + ": " + text)
+        if ((strlen was) > 0) {
+            set threads k (was + "\n" + line)
+        } {
+            set threads k line
+        }
+        version = (version + 1)
+    }
+
+    fn clearThread:void (row:int col:int) {
+        def k:string (this.cellKey(row col))
+        if (has threads k) {
+            set threads k ""
+        }
+        version = (version + 1)
+    }
+
+    fn noteShown:boolean (row:int col:int) {
+        if ((this.hasNote(row col)) == false) {
+            return false
+        }
+        if showAllNotes {
+            return true
+        }
+        def k:string (this.cellKey(row col))
+        if (has shownNotes k) {
+            return (unwrap (get shownNotes k))
+        }
+        return false
+    }
+
+    fn setNoteShown:void (row:int col:int on:boolean) {
+        set shownNotes (this.cellKey(row col)) on
+        version = (version + 1)
     }
 
     ; --- data validation ------------------------------------------------------
