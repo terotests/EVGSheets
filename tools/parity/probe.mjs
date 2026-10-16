@@ -590,20 +590,20 @@ try {
     for (const [ref, v] of [["A1", "Score"], ["A2", "2"], ["A3", "4"], ["A4", "4"], ["A5", "6"]]) await put(ref, v);
     await sel("A1:A5");
     await run("data.analysisToolPak");
-    await check("data.analysisToolPak", async () => { const v = [(await S()).sheets.slice(-1)[0], await cellAt("A1"), await cellAt("B3"), await cellAt("B6"), await cellAt("B13")]; return [v.slice(1).join(",") === "Score,4,4,4" && /Descriptive/.test(v[0]), v.join(",")]; });
+    await check("data.analysisToolPak", async () => { const v = [await M("G.book.sheetAt(G.book.activeIndex).name"), await cellAt("A1"), await cellAt("B3"), await cellAt("B6"), await cellAt("B13")]; return [v.slice(1).join(",") === "Score,4,4,4" && /Descriptive/.test(v[0]), v.join(",")]; });
     // Forecast Sheet.
     await run("sheet.add");
     for (const [ref, v] of [["A1", "Month"], ["B1", "Units"], ["A2", "1"], ["B2", "10"], ["A3", "2"], ["B3", "20"], ["A4", "3"], ["B4", "30"]]) await put(ref, v);
     await sel("A1:B4");
     const charts0 = await M("G.view.chartLayer.count()");
     await run("data.forecastSheet", "n=2");
-    await check("data.forecastSheet", async () => { const v = [await cellAt("A6"), await cellAt("C6"), await M("G.view.chartLayer.count()") - charts0]; return [v.join(",") === "5,50,1" && /Forecast/.test((await S()).sheets.slice(-1)[0]), v.join(",")]; });
+    await check("data.forecastSheet", async () => { const v = [await cellAt("A6"), await cellAt("C6"), await M("G.view.chartLayer.count()") - charts0]; return [v.join(",") === "5,50,1" && /Forecast/.test(await M("G.book.sheetAt(G.book.activeIndex).name")), v.join(",")]; });
     // Import: CSV text, and a table loaded as a query that Refresh All rereads.
     await run("data.fromTextCsv", 'Name,City\n"Smith, J",Oslo\nLee,Rome');
     await check("data.fromTextCsv", async () => { const v = [await cellAt("A2"), await cellAt("B3")]; return [v.join("|") === "Smith, J|Rome", v.join("|")]; });
     await at("A1");
     await run("data.fromTableRange");
-    const qSheet = (await S()).sheets.slice(-1)[0];
+    const qSheet = await M("G.book.sheetAt(G.book.activeIndex).name");
     await check("data.fromTableRange", async () => [(await cellAt("A2")) === "Smith, J" && /Query/.test(qSheet), qSheet]);
     await run("view.sheet.prev");
     await put("B3", "Paris");
@@ -994,7 +994,11 @@ try {
       return [fill === "#C6EFCE" && items.includes("Medium 2") && cf.some((x) => /Data Bars/.test(x)), "Good fill " + fill + "; tables " + items.length + "; cf " + cf.length];
     });
     await uiCheck("expandFormulaBar", async () => {
-      await at("A2");
+      // A click on the cell, as a person would: focus is still on the ribbon
+      // button whose menu Escape just closed.
+      const a2 = await cellCentre(1, 0);
+      await page.mouse.click(a2.x, a2.y);
+      await page.waitForTimeout(60);
       await page.keyboard.type("one");
       await page.keyboard.press("Enter");
       const ex0 = await byId("app/fx-expand");
@@ -1080,12 +1084,13 @@ try {
     });
     await uiCheck("zoomSlider", async () => {
       const tr = await tidRect("sx-zoomslider-track");
+      const before = await page.evaluate(() => { const A = window.sheet.app; return "menu " + A.anyMenuOpen() + " dlg " + A.dialogOpen() + " pane " + A.grid.app.paneKind + " ctx " + A.ctxOpen; });
       await page.mouse.click(tr.r.x + tr.r.w * 0.5, tr.r.y + tr.r.h / 2);
       await page.waitForTimeout(80);
       const z = await M("Math.round(M.zoom * 100)");
       const slider = (await axNow()).find((n) => n.role === "slider");
       await run("view.zoom", "100");
-      return [!!slider && z > 150 && z < 260, "slider " + !!slider + " zoom " + z];
+      return [!!slider && z > 150 && z < 260, "slider " + !!slider + " zoom " + z + " (" + before + " at " + JSON.stringify(tr.r) + ")"];
     });
     await uiCheck("formatCellsPane", async () => {
       await run("home.formatCells");
@@ -1219,7 +1224,7 @@ try {
   await check("review.newNote", async () => [(await M("M.noteAt(7,9)")) === "check this"]);
   await at("J10");
   await run("review.newComment", "and this");
-  await check("review.newComment", async () => [(await M("M.noteAt(9,9)")) === "and this"]);
+  await check("review.newComment", async () => [(await M("M.threadAt(9,9)")) === "You: and this", await M("M.threadAt(9,9)")]);
   await at("A1");
   await run("review.nextComment");
   await check("review.nextComment", async () => [(await S()).cell === "J8", (await S()).cell]);
