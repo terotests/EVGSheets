@@ -1461,58 +1461,107 @@ class GridView {
         return (theme.activeBorder.withAlpha(0.14))
     }
 
+    ; The number of view row hr2, tinted when its row is selected.
+    fn paintRowHeader:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid hr2:int bodyTop:int vh:int) {
+        def mr:int (grid.mapRow(hr2))
+        def rr:GridRect (grid.cellRect(model mr 0))
+        def num:string (to_string (mr + 1))
+        def rh:int (model.rowHeight(mr))
+        ; Skip labels fully outside the body band — backends that ignore
+        ; clip commands would otherwise paint them over the col headers
+        ; or sheet tabs.
+        def bandBot:int (bodyTop + vh)
+        if ((rr.y + rh) > bodyTop) {
+            if (rr.y < bandBot) {
+                def nw:int (to_int (ctx.tr.measureWidth(num (fontSize * 0.85))))
+                def nx:int ((grid.x + grid.rowHeaderW) - nw - 6)
+                def rs:int (this.headerState(model mr true))
+                def rInk:EVGColor theme.headerText
+                if (rs > 0) {
+                    this.pushRect(dl (to_double grid.x) (to_double rr.y) (to_double grid.rowHeaderW) (to_double rh) (this.headerTint(rs)))
+                    rInk = theme.activeBorder
+                }
+                this.pushText(dl num (to_double nx) (to_double (rr.y + 3)) (fontSize * 0.85) rInk)
+                this.pushRect(dl (to_double grid.x) (to_double (rr.y + rh - 1)) (to_double grid.rowHeaderW) 1.0 theme.gridLine)
+            }
+        }
+    }
+
     fn paintColHeaders:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid bodyLeft:int headerTop:int vw:int) {
         this.pushRect(dl (to_double bodyLeft) (to_double headerTop) (to_double vw) (to_double grid.colHeaderH) theme.headerBg)
-        this.pushClip(dl (to_double bodyLeft) (to_double headerTop) (to_double vw) (to_double grid.colHeaderH))
+        ; A frozen column's letter goes on last, in its own strip: a scrolled
+        ; column half under the frozen ones would otherwise paint over it.
+        def fzC:int (grid.freezeViewCols(model))
+        def fw:int 0
+        if (fzC > 0) {
+            fw = (grid.geoFrozenW(model))
+        }
+        this.pushClip(dl (to_double (bodyLeft + fw)) (to_double headerTop) (to_double (vw - fw)) (to_double grid.colHeaderH))
         def hc:int grid.firstVisibleCol
         while (hc <= grid.lastVisibleCol) {
-            def mc:int (grid.mapCol(hc))
-            def hx:int (grid.viewColScreenX(model hc))
-            def label:string (SpreadsheetModel.colLabel(mc))
-            ; A sort moves the data now, so the view is not sorting anything
-            ; — but the header still says which column was put in order, and
-            ; which way, because that is what the person did.
-            if (model.sortedCol == mc) {
-                if model.sortedAsc {
-                    label = (label + " ^")
-                } {
-                    label = (label + " v")
-                }
+            if (hc >= fzC) {
+                this.paintColHeader(dl model grid hc headerTop)
             }
-            if ((model.filterEnabled) && (model.filterCol == mc)) {
-                label = (label + " [#]")
-            }
-            def cw:int (model.colWidth(mc))
-            def aw:int (GridView.colMenuArrowW())
-            def lw:int (to_int (ctx.tr.measureWidth(label (fontSize * 0.9))))
-            def labelW:int (cw - aw)
-            if (labelW < 1) {
-                labelW = 1
-            }
-            def lx:int (hx + (to_int ((to_double (labelW - lw)) / 2.0)))
-            def hs:int (this.headerState(model mc false))
-            def hInk:EVGColor theme.headerText
-            if (hs > 0) {
-                this.pushRect(dl (to_double hx) (to_double headerTop) (to_double cw) (to_double grid.colHeaderH) (this.headerTint(hs)))
-                hInk = theme.activeBorder
-            }
-            this.pushText(dl label (to_double lx) (to_double (headerTop + 4)) (fontSize * 0.9) hInk)
-            ; Always-visible dropdown target: clicking the letter selects data,
-            ; clicking this arrow opens the existing sort/filter menu.
-            def ax:int ((hx + cw) - aw)
-            this.pushRect(dl (to_double ax) (to_double headerTop) 1.0 (to_double grid.colHeaderH) theme.gridLine)
-            def triY:int (headerTop + (idiv grid.colHeaderH 2))
-            def triW:int 7
-            def triX:int (ax + (idiv (aw - triW) 2))
-            def ti:int 0
-            while (ti < 4) {
-                this.pushRect(dl (to_double (triX + ti)) (to_double (triY + ti)) (to_double (triW - (ti * 2))) 1.0 theme.headerText)
-                ti = (ti + 1)
-            }
-            this.pushRect(dl (to_double (hx + cw - 1)) (to_double headerTop) 1.0 (to_double grid.colHeaderH) theme.gridLine)
             hc = (hc + 1)
         }
         this.popClip(dl)
+        if (fzC > 0) {
+            this.pushClip(dl (to_double bodyLeft) (to_double headerTop) (to_double fw) (to_double grid.colHeaderH))
+            def fc:int 0
+            while (fc < fzC) {
+                this.paintColHeader(dl model grid fc headerTop)
+                fc = (fc + 1)
+            }
+            this.popClip(dl)
+        }
+    }
+
+    ; The letter of view column hc, its sort / filter marks and its menu arrow.
+    fn paintColHeader:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid hc:int headerTop:int) {
+        def mc:int (grid.mapCol(hc))
+        def hx:int (grid.viewColScreenX(model hc))
+        def label:string (SpreadsheetModel.colLabel(mc))
+        ; A sort moves the data now, so the view is not sorting anything
+        ; — but the header still says which column was put in order, and
+        ; which way, because that is what the person did.
+        if (model.sortedCol == mc) {
+            if model.sortedAsc {
+                label = (label + " ^")
+            } {
+                label = (label + " v")
+            }
+        }
+        if ((model.filterEnabled) && (model.filterCol == mc)) {
+            label = (label + " [#]")
+        }
+        def cw:int (model.colWidth(mc))
+        def aw:int (GridView.colMenuArrowW())
+        def lw:int (to_int (ctx.tr.measureWidth(label (fontSize * 0.9))))
+        def labelW:int (cw - aw)
+        if (labelW < 1) {
+            labelW = 1
+        }
+        def lx:int (hx + (to_int ((to_double (labelW - lw)) / 2.0)))
+        def hs:int (this.headerState(model mc false))
+        def hInk:EVGColor theme.headerText
+        if (hs > 0) {
+            this.pushRect(dl (to_double hx) (to_double headerTop) (to_double cw) (to_double grid.colHeaderH) (this.headerTint(hs)))
+            hInk = theme.activeBorder
+        }
+        this.pushText(dl label (to_double lx) (to_double (headerTop + 4)) (fontSize * 0.9) hInk)
+        ; Always-visible dropdown target: clicking the letter selects data,
+        ; clicking this arrow opens the existing sort/filter menu.
+        def ax:int ((hx + cw) - aw)
+        this.pushRect(dl (to_double ax) (to_double headerTop) 1.0 (to_double grid.colHeaderH) theme.gridLine)
+        def triY:int (headerTop + (idiv grid.colHeaderH 2))
+        def triW:int 7
+        def triX:int (ax + (idiv (aw - triW) 2))
+        def ti:int 0
+        while (ti < 4) {
+            this.pushRect(dl (to_double (triX + ti)) (to_double (triY + ti)) (to_double (triW - (ti * 2))) 1.0 theme.headerText)
+            ti = (ti + 1)
+        }
+        this.pushRect(dl (to_double (hx + cw - 1)) (to_double headerTop) 1.0 (to_double grid.colHeaderH) theme.gridLine)
     }
 
     ; The status bar's chart button. Static so the hit test and the paint read
@@ -2089,30 +2138,18 @@ class GridView {
 
         ; row headers — show MODEL row numbers
         this.pushRect(dl (to_double grid.x) (to_double bodyTop) (to_double grid.rowHeaderW) (to_double vh) theme.headerBg)
-        this.pushClip(dl (to_double grid.x) (to_double bodyTop) (to_double grid.rowHeaderW) (to_double vh))
+        ; Scrolled rows' numbers first, below the frozen rows; the frozen
+        ; rows' numbers last, in their own strip (as the cell bands).
+        def fzRh:int (grid.freezeViewRows(model))
+        def fhh:int 0
+        if (fzRh > 0) {
+            fhh = (grid.geoFrozenH(model))
+        }
+        this.pushClip(dl (to_double grid.x) (to_double (bodyTop + fhh)) (to_double grid.rowHeaderW) (to_double (vh - fhh)))
         def hr2:int grid.firstVisibleRow
         while (hr2 <= grid.lastVisibleRow) {
-            def mr:int (grid.mapRow(hr2))
-            def rr:GridRect (grid.cellRect(model mr 0))
-            def num:string (to_string (mr + 1))
-            def rh:int (model.rowHeight(mr))
-            ; Skip labels fully outside the body band — backends that ignore
-            ; clip commands would otherwise paint them over the col headers
-            ; or sheet tabs.
-            def bandBot:int (bodyTop + vh)
-            if ((rr.y + rh) > bodyTop) {
-                if (rr.y < bandBot) {
-                    def nw:int (to_int (ctx.tr.measureWidth(num (fontSize * 0.85))))
-                    def nx:int ((grid.x + grid.rowHeaderW) - nw - 6)
-                    def rs:int (this.headerState(model mr true))
-                    def rInk:EVGColor theme.headerText
-                    if (rs > 0) {
-                        this.pushRect(dl (to_double grid.x) (to_double rr.y) (to_double grid.rowHeaderW) (to_double rh) (this.headerTint(rs)))
-                        rInk = theme.activeBorder
-                    }
-                    this.pushText(dl num (to_double nx) (to_double (rr.y + 3)) (fontSize * 0.85) rInk)
-                    this.pushRect(dl (to_double grid.x) (to_double (rr.y + rh - 1)) (to_double grid.rowHeaderW) 1.0 theme.gridLine)
-                }
+            if (hr2 >= fzRh) {
+                this.paintRowHeader(dl model grid hr2 bodyTop vh)
             }
             hr2 = (hr2 + 1)
         }
@@ -2120,6 +2157,15 @@ class GridView {
             this.paintRowPlus(dl model grid)
         }
         this.popClip(dl)
+        if (fzRh > 0) {
+            this.pushClip(dl (to_double grid.x) (to_double bodyTop) (to_double grid.rowHeaderW) (to_double fhh))
+            def fr:int 0
+            while (fr < fzRh) {
+                this.paintRowHeader(dl model grid fr bodyTop vh)
+                fr = (fr + 1)
+            }
+            this.popClip(dl)
+        }
 
         ; body: backgrounds + text + gridlines (visible cells only)
         this.pushClip(dl (to_double bodyLeft) (to_double bodyTop) (to_double vw) (to_double vh))
