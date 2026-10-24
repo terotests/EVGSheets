@@ -1,0 +1,158 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; FreezeClipTest — scrolled rows stay under the frozen ones.
+; ==============================================================================
+;
+; With rows frozen, the bands were painted frozen first and scrolling last, and
+; the scrolling band had no clip of its own: a row scrolled by pixels sits
+; partly under the frozen rows, so its fill and text were drawn OVER them (and
+; its gridline through them). Seen in M-Files' preview of an .xlsx with a
+; frozen header, scrolled with the wheel.
+;
+; Like OverflowRenderTest it compares two pictures of the same sheet, once with
+; the scrolled rows full of dark cells and once with them empty: no pixel of
+; the frozen rows, nor of the frozen column, may differ between the two.
+;
+;   (in a Ranger tree, with this directory at gallery/datagrid)
+;   bash scripts/rgr-suite.sh ./gallery/datagrid/tests/FreezeClipTest.rgr ./gallery/datagrid/bin FreezeClipTest.js
+; ==============================================================================
+
+Import "../src/GridApp.rgr"
+
+class FreezeCheck {
+    def passed:int 0
+    def failed:int 0
+
+    fn ok:void (name:string cond:boolean) {
+        if cond {
+            passed = (passed + 1)
+            print ("  PASS " + name)
+        } {
+            failed = (failed + 1)
+            print ("  FAIL " + name)
+        }
+    }
+
+    fn eqInt:void (name:string got:int want:int) {
+        this.ok((name + " (got " + (to_string got) + " want " + (to_string want) + ")") (got == want))
+    }
+}
+
+class FreezeClipTest {
+    sfn snapshot:buffer (app:GridApp) {
+        def src:buffer (app.raw())
+        def n:int (buffer_length src)
+        def out:buffer (buffer_alloc n)
+        buffer_copy out 0 src 0 n
+        return out
+    }
+
+    sfn diffIn:int (a:buffer b:buffer w:int x0:int y0:int x1:int y1:int) {
+        def n:int 0
+        def y:int y0
+        while (y < y1) {
+            def x:int x0
+            while (x < x1) {
+                def at:int (((y * w) + x) * 4)
+                if ((at + 2) < (buffer_length a)) {
+                    if ((buffer_get a at) != (buffer_get b at)) {
+                        n = (n + 1)
+                    } {
+                        if ((buffer_get a (at + 1)) != (buffer_get b (at + 1))) {
+                            n = (n + 1)
+                        } {
+                            if ((buffer_get a (at + 2)) != (buffer_get b (at + 2))) {
+                                n = (n + 1)
+                            }
+                        }
+                    }
+                }
+                x = (x + 1)
+            }
+            y = (y + 1)
+        }
+        return n
+    }
+
+    ; Two frozen rows and one frozen column, the same labels in them either
+    ; way; `full` fills every scrolling cell with a dark fill and a label. The
+    ; sheet is scrolled down and right by a part of a row and of a column, so
+    ; the first visible scrolling row and column are half under the frozen ones.
+    sfn build:GridApp (full:boolean) {
+        def app:GridApp (new GridApp)
+        app.init("gallery/pdf_writer/assets/fonts")
+        app.model.clearSheet()
+        app.model.resize(60 12)
+        app.model.setFreeze(2 1)
+        app.model.setCellRaw(0 0 "Corner")
+        app.model.setCellRaw(0 1 "Header")
+        app.model.setCellRaw(1 1 "Second")
+        app.model.setCellRaw(5 0 "Side")
+        if full {
+            def dark:CellStyle (new CellStyle)
+            dark.hasFill = true
+            dark.fillRgb = "#202020"
+            dark.textRgb = "#ffffff"
+            def sid:int (app.model.styleIdFor(dark))
+            def r:int 2
+            while (r < 60) {
+                def c:int 1
+                while (c < 12) {
+                    app.model.setCellRaw(r c ("Row " + (to_string r) + " long label"))
+                    app.model.setCellStyleId(r c sid)
+                    c = (c + 1)
+                }
+                r = (r + 1)
+            }
+        }
+        app.sheetView.markDirty()
+        app.sheetView.rebuild()
+        app.engine.rebuildAll()
+        app.grid.scrollY = ((app.model.rowHeight(2)) * 3) + 9
+        app.grid.scrollX = ((app.model.colWidth(1)) * 2) + 23
+        app.grid.updateVisible(app.model)
+        app.render()
+        return app
+    }
+
+    sfn main:void () {
+        def c:FreezeCheck (new FreezeCheck)
+        print "== FreezeClipTest =="
+
+        def emptyApp:GridApp (FreezeClipTest.build(false))
+        def before:buffer (FreezeClipTest.snapshot(emptyApp))
+        def app:GridApp (FreezeClipTest.build(true))
+        def after:buffer (FreezeClipTest.snapshot(app))
+        def W:int app.W
+
+        def bodyLeft:int (app.grid.x + app.grid.rowHeaderW)
+        def bodyTop:int ((app.grid.headerTop()) + app.grid.colHeaderH)
+        def vw:int (app.grid.viewportW())
+        def vh:int (app.grid.viewportH())
+        def fh:int (app.grid.geoFrozenH(app.model))
+        def fw:int (app.grid.geoFrozenW(app.model))
+        c.ok("two rows and a column are frozen" ((fh > 0) && (fw > 0)))
+
+        print "-- the frozen rows are untouched --"
+        ; up to the freeze line, which is drawn over both
+        def rows:int (FreezeClipTest.diffIn(before after W bodyLeft bodyTop (bodyLeft + vw) ((bodyTop + fh) - 2)))
+        c.eqInt("no pixel of the frozen rows changed" rows 0)
+
+        print "-- the frozen column is untouched --"
+        def col:int (FreezeClipTest.diffIn(before after W bodyLeft bodyTop ((bodyLeft + fw) - 2) (bodyTop + vh)))
+        c.eqInt("no pixel of the frozen column changed" col 0)
+
+        print "-- the scrolled cells are drawn --"
+        def body:int (FreezeClipTest.diffIn(before after W (bodyLeft + fw + 2) (bodyTop + fh + 2) (bodyLeft + vw) (bodyTop + vh)))
+        c.ok("the scrolling part did change" (body > 1000))
+
+        print ""
+        print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
+        if (c.failed == 0) {
+            print "ALL PASS"
+        } {
+            print "FAILURES"
+        }
+    }
+}

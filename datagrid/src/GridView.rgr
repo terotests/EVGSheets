@@ -1328,17 +1328,56 @@ class GridView {
     }
 
     ; The same four bands `buildDisplayList` paints cells in, for borders.
-    fn paintBordersBands:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid fzR:int fzC:int) {
+    fn paintBordersBands:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid fzR:int fzC:int bodyLeft:int bodyTop:int vw:int vh:int) {
         if (fzR > 0) {
             if (fzC > 0) {
                 this.paintBordersRange(dl model grid 0 (fzR - 1) 0 (fzC - 1))
             }
+            this.pushBandClip(dl model grid bodyLeft bodyTop vw vh false true)
             this.paintBordersRange(dl model grid 0 (fzR - 1) grid.firstScrollCol grid.lastScrollCol)
+            this.popClip(dl)
         }
         if (fzC > 0) {
+            this.pushBandClip(dl model grid bodyLeft bodyTop vw vh true false)
             this.paintBordersRange(dl model grid grid.firstScrollRow grid.lastScrollRow 0 (fzC - 1))
+            this.popClip(dl)
         }
+        this.pushBandClip(dl model grid bodyLeft bodyTop vw vh true true)
         this.paintBordersRange(dl model grid grid.firstScrollRow grid.lastScrollRow grid.firstScrollCol grid.lastScrollCol)
+        this.popClip(dl)
+    }
+
+    ; A band's part of the body: below the frozen rows when its rows scroll
+    ; (else the frozen rows' strip), right of the frozen columns when its
+    ; columns scroll (else the frozen columns' strip).
+    fn pushBandClip:void (dl:EVGDisplayList model:SpreadsheetModel grid:DataGrid bodyLeft:int bodyTop:int vw:int vh:int scrollRows:boolean scrollCols:boolean) {
+        def fw:int 0
+        def fh:int 0
+        if ((grid.freezeViewCols(model)) > 0) {
+            fw = (grid.geoFrozenW(model))
+        }
+        if ((grid.freezeViewRows(model)) > 0) {
+            fh = (grid.geoFrozenH(model))
+        }
+        def x:int bodyLeft
+        def w:int fw
+        if scrollCols {
+            x = (bodyLeft + fw)
+            w = (vw - fw)
+        }
+        def y:int bodyTop
+        def h:int fh
+        if scrollRows {
+            y = (bodyTop + fh)
+            h = (vh - fh)
+        }
+        if (w < 0) {
+            w = 0
+        }
+        if (h < 0) {
+            h = 0
+        }
+        this.pushClip(dl (to_double x) (to_double y) (to_double w) (to_double h))
     }
 
     ; r0..r1 / c0..c1 are VIEW indices when grid.hasView.
@@ -2119,22 +2158,39 @@ class GridView {
         ; Ranges are VIEW indices when SheetView is bound.
         def fzR:int (grid.freezeViewRows(model))
         def fzC:int (grid.freezeViewCols(model))
+        ; Each band but the corner is clipped to its own part of the body: a
+        ; row scrolled by pixels sits partly under the frozen rows, and drawn
+        ; after them it painted over them (fill, text and all).
         if (fzR > 0) {
             if (fzC > 0) {
                 this.paintCellRange(dl model sel grid editing editBuf 0 (fzR - 1) 0 (fzC - 1))
             }
+            this.pushBandClip(dl model grid bodyLeft bodyTop vw vh false true)
             this.paintCellRange(dl model sel grid editing editBuf 0 (fzR - 1) grid.firstScrollCol grid.lastScrollCol)
+            this.popClip(dl)
         }
         if (fzC > 0) {
+            this.pushBandClip(dl model grid bodyLeft bodyTop vw vh true false)
             this.paintCellRange(dl model sel grid editing editBuf grid.firstScrollRow grid.lastScrollRow 0 (fzC - 1))
+            this.popClip(dl)
         }
+        this.pushBandClip(dl model grid bodyLeft bodyTop vw vh true true)
         this.paintCellRange(dl model sel grid editing editBuf grid.firstScrollRow grid.lastScrollRow grid.firstScrollCol grid.lastScrollCol)
+        this.popClip(dl)
 
         ; vertical grid lines (scrollable + frozen) — VIEW indices. View >
         ; Gridlines off draws none; the loops simply run to nothing.
         def vc:int 0
         def vcLast:int grid.lastScrollCol
         def vrLast:int grid.lastScrollRow
+        def frozenW:int 0
+        def frozenH:int 0
+        if (fzC > 0) {
+            frozenW = (grid.geoFrozenW(model))
+        }
+        if (fzR > 0) {
+            frozenH = (grid.geoFrozenH(model))
+        }
         if (model.showGridlines == false) {
             vcLast = -1
             vrLast = -1
@@ -2146,7 +2202,10 @@ class GridView {
                 vr = (grid.cellRect(model (grid.mapRow(0)) mc2))
             }
             def cw2:int (model.colWidth(mc2))
-            this.pushRect(dl (to_double (vr.x + cw2 - 1)) (to_double bodyTop) 1.0 (to_double vh) theme.gridLine)
+            ; a scrolled column's line left of the frozen columns is under them
+            if ((vc < fzC) || ((vr.x + cw2) > (bodyLeft + frozenW))) {
+                this.pushRect(dl (to_double (vr.x + cw2 - 1)) (to_double bodyTop) 1.0 (to_double vh) theme.gridLine)
+            }
             vc = (vc + 1)
         }
         def vr2:int 0
@@ -2157,12 +2216,14 @@ class GridView {
                 rr2 = (grid.cellRect(model mr2 (grid.mapCol(0))))
             }
             def rh2:int (model.rowHeight(mr2))
-            this.pushRect(dl (to_double bodyLeft) (to_double (rr2.y + rh2 - 1)) (to_double vw) 1.0 theme.gridLine)
+            if ((vr2 < fzR) || ((rr2.y + rh2) > (bodyTop + frozenH))) {
+                this.pushRect(dl (to_double bodyLeft) (to_double (rr2.y + rh2 - 1)) (to_double vw) 1.0 theme.gridLine)
+            }
             vr2 = (vr2 + 1)
         }
 
         ; Cell borders go OVER the gridlines they replace.
-        this.paintBordersBands(dl model grid fzR fzC)
+        this.paintBordersBands(dl model grid fzR fzC bodyLeft bodyTop vw vh)
         if (model.viewMode != "normal") {
             this.paintPages(dl model grid bodyLeft bodyTop vw vh)
         }
