@@ -8,7 +8,8 @@
 ; the scrolling band had no clip of its own: a row scrolled by pixels sits
 ; partly under the frozen rows, so its fill and text were drawn OVER them (and
 ; its gridline through them). Seen in M-Files' preview of an .xlsx with a
-; frozen header, scrolled with the wheel.
+; frozen header, scrolled with the wheel. The row numbers and column letters
+; had the same fault: a scrolled row's number was drawn over a frozen one's.
 ;
 ; Like OverflowRenderTest it compares two pictures of the same sheet, once with
 ; the scrolled rows full of dark cells and once with them empty: no pixel of
@@ -146,6 +147,24 @@ class FreezeClipTest {
         print "-- the scrolled cells are drawn --"
         def body:int (FreezeClipTest.diffIn(before after W (bodyLeft + fw + 2) (bodyTop + fh + 2) (bodyLeft + vw) (bodyTop + vh)))
         c.ok("the scrolling part did change" (body > 1000))
+
+        ; The same sheet unscrolled: the frozen rows' numbers and the frozen
+        ; column's letter must look the same, with no scrolled number or letter
+        ; drawn over them.
+        app.grid.scrollY = 0
+        app.grid.scrollX = 0
+        app.grid.updateVisible(app.model)
+        app.render()
+        def top:buffer (FreezeClipTest.snapshot(app))
+        def headTop:int (app.grid.headerTop())
+
+        print "-- the frozen rows' numbers are untouched --"
+        def nums:int (FreezeClipTest.diffIn(top after W app.grid.x bodyTop ((app.grid.x + app.grid.rowHeaderW) - 2) ((bodyTop + fh) - 2)))
+        c.eqInt("no pixel of the frozen row numbers changed" nums 0)
+
+        print "-- the frozen column's letter is untouched --"
+        def letters:int (FreezeClipTest.diffIn(top after W bodyLeft headTop ((bodyLeft + fw) - 2) (bodyTop - 1)))
+        c.eqInt("no pixel of the frozen column letter changed" letters 0)
 
         print ""
         print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
