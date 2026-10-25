@@ -145,6 +145,10 @@ class GridApp {
     ; Where a text selection started inside the edit buffer, or -1 for none.
     def editSelAnchor:int -1
     def flingX:double 0.0
+    ; A scroll bar thumb being dragged: 1 vertical, 2 horizontal, 0 none; and
+    ; where on the thumb it was taken.
+    def barDrag:int 0
+    def barGrab:int 0
     def flingY:double 0.0
     ; What is left over when a frame's travel is not a whole number of pixels.
     def subX:double 0.0
@@ -1530,6 +1534,12 @@ class GridApp {
         showStatus = status
         this.layoutFrame()
         grid.updateVisible(model)
+    }
+
+    ; Scroll bars at the body's right and bottom edges (DataGrid.showScrollbars).
+    fn setScrollbars:void (on:boolean) {
+        grid.showScrollbars = on
+        barDrag = 0
     }
 
     fn setReadOnly:void (on:boolean) {
@@ -17931,6 +17941,70 @@ class GridApp {
     ; difference between a sheet that steps and a sheet that moves. Capped, so
     ; no amount of spinning can throw the view across a hundred thousand rows
     ; in one frame.
+    ; A press on a scroll bar: on the thumb it starts a drag, beside it the
+    ; sheet moves a screen that way (as every scroll bar). True while the bars
+    ; own the pointer.
+    fn scrollbarInput:boolean (input:UIInput) {
+        if (grid.showScrollbars == false) {
+            barDrag = 0
+            return false
+        }
+        if (barDrag != 0) {
+            if input.pointerDown {
+                def vert:boolean (barDrag == 1)
+                if vert {
+                    grid.scrollY = (grid.scrollForThumb(model true (input.pointerY - barGrab)))
+                } {
+                    grid.scrollX = (grid.scrollForThumb(model false (input.pointerX - barGrab)))
+                }
+                grid.updateVisible(model)
+                return true
+            }
+            barDrag = 0
+            return true
+        }
+        if (input.pointerPressed == false) {
+            return false
+        }
+        def px:int input.pointerX
+        def py:int input.pointerY
+        def k:int 0
+        while (k < 2) {
+            def vertical:boolean (k == 0)
+            def th:GridRect (grid.scrollThumb(model vertical))
+            def tr:GridRect (grid.scrollTrack(model vertical))
+            if ((th.w > 0) && ((px >= tr.x) && ((px < (tr.x + tr.w)) && ((py >= tr.y) && (py < (tr.y + tr.h)))))) {
+                this.stopFling()
+                if vertical {
+                    if ((py >= th.y) && (py < (th.y + th.h))) {
+                        barDrag = 1
+                        barGrab = (py - th.y)
+                    } {
+                        def page:int (grid.scrollAreaH(model))
+                        if (py < th.y) {
+                            page = (0 - page)
+                        }
+                        grid.scrollByPixels(model 0 page)
+                    }
+                } {
+                    if ((px >= th.x) && (px < (th.x + th.w))) {
+                        barDrag = 2
+                        barGrab = (px - th.x)
+                    } {
+                        def pageX:int (grid.scrollAreaW(model))
+                        if (px < th.x) {
+                            pageX = (0 - pageX)
+                        }
+                        grid.scrollByPixels(model pageX 0)
+                    }
+                }
+                return true
+            }
+            k = (k + 1)
+        }
+        return false
+    }
+
     fn addFling:double (current:double push:double) {
         def v:double (current + push)
         ; A shove the other way stops the sheet rather than fighting it.
@@ -18175,6 +18249,11 @@ class GridApp {
         ; held, it stays where it was so the press below can hit it.
         if (input.pointerDown == false) {
             view.rowPlusAt = (this.rowPlusHover(input.pointerX input.pointerY))
+        }
+        ; The scroll bars, where the host shows them, own a press on them and
+        ; the drag that follows.
+        if (this.scrollbarInput(input)) {
+            return
         }
         if input.pointerPressed {
             if (view.rowPlusAt >= 0) {
