@@ -95,9 +95,15 @@ class DataGridWeb {
         return want
     }
 
-    ; The workbook as .xlsx bytes for a browser download (Save / Save As).
+    ; The workbook as bytes for a browser download (Save / Save As), in the
+    ; format of the name it will be saved as: .ods stays .ods, the rest .xlsx.
     fn saveWorkbookBytes:buffer () {
-        return (app.saveXlsxBytes())
+        return (app.saveBytesAs((app.suggestSaveName())))
+    }
+
+    ; The workbook (or, for csv/tsv, the active sheet) as a file of type `ext`.
+    fn exportBytes:buffer (ext:string) {
+        return (app.saveBytesAs(("export." + ext)))
     }
 
     ; The report the app last exported, as bytes, and what to call it. The

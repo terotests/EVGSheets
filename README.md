@@ -49,6 +49,34 @@ tree as real DOM over the canvas.
   - Escape returns to the sheet.
   - Ctrl chords reach the sheet from anywhere.
 
+## File formats
+
+Open takes the file's contents, not its name, to decide what it is.
+
+| Format | Open | Save | What is kept |
+|---|---|---|---|
+| `.xlsx` `.xlsm` `.xltx` `.xltm` | yes | yes, same format | everything the core models; parts it does not (VBA projects, template and macro content types) are written back unchanged |
+| password-protected `.xlsx` | yes | as `.xlsx` | as `.xlsx` |
+| `.ods` (OpenDocument) | yes | yes (File › Download .ods) | values, formulas (OpenFormula ↔ Excel), number formats, fonts, fills, borders, alignment, merges, column widths, row heights, hidden rows/columns/sheets, named ranges |
+| `.xls` `.xlt` (Excel 97-2003) | yes | as `.xlsx` | values, formulas, number formats, fonts, fills, borders, alignment, merges, column widths, row heights, freeze panes, defined names, print area |
+| `.xlsb` (binary) | yes | as `.xlsx` | values (a formula as its saved result), number formats, merges, column widths |
+| `.csv` `.tsv` `.txt` | yes | yes (Download .csv / .tsv) | the active sheet as shown; the separator and encoding (UTF-8, UTF-16, Windows-1252) are detected on open |
+
+Not imported from `.xls` and `.ods`: charts, pictures, notes, conditional
+formats, validation. `.ods` output does not write freeze panes. Opening a
+format that is not saved back sets Save to the same name with `.xlsx`, and
+the status line says what was left out.
+
+Word and PowerPoint files are not spreadsheets and are not opened here;
+`.docx` belongs to [RangerDocx](https://github.com/terotests/RangerDocx).
+
+The `.xls` formula decoder's function table and the record layouts follow
+[GridCraft](https://github.com/storytold/gridcraft) (MIT/Apache-2.0).
+`datagrid/tests/FormatsTest.rgr` checks each reader against the same
+workbooks saved as `.xlsx` (`datagrid/fixtures/formats/`), and
+`datagrid/tools/check_ods_export.py` has LibreOffice recalculate the `.ods`
+the writer makes.
+
 ## Parameters
 
 You choose which parts appear, which ribbon tools exist, and whether the
@@ -82,7 +110,7 @@ const sheet = await mountSheets(element, {
   base: "https://terotests.github.io/EVGSheets/",
 });
 await sheet.setPreset("compact"); // switch to editing in place
-const bytes = sheet.saveBytes();  // the workbook as .xlsx
+const bytes = sheet.saveBytes();  // the workbook as .xlsx (.ods if it was opened from one)
 sheet.state();                    // active cell, formats, sheets, selection sum…
 sheet.destroy();
 ```

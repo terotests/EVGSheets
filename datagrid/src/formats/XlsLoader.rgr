@@ -1,0 +1,1308 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; XlsLoader — an Excel 97-2003 workbook (.xls, BIFF8) into a WorkbookModel.
+; ==============================================================================
+;
+; The file is a compound file (`Cfb`) whose "Workbook" stream is a run of
+; records: [id u16][length u16][data]. A record longer than 8224 bytes goes on
+; in CONTINUE records, and a string that crosses into one restarts with a new
+; flag byte saying whether its characters are one byte or two — so strings are
+; read through `XlsCursor`, which knows where the pieces join.
+;
+; The stream opens with the workbook globals (sheet list, shared strings,
+; fonts, formats, cell formats, names, the EXTERNSHEET table) and then one
+; substream per sheet, each between a BOF and an EOF, found by the offsets the
+; BOUNDSHEET records give.
+;
+; Read: values, formulas (as text, see `XlsFormula`; a formula it cannot
+; decode keeps its cached value), shared and array formulas, number formats,
+; fonts, fills, borders and alignment, merges, column widths, row heights,
+; hidden rows, columns and sheets, freeze panes, defined names, the 1904 date
+; system. Not read: charts, pictures, comments, conditional formats,
+; validation, hyperlinks. What was skipped is listed in `notes`.
+;
+; The design follows GridCraft's clean-room reader (crates/xlsx/src/xls,
+; MIT/Apache-2.0), itself written from [MS-CFB] and [MS-XLS].
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+Import "Cfb.rgr"
+Import "XlsFormula.rgr"
+Import "../WorkbookModel.rgr"
+Import "../SpreadsheetModel.rgr"
+Import "../CellStyle.rgr"
+Import "../XlsxNumberFormat.rgr"
+Import "../../../office/drawing/OfficeColor.rgr"
+
+; A record's data, in the pieces CONTINUE records split it into.
+class XlsCursor {
+    def parts:[buffer]
+    def part:int 0
+    def pos:int 0
+
+    Constructor () {
+    }
+
+    fn settle:boolean () {
+        def moved:boolean false
+        while ((part < ((array_length parts) - 1)) && (pos >= (buffer_length (itemAt parts part)))) {
+            part = (part + 1)
+            pos = 0
+            moved = true
+        }
+        return moved
+    }
+
+    fn atEnd:boolean () {
+        this.settle()
+        if (part >= (array_length parts)) {
+            return true
+        }
+        return (pos >= (buffer_length (itemAt parts part)))
+    }
+
+    fn remaining:int () {
+        def n:int 0
+        def i:int part
+        while (i < (array_length parts)) {
+            def len:int (buffer_length (itemAt parts i))
+            if (i == part) {
+                n = (n + (len - pos))
+            } {
+                n = (n + len)
+            }
+            i = (i + 1)
+        }
+        return n
+    }
+
+    fn u8:int () {
+        this.settle()
+        if (part >= (array_length parts)) {
+            return 0
+        }
+        def b:buffer (itemAt parts part)
+        if (pos >= (buffer_length b)) {
+            return 0
+        }
+        def v:int (buffer_get b pos)
+        pos = (pos + 1)
+        return v
+    }
+
+    fn u16:int () {
+        def lo:int (this.u8())
+        return (lo + ((this.u8()) * 256))
+    }
+
+    fn i32:int () {
+        def lo:int (this.u16())
+        def hi:int (this.u16())
+        if (hi >= 32768) {
+            hi = (hi - 65536)
+        }
+        return ((hi * 65536) + lo)
+    }
+
+    fn f64:double () {
+        def d:buffer (buffer_alloc 8)
+        def i:int 0
+        while (i < 8) {
+            buffer_set d i (this.u8())
+            i = (i + 1)
+        }
+        return (SheetBytes.f64(d 0))
+    }
+
+    fn skip:void (n:int) {
+        def i:int 0
+        while (i < n) {
+            this.u8()
+            i = (i + 1)
+        }
+    }
+
+    ; Everything left, as one buffer: formula tokens never cross a CONTINUE
+    ; boundary in a way that matters, so they are read flat.
+    fn rest:buffer () {
+        def n:int (this.remaining())
+        def out:buffer (buffer_alloc n)
+        def w:int 0
+        while ((part < (array_length parts)) && (w < n)) {
+            def b:buffer (itemAt parts part)
+            def take:int ((buffer_length b) - pos)
+            if (take > 0) {
+                buffer_copy out w b pos take
+                w = (w + take)
+            }
+            part = (part + 1)
+            pos = 0
+        }
+        return out
+    }
+
+    ; `cch` characters. At the start of each CONTINUE piece the width flag is
+    ; stated again.
+    fn chars:string (cch:int wide:boolean) {
+        def units:[int]
+        def high:boolean wide
+        def i:int 0
+        while (i < cch) {
+            def here:boolean false
+            if (part < (array_length parts)) {
+                here = (pos < (buffer_length (itemAt parts part)))
+            }
+            if (here == false) {
+                if (this.settle()) {
+                    high = ((bit_and (this.u8()) 1) != 0)
+                } {
+                    i = cch
+                    continue
+                }
+            }
+            if high {
+                push units (this.u16())
+            } {
+                push units (this.u8())
+            }
+            i = (i + 1)
+        }
+        return (SheetBytes.unitsToString(units))
+    }
+
+    fn shortString:string () {
+        def cch:int (this.u8())
+        def wide:boolean ((bit_and (this.u8()) 1) != 0)
+        return (this.chars(cch wide))
+    }
+
+    fn string:string () {
+        def cch:int (this.u16())
+        def wide:boolean ((bit_and (this.u8()) 1) != 0)
+        return (this.chars(cch wide))
+    }
+
+    ; XLUnicodeRichExtendedString: the text, then formatting runs and phonetic
+    ; data that are skipped.
+    fn richString:string () {
+        def cch:int (this.u16())
+        def flags:int (this.u8())
+        def runs:int 0
+        if ((bit_and flags 8) != 0) {
+            runs = (this.u16())
+        }
+        def ext:int 0
+        if ((bit_and flags 4) != 0) {
+            ext = (this.i32())
+        }
+        def text:string (this.chars(cch ((bit_and flags 1) != 0)))
+        this.skip(((runs * 4) + ext))
+        return text
+    }
+}
+
+class XlsRecord {
+    def id:int 0
+    def cur:XlsCursor (new XlsCursor)
+
+    Constructor () {
+    }
+}
+
+class XlsFont {
+    def bold:boolean false
+    def italic:boolean false
+    def underline:boolean false
+    def strike:boolean false
+    def sizePt:double 10.0
+    def rgb:string ""
+    def name:string ""
+    def vertAlign:string ""
+
+    Constructor () {
+    }
+}
+
+class XlsLoader {
+    def lastError:string ""
+    def notes:[string]
+    def stream:buffer (buffer_alloc 0)
+    def pos:int 0
+    def date1904:boolean false
+    def sst:[string]
+    def fonts:[XlsFont]
+    def formats:[int:string]
+    def styles:[CellStyle]
+    def palette:[string]
+    def sheetNames:[string]
+    def sheetPos:[int]
+    def sheetKind:[int]
+    def sheetState:[int]
+    def nameText:[string]
+    def nameRgce:[buffer]
+    def nameItab:[int]
+    def nameBuiltin:[int]
+    def formula:XlsFormula (new XlsFormula)
+    ; Per sheet, while it is read.
+    def lastFormulaKey:string ""
+    def pendingStringRow:int -1
+    def pendingStringCol:int -1
+    def sharedRgce:[string:buffer]
+    def sharedRgcb:[string:buffer]
+    def sharedCells:[string]
+    def sharedAnchors:[string]
+    def failures:[string]
+
+    Constructor () {
+    }
+
+    fn note:void (msg:string) {
+        def i:int 0
+        while (i < (array_length notes)) {
+            if ((itemAt notes i) == msg) {
+                return
+            }
+            i = (i + 1)
+        }
+        push notes msg
+    }
+
+    sfn isXls:boolean (b:buffer) {
+        if ((Cfb.isCompound(b)) == false) {
+            return false
+        }
+        def cf:Cfb (new Cfb)
+        if ((cf.open(b)) == false) {
+            return false
+        }
+        return ((cf.hasStream("Workbook")) || (cf.hasStream("Book")))
+    }
+
+    ; --- records ----------------------------------------------------------------
+
+    fn nextRecord:XlsRecord () {
+        def rec:XlsRecord (new XlsRecord)
+        rec.id = -1
+        def n:int (buffer_length stream)
+        if ((pos + 4) > n) {
+            return rec
+        }
+        rec.id = (SheetBytes.u16(stream pos))
+        def len:int (SheetBytes.u16(stream (pos + 2)))
+        def start:int (pos + 4)
+        if ((start + len) > n) {
+            len = (n - start)
+        }
+        push rec.cur.parts (buffer_slice stream start (start + len))
+        pos = (start + len)
+        ; CONTINUE (0x003C) pieces belong to the record before them.
+        while ((pos + 4) <= n) {
+            if ((SheetBytes.u16(stream pos)) != 60) {
+                break
+            }
+            def clen:int (SheetBytes.u16(stream (pos + 2)))
+            def cs:int (pos + 4)
+            if ((cs + clen) > n) {
+                clen = (n - cs)
+            }
+            push rec.cur.parts (buffer_slice stream cs (cs + clen))
+            pos = (cs + clen)
+        }
+        return rec
+    }
+
+    ; --- the workbook -------------------------------------------------------------
+
+    fn loadBytes:boolean (bytes:buffer book:WorkbookModel) {
+        lastError = ""
+        def cf:Cfb (new Cfb)
+        if ((cf.open(bytes)) == false) {
+            lastError = ("XLS: " + cf.lastError)
+            return false
+        }
+        if ((cf.hasStream("Workbook")) == false) {
+            if (cf.hasStream("Book")) {
+                lastError = "Excel 5.0/95 workbooks (BIFF5) are not supported; save the file as .xlsx in Excel and try again"
+            } {
+                lastError = "the file has no Workbook stream, so it is not an Excel workbook"
+            }
+            return false
+        }
+        stream = (cf.stream("Workbook"))
+        if ((strlen cf.lastError) > 0) {
+            lastError = ("XLS: " + cf.lastError)
+            return false
+        }
+        this.initPalette()
+        if ((this.readGlobals()) == false) {
+            return false
+        }
+        this.buildStyles()
+        formula.links.sheets = sheetNames
+        book.clear()
+        ; BOUNDSHEET index → model index, -1 for sheets that were skipped.
+        def modelIndex:[int]
+        def i:int 0
+        while (i < (array_length sheetNames)) {
+            def kind:int (itemAt sheetKind i)
+            if (kind != 0) {
+                if (kind == 2) {
+                    this.note("chart sheets were skipped")
+                } {
+                    this.note("macro and module sheets were skipped")
+                }
+                push modelIndex -1
+            } {
+                def sheet:SpreadsheetModel (new SpreadsheetModel)
+                sheet.name = (itemAt sheetNames i)
+                sheet.sheetHidden = ((itemAt sheetState i) != 0)
+                sheet.quietWrites = true
+                if (this.readSheet((itemAt sheetPos i) sheet)) {
+                    sheet.setStylesFrom(styles)
+                    if ((array_length fonts) > 0) {
+                        def f0:XlsFont (itemAt fonts 0)
+                        sheet.defaultFontName = f0.name
+                    }
+                    sheet.quietWrites = false
+                    sheet.version = (sheet.version + 1)
+                    push modelIndex (book.sheetCount())
+                    book.addSheet(sheet)
+                } {
+                    this.note("dialog sheets and unreadable sheets were skipped")
+                    push modelIndex -1
+                }
+            }
+            i = (i + 1)
+        }
+        if ((book.sheetCount()) == 0) {
+            lastError = "the workbook has no worksheets that can be read"
+            return false
+        }
+        this.readNames(book modelIndex)
+        def first:int 0
+        def k:int 0
+        while (k < (book.sheetCount())) {
+            def sh:SpreadsheetModel (book.sheetAt(k))
+            if (sh.sheetHidden == false) {
+                first = k
+                break
+            }
+            k = (k + 1)
+        }
+        book.setActive(first)
+        if ((array_length failures) > 0) {
+            this.note(("some formulas use " + (join failures ", ") + "; their saved results were kept as values"))
+        }
+        return true
+    }
+
+    fn initPalette:void () {
+        clear palette
+        def i:int 0
+        while (i < 64) {
+            push palette ("#" + (OfficeColorMath.indexedColor(i)))
+            i = (i + 1)
+        }
+    }
+
+    fn colorOf:string (icv:int) {
+        if ((icv >= 0) && (icv < (array_length palette))) {
+            return (itemAt palette icv)
+        }
+        return ""
+    }
+
+    fn readGlobals:boolean () {
+        pos = 0
+        def first:XlsRecord (this.nextRecord())
+        if (first.id != 2057) {
+            lastError = "XLS: the Workbook stream does not start with a BOF record"
+            return false
+        }
+        def vers:int (first.cur.u16())
+        def dt:int (first.cur.u16())
+        if (vers != 1536) {
+            if (vers == 1280) {
+                lastError = "Excel 5.0/95 workbooks (BIFF5) are not supported; save the file as .xlsx in Excel and try again"
+            } {
+                lastError = "unsupported BIFF version (only Excel 97-2003 BIFF8 files are read)"
+            }
+            return false
+        }
+        if (dt != 5) {
+            lastError = "XLS: the Workbook stream does not start with the workbook globals"
+            return false
+        }
+        def guard:int 0
+        while true {
+            def rec:XlsRecord (this.nextRecord())
+            if ((rec.id < 0) || (rec.id == 10)) {
+                break
+            }
+            guard = (guard + 1)
+            if (guard > 10000000) {
+                break
+            }
+            def c:XlsCursor rec.cur
+            if (rec.id == 47) {
+                lastError = "this .xls workbook is password-protected (encrypted); remove the password in Excel and try again"
+                return false
+            }
+            if (rec.id == 133) {
+                ; BOUNDSHEET8: where the sheet's substream starts, its state,
+                ; its kind, its name.
+                push sheetPos (c.i32())
+                push sheetState (bit_and (c.u8()) 3)
+                push sheetKind (c.u8())
+                push sheetNames (c.shortString())
+            }
+            if (rec.id == 34) {
+                date1904 = ((c.u16()) == 1)
+            }
+            if (rec.id == 1054) {
+                def ifmt:int (c.u16())
+                set formats ifmt (c.string())
+            }
+            if (rec.id == 49) {
+                push fonts (this.readFont(c))
+            }
+            if (rec.id == 146) {
+                ; PALETTE: colours 8 onward replaced.
+                def cnt:int (c.u16())
+                def p:int 0
+                while (p < cnt) {
+                    def r:int (c.u8())
+                    def g:int (c.u8())
+                    def b:int (c.u8())
+                    c.u8()
+                    if ((p + 8) < (array_length palette)) {
+                        set_at palette (p + 8) ("#" + (XlsLoader.hex2(r)) + (XlsLoader.hex2(g)) + (XlsLoader.hex2(b)))
+                    }
+                    p = (p + 1)
+                }
+            }
+            if (rec.id == 224) {
+                push styles (this.readXf(c))
+            }
+            if (rec.id == 252) {
+                this.readSst(c)
+            }
+            if (rec.id == 430) {
+                ; SUPBOOK: 0x0401 marks this workbook, 0x3A01 an add-in.
+                c.u16()
+                def cch:int (c.u16())
+                push formula.links.bookInternal ((cch == 1025) || (cch == 14849))
+                def none:[string]
+                push formula.links.bookNames none
+            }
+            if (rec.id == 35) {
+                ; EXTERNNAME: a name in the last SUPBOOK (add-in functions).
+                c.u16()
+                c.skip(4)
+                def en:string (c.shortString())
+                def nb:int (array_length formula.links.bookNames)
+                if (nb > 0) {
+                    def list:[string] (itemAt formula.links.bookNames (nb - 1))
+                    push list en
+                    set_at formula.links.bookNames (nb - 1) list
+                }
+            }
+            if (rec.id == 23) {
+                def nx:int (c.u16())
+                def xi:int 0
+                while ((xi < nx) && ((c.remaining()) >= 6)) {
+                    push formula.links.xtiBook (c.u16())
+                    def f1:int (c.u16())
+                    def f2:int (c.u16())
+                    if (f1 >= 32768) {
+                        f1 = (f1 - 65536)
+                    }
+                    if (f2 >= 32768) {
+                        f2 = (f2 - 65536)
+                    }
+                    push formula.links.xtiFirst f1
+                    push formula.links.xtiLast f2
+                    xi = (xi + 1)
+                }
+            }
+            if (rec.id == 24) {
+                this.readLbl(c)
+            }
+        }
+        return true
+    }
+
+    sfn hex2:string (v:int) {
+        def digits:string "0123456789ABCDEF"
+        def hi:int (floor (v / 16))
+        def lo:int (v % 16)
+        return ((substring digits hi (hi + 1)) + (substring digits lo (lo + 1)))
+    }
+
+    fn readFont:XlsFont (c:XlsCursor) {
+        def f:XlsFont (new XlsFont)
+        def height:int (c.u16())
+        def grbit:int (c.u16())
+        def icv:int (c.u16())
+        def bls:int (c.u16())
+        def sss:int (c.u16())
+        def uls:int (c.u8())
+        c.skip(3)
+        f.sizePt = ((to_double height) / 20.0)
+        f.italic = ((bit_and grbit 2) != 0)
+        f.strike = ((bit_and grbit 8) != 0)
+        f.bold = (bls >= 700)
+        f.underline = (uls != 0)
+        if (sss == 1) {
+            f.vertAlign = "superscript"
+        }
+        if (sss == 2) {
+            f.vertAlign = "subscript"
+        }
+        if ((icv != 32767) && (icv != 8)) {
+            f.rgb = (this.colorOf(icv))
+        }
+        f.name = (c.shortString())
+        return f
+    }
+
+    sfn borderStyle:string (dg:int) {
+        def names:[string] ([] _:string ("" "thin" "medium" "dashed" "dotted" "thick" "double" "hair" "mediumDashed" "dashDot" "mediumDashDot" "dashDotDot" "mediumDashDotDot" "slantDashDot"))
+        if ((dg < 0) || (dg >= (array_length names))) {
+            return ""
+        }
+        return (itemAt names dg)
+    }
+
+    ; XF: font, number format, alignment, borders, fill — all a CellStyle has
+    ; room for.
+    fn readXf:CellStyle (c:XlsCursor) {
+        def st:CellStyle (new CellStyle)
+        def ifnt:int (c.u16())
+        def ifmt:int (c.u16())
+        c.u16()
+        def al:int (c.u8())
+        def rot:int (c.u8())
+        def ind:int (c.u8())
+        c.u8()
+        def b1:int (c.u16())
+        def b2:int (c.u16())
+        def b3:int (c.u16())
+        def b4:int (c.u16())
+        def fillColors:int (c.u16())
+        ; Font index 4 does not exist in BIFF: the indexes after it are one
+        ; higher than their place in the list.
+        def fi:int ifnt
+        if (fi > 4) {
+            fi = (fi - 1)
+        }
+        if ((fi >= 0) && (fi < (array_length fonts))) {
+            def f:XlsFont (itemAt fonts fi)
+            st.bold = f.bold
+            st.italic = f.italic
+            st.underline = f.underline
+            st.strike = f.strike
+            st.fontSizePt = f.sizePt
+            st.vertAlign = f.vertAlign
+            if ((strlen f.rgb) > 0) {
+                st.textRgb = f.rgb
+            }
+            st.fontName = f.name
+        }
+        if (has formats ifmt) {
+            st.numFmt = (unwrap (get formats ifmt))
+        } {
+            st.numFmt = (SheetBytes.builtinNumFmt(ifmt))
+        }
+        def alc:int (bit_and al 7)
+        def hnames:[string] ([] _:string ("general" "left" "center" "right" "fill" "justify" "centerContinuous" "distributed"))
+        st.align = (itemAt hnames alc)
+        if (alc != 0) {
+            st.alignSet = true
+        } {
+            st.align = "left"
+        }
+        st.wrapText = ((bit_and al 8) != 0)
+        def alv:int (bit_and (floor (al / 16)) 7)
+        def vnames:[string] ([] _:string ("top" "center" "bottom" "justify" "distributed" "bottom" "bottom" "bottom"))
+        st.valign = (itemAt vnames alv)
+        if ((rot > 0) && (rot <= 180)) {
+            st.textRotation = rot
+        }
+        st.indent = (bit_and ind 15)
+        ; Borders: four 4-bit styles, then 7-bit colour indexes.
+        def dgLeft:int (bit_and b1 15)
+        def dgRight:int (bit_and (floor (b1 / 16)) 15)
+        def dgTop:int (bit_and (floor (b1 / 256)) 15)
+        def dgBottom:int (bit_and (floor (b1 / 4096)) 15)
+        def icvLeft:int (bit_and b2 127)
+        def icvRight:int (bit_and (floor (b2 / 128)) 127)
+        def icvTop:int (bit_and b3 127)
+        def icvBottom:int (bit_and (floor (b3 / 128)) 127)
+        st.borderLeft.style = (XlsLoader.borderStyle(dgLeft))
+        st.borderRight.style = (XlsLoader.borderStyle(dgRight))
+        st.borderTop.style = (XlsLoader.borderStyle(dgTop))
+        st.borderBottom.style = (XlsLoader.borderStyle(dgBottom))
+        st.borderLeft.rgb = (this.borderRgb(icvLeft))
+        st.borderRight.rgb = (this.borderRgb(icvRight))
+        st.borderTop.rgb = (this.borderRgb(icvTop))
+        st.borderBottom.rgb = (this.borderRgb(icvBottom))
+        st.hasBorder = ((dgLeft + dgRight + dgTop + dgBottom) > 0)
+        ; The fill pattern is the top six bits of the second border word.
+        def fls:int (floor (b4 / 1024))
+        if (fls > 0) {
+            def icvFore:int (bit_and fillColors 127)
+            def icvBack:int (bit_and (floor (fillColors / 128)) 127)
+            def rgb:string (this.colorOf(icvFore))
+            if ((fls != 1) && ((strlen rgb) == 0)) {
+                rgb = (this.colorOf(icvBack))
+            }
+            if ((strlen rgb) > 0) {
+                st.hasFill = true
+                st.fillRgb = rgb
+            }
+        }
+        return st
+    }
+
+    fn borderRgb:string (icv:int) {
+        def rgb:string (this.colorOf(icv))
+        if ((strlen rgb) == 0) {
+            return "#000000"
+        }
+        return rgb
+    }
+
+    fn buildStyles:void () {
+        ; Cell formats are the XFs as listed; nothing to do but keep the
+        ; list's order, which is what the cells index.
+        if ((array_length styles) == 0) {
+            push styles (new CellStyle)
+        }
+    }
+
+    fn readSst:void (c:XlsCursor) {
+        c.i32()
+        def unique:int (c.i32())
+        def i:int 0
+        while (i < unique) {
+            if (c.atEnd()) {
+                break
+            }
+            push sst (c.richString())
+            i = (i + 1)
+        }
+    }
+
+    fn readLbl:void (c:XlsCursor) {
+        def flags:int (c.u16())
+        c.u8()
+        def cch:int (c.u8())
+        def cce:int (c.u16())
+        c.skip(2)
+        def itab:int (c.u16())
+        c.skip(4)
+        def wide:boolean ((bit_and (c.u8()) 1) != 0)
+        def raw:string (c.chars(cch wide))
+        def builtin:int -1
+        def name:string raw
+        if ((bit_and flags 32) != 0) {
+            builtin = 0
+            if ((strlen raw) > 0) {
+                builtin = (charAt raw 0)
+            }
+            def bn:[string] ([] _:string ("Consolidate_Area" "Auto_Open" "Auto_Close" "Extract" "Database" "Criteria" "Print_Area" "Print_Titles" "Recorder" "Data_Form" "Auto_Activate" "Auto_Deactivate" "Sheet_Title" "_FilterDatabase"))
+            if ((builtin >= 0) && (builtin < (array_length bn))) {
+                name = (itemAt bn builtin)
+            }
+        }
+        if ((bit_and flags 10) != 0) {
+            ; A macro name: kept in the list so later indexes line up.
+            builtin = 99
+        }
+        def all:buffer (c.rest())
+        def take:int cce
+        if (take > (buffer_length all)) {
+            take = (buffer_length all)
+        }
+        push formula.links.names name
+        push nameText name
+        push nameRgce (buffer_slice all 0 take)
+        push nameItab itab
+        push nameBuiltin builtin
+    }
+
+    fn readNames:void (book:WorkbookModel modelIndex:[int]) {
+        def i:int 0
+        while (i < (array_length nameText)) {
+            def b:int (itemAt nameBuiltin i)
+            def rg:buffer (itemAt nameRgce i)
+            if ((buffer_length rg) > 0) {
+                def text:string (formula.decode(rg (buffer_alloc 0) 0 0))
+                if ((strlen text) > 0) {
+                    def itab:int (itemAt nameItab i)
+                    def target@(optional):SpreadsheetModel
+                    if ((itab > 0) && (itab <= (array_length modelIndex))) {
+                        def mi:int (itemAt modelIndex (itab - 1))
+                        if (mi >= 0) {
+                            target = (book.sheetAt(mi))
+                        }
+                    }
+                    if (b == 6) {
+                        if (!null? target) {
+                            def sh:SpreadsheetModel (unwrap target)
+                            sh.printArea = (XlsLoader.dropSheet(text))
+                        }
+                    } {
+                        if (b == 7) {
+                            if (!null? target) {
+                                def sh2:SpreadsheetModel (unwrap target)
+                                sh2.printTitleRows = (XlsLoader.dropSheet(text))
+                            }
+                        } {
+                            if (b < 0) {
+                                if (itab == 0) {
+                                    book.setName((itemAt nameText i) text)
+                                } {
+                                    ; Sheet-scoped names have no place of their own in
+                                    ; the model; the workbook-wide one is better than none.
+                                    if ((book.hasName((itemAt nameText i))) == false) {
+                                        book.setName((itemAt nameText i) text)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } {
+                    if (b < 0) {
+                        this.note("some defined names could not be read and were skipped")
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; "Sheet1!$A$1:$D$9" → "$A$1:$D$9" (the first range of a list).
+    sfn dropSheet:string (text:string) {
+        def s:string text
+        def comma:int (indexOf s ",")
+        if (comma >= 0) {
+            s = (substring s 0 comma)
+        }
+        def bang:int -1
+        def i:int 0
+        while (i < (strlen s)) {
+            if ((charAt s i) == 33) {
+                bang = i
+            }
+            i = (i + 1)
+        }
+        return (substring s (bang + 1) (strlen s))
+    }
+
+    ; --- one sheet ----------------------------------------------------------------
+
+    fn putCell:void (sheet:SpreadsheetModel row:int col:int xf:int value:string) {
+        if ((row < 0) || (row >= 65536) || (col < 0) || (col >= 256)) {
+            return
+        }
+        if (((row + 1) > sheet.rowCount) || ((col + 1) > sheet.colCount)) {
+            def nr:int sheet.rowCount
+            def nc:int sheet.colCount
+            if ((row + 1) > nr) {
+                nr = (row + 1)
+            }
+            if ((col + 1) > nc) {
+                nc = (col + 1)
+            }
+            sheet.growTo(nr nc)
+        }
+        if ((strlen value) > 0) {
+            sheet.setCellRaw(row col value)
+        }
+        ; XF 15 is the default cell format, which is what a cell with no
+        ; style is drawn in already.
+        if ((xf >= 0) && (xf != 15) && (xf < (array_length styles))) {
+            sheet.setCellStyleId(row col xf)
+        }
+    }
+
+    ; A number as the cell's text. In a 1904 workbook a date's serial is
+    ; 1462 days behind the 1900 count the model uses, so date-formatted
+    ; numbers are moved; other numbers are not dates and stay as they are.
+    fn numAt:string (xf:int v:double) {
+        def x:double v
+        if (date1904 && (xf >= 0) && (xf < (array_length styles))) {
+            def st:CellStyle (itemAt styles xf)
+            if (XlsxNumberFormat.isDatePattern(st.numFmt)) {
+                x = (v + 1462.0)
+            }
+        }
+        return (SheetBytes.numText(x))
+    }
+
+    fn readSheet:boolean (at:int sheet:SpreadsheetModel) {
+        if ((at < 0) || (at >= (buffer_length stream))) {
+            return false
+        }
+        pos = at
+        def first:XlsRecord (this.nextRecord())
+        if (first.id != 2057) {
+            return false
+        }
+        def vers:int (first.cur.u16())
+        def dt:int (first.cur.u16())
+        if ((vers != 1536) || (dt != 16)) {
+            return false
+        }
+        lastFormulaKey = ""
+        pendingStringRow = -1
+        def noR:[string:buffer]
+        sharedRgce = noR
+        def noB:[string:buffer]
+        sharedRgcb = noB
+        clear sharedCells
+        clear sharedAnchors
+        def depth:int 1
+        def guard:int 0
+        while true {
+            def rec:XlsRecord (this.nextRecord())
+            if (rec.id < 0) {
+                break
+            }
+            guard = (guard + 1)
+            if (guard > 10000000) {
+                break
+            }
+            if (rec.id == 2057) {
+                depth = (depth + 1)
+                continue
+            }
+            if (rec.id == 10) {
+                depth = (depth - 1)
+                if (depth == 0) {
+                    break
+                }
+                continue
+            }
+            if (depth > 1) {
+                continue
+            }
+            if (rec.id == 129) {
+                ; WSBOOL: a dialog sheet shares the worksheet BOF.
+                if ((bit_and (rec.cur.u8()) 16) != 0) {
+                    return false
+                }
+                continue
+            }
+            this.sheetRecord(rec sheet)
+        }
+        this.resolveShared(sheet)
+        return true
+    }
+
+    fn sheetRecord:void (rec:XlsRecord sheet:SpreadsheetModel) {
+        def c:XlsCursor rec.cur
+        def id:int rec.id
+        if ((id != 519) && (id != 1212) && (id != 545) && (id != 566)) {
+            pendingStringRow = -1
+        }
+        if (id == 515) {
+            ; NUMBER
+            def r:int (c.u16())
+            def col:int (c.u16())
+            def xf:int (c.u16())
+            this.putCell(sheet r col xf (this.numAt(xf (c.f64()))))
+            return
+        }
+        if (id == 638) {
+            ; RK
+            def r2:int (c.u16())
+            def c2:int (c.u16())
+            def xf2:int (c.u16())
+            def raw:buffer (c.rest())
+            this.putCell(sheet r2 c2 xf2 (this.numAt(xf2 (SheetBytes.rk(raw 0)))))
+            return
+        }
+        if (id == 189) {
+            ; MULRK: one row, consecutive columns, (xf, rk) each.
+            def all:buffer (c.rest())
+            def mr:int (SheetBytes.u16(all 0))
+            def mc:int (SheetBytes.u16(all 2))
+            def cnt:int (floor (((buffer_length all) - 6) / 6))
+            def k:int 0
+            while (k < cnt) {
+                def base:int (4 + (k * 6))
+                def mxf:int (SheetBytes.u16(all base))
+                this.putCell(sheet mr (mc + k) mxf (this.numAt(mxf (SheetBytes.rk(all (base + 2))))))
+                k = (k + 1)
+            }
+            return
+        }
+        if (id == 253) {
+            ; LABELSST
+            def r3:int (c.u16())
+            def c3:int (c.u16())
+            def xf3:int (c.u16())
+            def si:int (c.i32())
+            if ((si >= 0) && (si < (array_length sst))) {
+                this.putCell(sheet r3 c3 xf3 (itemAt sst si))
+            }
+            return
+        }
+        if (id == 516) {
+            ; LABEL (older writers)
+            def r4:int (c.u16())
+            def c4:int (c.u16())
+            def xf4:int (c.u16())
+            this.putCell(sheet r4 c4 xf4 (c.string()))
+            return
+        }
+        if (id == 517) {
+            ; BOOLERR
+            def r5:int (c.u16())
+            def c5:int (c.u16())
+            def xf5:int (c.u16())
+            def v:int (c.u8())
+            def isErr:int (c.u8())
+            if (isErr != 0) {
+                this.putCell(sheet r5 c5 xf5 (XlsFormula.errorText(v)))
+            } {
+                if (v != 0) {
+                    this.putCell(sheet r5 c5 xf5 "TRUE")
+                } {
+                    this.putCell(sheet r5 c5 xf5 "FALSE")
+                }
+            }
+            return
+        }
+        if (id == 513) {
+            ; BLANK: only its format
+            def r6:int (c.u16())
+            def c6:int (c.u16())
+            this.putCell(sheet r6 c6 (c.u16()) "")
+            return
+        }
+        if (id == 190) {
+            ; MULBLANK
+            def all2:buffer (c.rest())
+            def br:int (SheetBytes.u16(all2 0))
+            def bc:int (SheetBytes.u16(all2 2))
+            def bn:int (floor (((buffer_length all2) - 6) / 2))
+            def bk:int 0
+            while (bk < bn) {
+                this.putCell(sheet br (bc + bk) (SheetBytes.u16(all2 (4 + (bk * 2)))) "")
+                bk = (bk + 1)
+            }
+            return
+        }
+        if (id == 6) {
+            this.formulaCell(c sheet)
+            return
+        }
+        if (id == 519) {
+            ; STRING: the text result of the formula just before it.
+            if (pendingStringRow >= 0) {
+                sheet.setCellRaw(pendingStringRow pendingStringCol (c.string()))
+                pendingStringRow = -1
+            }
+            return
+        }
+        if (id == 1212) {
+            ; SHRFMLA: the formula shared by the cells whose FORMULA record
+            ; points at the cell just read.
+            c.skip(8)
+            def cce:int (c.u16())
+            def all3:buffer (c.rest())
+            def take:int cce
+            if (take > (buffer_length all3)) {
+                take = (buffer_length all3)
+            }
+            if ((strlen lastFormulaKey) > 0) {
+                set sharedRgce lastFormulaKey (buffer_slice all3 0 take)
+                set sharedRgcb lastFormulaKey (buffer_slice all3 take (buffer_length all3))
+            }
+            return
+        }
+        if (id == 545) {
+            ; ARRAY: the formula of an array range; it goes on its top-left
+            ; cell, which is the one just read.
+            def ar0:int (c.u16())
+            def ar1:int (c.u16())
+            def ac0:int (c.u8())
+            def ac1:int (c.u8())
+            c.skip(6)
+            def acce:int (c.u16())
+            def all4:buffer (c.rest())
+            def atake:int acce
+            if (atake > (buffer_length all4)) {
+                atake = (buffer_length all4)
+            }
+            def text:string (formula.decode((buffer_slice all4 0 atake) (buffer_slice all4 atake (buffer_length all4)) ar0 ac0))
+            if ((strlen text) > 0) {
+                sheet.setFormula(ar0 ac0 text)
+            } {
+                this.failed(formula.failure)
+            }
+            return
+        }
+        if (id == 229) {
+            ; MERGECELLS
+            def mn:int (c.u16())
+            def mi:int 0
+            while ((mi < mn) && ((c.remaining()) >= 8)) {
+                def m0:int (c.u16())
+                def m1:int (c.u16())
+                def n0:int (c.u16())
+                def n1:int (c.u16())
+                if ((m1 >= m0) && (n1 >= n0) && (n1 < 256) && (((m1 - m0) + (n1 - n0)) > 0)) {
+                    def need:int (m1 + 1)
+                    def needC:int (n1 + 1)
+                    if ((need > sheet.rowCount) || (needC > sheet.colCount)) {
+                        def gr:int sheet.rowCount
+                        def gc:int sheet.colCount
+                        if (need > gr) {
+                            gr = need
+                        }
+                        if (needC > gc) {
+                            gc = needC
+                        }
+                        sheet.growTo(gr gc)
+                    }
+                    sheet.addMerge(m0 n0 m1 n1)
+                }
+                mi = (mi + 1)
+            }
+            return
+        }
+        if (id == 125) {
+            ; COLINFO: widths in 1/256 of a character.
+            def cf:int (c.u16())
+            def cl:int (c.u16())
+            def width:int (c.u16())
+            c.u16()
+            def flags:int (c.u16())
+            if (cl > 255) {
+                cl = 255
+            }
+            if (cf > cl) {
+                return
+            }
+            def px:int (XlsLoader.colWidthToPx(((to_double width) / 256.0)))
+            if ((cl + 1) > sheet.colCount) {
+                ; A COLINFO that runs to the last column does not make the
+                ; sheet that wide; only the columns that already exist are
+                ; sized.
+                cl = (sheet.colCount - 1)
+                if (cl < cf) {
+                    if (cf < 64) {
+                        sheet.growTo(sheet.rowCount (cf + 1))
+                        cl = cf
+                    } {
+                        return
+                    }
+                }
+            }
+            def cc:int cf
+            while (cc <= cl) {
+                sheet.setColWidth(cc px)
+                if ((bit_and flags 1) != 0) {
+                    sheet.setColHidden(cc true)
+                }
+                cc = (cc + 1)
+            }
+            return
+        }
+        if (id == 520) {
+            ; ROW: height in twips, flags.
+            def rr:int (c.u16())
+            c.skip(4)
+            def height:int (c.u16())
+            c.skip(4)
+            def rflags:int (c.i32())
+            def custom:boolean ((bit_and rflags 64) != 0)
+            def hidden:boolean ((bit_and rflags 32) != 0)
+            if (custom || hidden) {
+                if ((rr + 1) > sheet.rowCount) {
+                    sheet.growTo((rr + 1) sheet.colCount)
+                }
+                if custom {
+                    def hpx:int (to_int ((((to_double (bit_and height 32767)) / 20.0) * 96.0) / 72.0))
+                    if (hpx < 8) {
+                        hpx = 8
+                    }
+                    sheet.setRowHeight(rr hpx)
+                }
+                if hidden {
+                    sheet.setRowHidden(rr true)
+                }
+            }
+            return
+        }
+        if (id == 574) {
+            ; WINDOW2: gridlines, headings, formulas shown.
+            if ((c.remaining()) >= 10) {
+                def wflags:int (c.u16())
+                sheet.showFormulas = ((bit_and wflags 1) != 0)
+                sheet.showGridlines = ((bit_and wflags 2) != 0)
+                sheet.showHeadings = ((bit_and wflags 4) != 0)
+            }
+            return
+        }
+        if (id == 65) {
+            ; PANE: frozen rows and columns (x is columns, y is rows).
+            def px2:int (c.u16())
+            def py2:int (c.u16())
+            if ((px2 < 256) && (py2 < 65536)) {
+                sheet.freezeCols = px2
+                sheet.freezeRows = py2
+            }
+            return
+        }
+        if (id == 28) {
+            this.note("cell notes were not imported")
+            return
+        }
+        if (id == 236) {
+            this.note("pictures, charts and shapes were not imported")
+            return
+        }
+        if ((id == 432) || (id == 2169)) {
+            this.note("conditional formatting was not imported")
+            return
+        }
+        if (id == 434) {
+            this.note("data validation was not imported")
+            return
+        }
+        if (id == 440) {
+            this.note("hyperlinks were not imported")
+            return
+        }
+        if (id == 176) {
+            this.note("PivotTables were not imported; their values were kept")
+            return
+        }
+    }
+
+    sfn colWidthToPx:int (w:double) {
+        ; COLINFO counts in characters including the padding Excel adds, so
+        ; this is a touch narrower than the .xlsx conversion.
+        def px:int (to_int ((w * 7.0) + 0.5))
+        if (px < 16) {
+            px = 16
+        }
+        return px
+    }
+
+    fn failed:void (why:string) {
+        if ((strlen why) == 0) {
+            return
+        }
+        def i:int 0
+        while (i < (array_length failures)) {
+            if ((itemAt failures i) == why) {
+                return
+            }
+            i = (i + 1)
+        }
+        push failures why
+    }
+
+    fn formulaCell:void (c:XlsCursor sheet:SpreadsheetModel) {
+        def r:int (c.u16())
+        def col:int (c.u16())
+        def xf:int (c.u16())
+        def val:buffer (buffer_alloc 8)
+        def i:int 0
+        while (i < 8) {
+            buffer_set val i (c.u8())
+            i = (i + 1)
+        }
+        c.u16()
+        c.skip(4)
+        def cce:int (c.u16())
+        def all:buffer (c.rest())
+        def take:int cce
+        if (take > (buffer_length all)) {
+            take = (buffer_length all)
+        }
+        def rgce:buffer (buffer_slice all 0 take)
+        def rgcb:buffer (buffer_slice all take (buffer_length all))
+        ; The cached result: a double, or a tagged value when the top two
+        ; bytes are 0xFFFF.
+        def shown:string ""
+        def stringResult:boolean false
+        if (((buffer_get val 6) == 255) && ((buffer_get val 7) == 255)) {
+            def kind:int (buffer_get val 0)
+            if (kind == 0) {
+                stringResult = true
+            }
+            if (kind == 1) {
+                if ((buffer_get val 2) != 0) {
+                    shown = "TRUE"
+                } {
+                    shown = "FALSE"
+                }
+            }
+            if (kind == 2) {
+                shown = (XlsFormula.errorText((buffer_get val 2)))
+            }
+        } {
+            shown = (this.numAt(xf (SheetBytes.f64(val 0))))
+        }
+        this.putCell(sheet r col xf shown)
+        lastFormulaKey = ((to_string r) + "," + (to_string col))
+        if stringResult {
+            pendingStringRow = r
+            pendingStringCol = col
+        }
+        ; tExp: the cell is one of a shared (or array) formula's cells; the
+        ; formula itself comes later, so it is resolved at the end.
+        if ((take == 5) && ((buffer_get rgce 0) == 1)) {
+            def ar:int (SheetBytes.u16(rgce 1))
+            def ac:int (SheetBytes.u16(rgce 3))
+            push sharedCells lastFormulaKey
+            push sharedAnchors ((to_string ar) + "," + (to_string ac))
+            return
+        }
+        def text:string (formula.decode(rgce rgcb r col))
+        if ((strlen text) > 0) {
+            sheet.setFormula(r col text)
+        } {
+            this.failed(formula.failure)
+        }
+    }
+
+    fn resolveShared:void (sheet:SpreadsheetModel) {
+        def i:int 0
+        while (i < (array_length sharedCells)) {
+            def key:string (itemAt sharedCells i)
+            def anchor:string (itemAt sharedAnchors i)
+            if (has sharedRgce anchor) {
+                def parts:[string] (strsplit key ",")
+                def r:int (XlsLoader.toInt((itemAt parts 0)))
+                def c:int (XlsLoader.toInt((itemAt parts 1)))
+                def text:string (formula.decode((unwrap (get sharedRgce anchor)) (unwrap (get sharedRgcb anchor)) r c))
+                if ((strlen text) > 0) {
+                    sheet.setFormula(r c text)
+                } {
+                    this.failed(formula.failure)
+                }
+            }
+            ; An array formula's other cells point at its corner too; they
+            ; keep their values, and the corner already has the formula.
+            i = (i + 1)
+        }
+    }
+
+    sfn toInt:int (s:string) {
+        def v@(optional):int (to_int s)
+        if (null? v) {
+            return 0
+        }
+        return (unwrap v)
+    }
+}

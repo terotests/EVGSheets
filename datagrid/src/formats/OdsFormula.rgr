@@ -1,0 +1,422 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; OdsFormula — OpenFormula (ODF 1.2 part 2) to Excel formula text and back.
+; ==============================================================================
+;
+; The two languages share their functions and operators. They differ in how a
+; reference is spelled and in the argument separator:
+;
+;   OpenFormula                     Excel
+;   of:=SUM([.A1:.B3];2)            SUM(A1:B3,2)
+;   [$Sheet2.$C$4]                  Sheet2!$C$4
+;   ['My Sheet'.A1:.B2]             'My Sheet'!A1:B2
+;   [.A1]~[.C1]   (union)           A1,C1
+;
+; Both directions walk the text once, copy string literals untouched and
+; rewrite only references and separators. Functions LibreOffice names under a
+; namespace (COM.MICROSOFT.…, _xlfn.…) lose the prefix on the way in.
+; ==============================================================================
+
+class OdsFormula {
+
+    ; --- in: OpenFormula → Excel ----------------------------------------------
+
+    sfn toExcel:string (raw:string) {
+        def s:string raw
+        if ((indexOf s "of:") == 0) {
+            s = (substring s 3 (strlen s))
+        }
+        if ((indexOf s "msoxl:") == 0) {
+            s = (substring s 6 (strlen s))
+        }
+        if ((strlen s) > 0) {
+            if ((charAt s 0) == 61) {
+                s = (substring s 1 (strlen s))
+            }
+        }
+        def out:[string]
+        def i:int 0
+        def n:int (strlen s)
+        def depth:int 0
+        while (i < n) {
+            def ch:int (charAt s i)
+            if (ch == 34) {
+                def j:int (OdsFormula.stringEnd(s i))
+                push out (substring s i j)
+                i = j
+                continue
+            }
+            if (ch == 91) {
+                ; [ … ] — a reference; quotes inside may hold a "]".
+                def k:int (i + 1)
+                def inQ:boolean false
+                while (k < n) {
+                    def c2:int (charAt s k)
+                    if (c2 == 39) {
+                        inQ = (inQ == false)
+                    }
+                    if ((c2 == 93) && (inQ == false)) {
+                        break
+                    }
+                    k = (k + 1)
+                }
+                push out (OdsFormula.refToExcel((substring s (i + 1) k)))
+                i = (k + 1)
+                continue
+            }
+            if (ch == 40) {
+                depth = (depth + 1)
+            }
+            if (ch == 41) {
+                depth = (depth - 1)
+            }
+            if (ch == 59) {
+                push out ","
+                i = (i + 1)
+                continue
+            }
+            if (ch == 126) {
+                push out ","
+                i = (i + 1)
+                continue
+            }
+            if (ch == 33) {
+                push out " "
+                i = (i + 1)
+                continue
+            }
+            ; A namespaced function name: drop the namespace.
+            if (OdsFormula.isNameStart(ch)) {
+                def e:int i
+                while ((e < n) && (OdsFormula.isNameChar((charAt s e)))) {
+                    e = (e + 1)
+                }
+                def word:string (substring s i e)
+                if ((e < n) && ((charAt s e) == 40)) {
+                    word = (OdsFormula.functionIn(word))
+                }
+                push out word
+                i = e
+                continue
+            }
+            push out (substring s i (i + 1))
+            i = (i + 1)
+        }
+        return (join out "")
+    }
+
+    sfn functionIn:string (name:string) {
+        def up:string (to_uppercase name)
+        if ((indexOf up "COM.MICROSOFT.") == 0) {
+            return (substring name 14 (strlen name))
+        }
+        if ((indexOf up "_XLFN.") == 0) {
+            return (substring name 6 (strlen name))
+        }
+        return name
+    }
+
+    sfn isNameStart:boolean (ch:int) {
+        return (((ch >= 65) && (ch <= 90)) || ((ch >= 97) && (ch <= 122)) || (ch == 95))
+    }
+
+    sfn isNameChar:boolean (ch:int) {
+        return ((OdsFormula.isNameStart(ch)) || ((ch >= 48) && (ch <= 57)) || (ch == 46) || (ch == 36))
+    }
+
+    ; Index just past the string literal starting at `i` ("" is a quote).
+    sfn stringEnd:int (s:string i:int) {
+        def n:int (strlen s)
+        def k:int (i + 1)
+        while (k < n) {
+            if ((charAt s k) == 34) {
+                if (((k + 1) < n) && ((charAt s (k + 1)) == 34)) {
+                    k = (k + 2)
+                    continue
+                }
+                return (k + 1)
+            }
+            k = (k + 1)
+        }
+        return n
+    }
+
+    ; "$Sheet1.A1:.B2" → "Sheet1!A1:B2"
+    sfn refToExcel:string (body:string) {
+        def parts:[string] (OdsFormula.splitOutsideQuotes(body 58))
+        def sheets:[string]
+        def cells:[string]
+        def i:int 0
+        while (i < (array_length parts)) {
+            def p:string (itemAt parts i)
+            def dot:int (OdsFormula.lastDotOutsideQuotes(p))
+            def sheet:string ""
+            def cell:string p
+            if (dot >= 0) {
+                sheet = (substring p 0 dot)
+                cell = (substring p (dot + 1) (strlen p))
+            }
+            if ((strlen sheet) > 0) {
+                if ((charAt sheet 0) == 36) {
+                    sheet = (substring sheet 1 (strlen sheet))
+                }
+            }
+            push sheets sheet
+            push cells cell
+            i = (i + 1)
+        }
+        if ((array_length cells) == 0) {
+            return "#REF!"
+        }
+        def first:string (itemAt sheets 0)
+        def prefix:string ""
+        if ((strlen first) > 0) {
+            prefix = (first + "!")
+            if ((array_length sheets) > 1) {
+                def last:string (itemAt sheets ((array_length sheets) - 1))
+                if (((strlen last) > 0) && (last != first)) {
+                    prefix = (first + ":" + last + "!")
+                }
+            }
+        }
+        return (prefix + (join cells ":"))
+    }
+
+    sfn splitOutsideQuotes:[string] (s:string sep:int) {
+        def out:[string]
+        def inQ:boolean false
+        def start:int 0
+        def i:int 0
+        while (i < (strlen s)) {
+            def ch:int (charAt s i)
+            if (ch == 39) {
+                inQ = (inQ == false)
+            }
+            if ((ch == sep) && (inQ == false)) {
+                push out (substring s start i)
+                start = (i + 1)
+            }
+            i = (i + 1)
+        }
+        push out (substring s start (strlen s))
+        return out
+    }
+
+    sfn lastDotOutsideQuotes:int (s:string) {
+        def inQ:boolean false
+        def at:int -1
+        def i:int 0
+        while (i < (strlen s)) {
+            def ch:int (charAt s i)
+            if (ch == 39) {
+                inQ = (inQ == false)
+            }
+            if ((ch == 46) && (inQ == false)) {
+                at = i
+            }
+            i = (i + 1)
+        }
+        return at
+    }
+
+    ; --- out: Excel → OpenFormula ---------------------------------------------
+
+    sfn isCellRef:boolean (s:string) {
+        ; $?LETTERS$?DIGITS, or a whole column ($?LETTERS) or row ($?DIGITS)
+        ; when `part` allows — callers check the forms they accept.
+        def i:int 0
+        def n:int (strlen s)
+        if ((i < n) && ((charAt s i) == 36)) {
+            i = (i + 1)
+        }
+        def ls:int i
+        while ((i < n) && ((((charAt s i) >= 65) && ((charAt s i) <= 90)) || (((charAt s i) >= 97) && ((charAt s i) <= 122)))) {
+            i = (i + 1)
+        }
+        if (((i - ls) < 1) || ((i - ls) > 3)) {
+            return false
+        }
+        if ((i < n) && ((charAt s i) == 36)) {
+            i = (i + 1)
+        }
+        def ds:int i
+        while ((i < n) && ((charAt s i) >= 48) && ((charAt s i) <= 57)) {
+            i = (i + 1)
+        }
+        return ((i == n) && ((i - ds) >= 1))
+    }
+
+    sfn isColRef:boolean (s:string) {
+        def i:int 0
+        def n:int (strlen s)
+        if ((i < n) && ((charAt s i) == 36)) {
+            i = (i + 1)
+        }
+        def ls:int i
+        while ((i < n) && ((((charAt s i) >= 65) && ((charAt s i) <= 90)) || (((charAt s i) >= 97) && ((charAt s i) <= 122)))) {
+            i = (i + 1)
+        }
+        return ((i == n) && ((i - ls) >= 1) && ((i - ls) <= 3))
+    }
+
+    sfn isRowRef:boolean (s:string) {
+        def i:int 0
+        def n:int (strlen s)
+        if ((i < n) && ((charAt s i) == 36)) {
+            i = (i + 1)
+        }
+        def ds:int i
+        while ((i < n) && ((charAt s i) >= 48) && ((charAt s i) <= 57)) {
+            i = (i + 1)
+        }
+        return ((i == n) && ((i - ds) >= 1))
+    }
+
+    ; One reference, already split into an optional sheet and one or two
+    ; anchors, in OpenFormula's brackets.
+    sfn refOut:string (sheet:string a:string b:string) {
+        def pre:string "."
+        if ((strlen sheet) > 0) {
+            pre = ("$" + sheet + ".")
+        }
+        def a2:string a
+        def b2:string b
+        ; Whole columns and rows have no short form in ODF 1.2; they are
+        ; written as the full extent.
+        if (((strlen b) > 0) && (OdsFormula.isColRef(a)) && (OdsFormula.isColRef(b))) {
+            a2 = (a + "1")
+            b2 = (b + "1048576")
+        }
+        if (((strlen b) > 0) && (OdsFormula.isRowRef(a)) && (OdsFormula.isRowRef(b))) {
+            a2 = ("A" + a)
+            b2 = ("XFD" + b)
+        }
+        if ((strlen b2) == 0) {
+            return ("[" + pre + a2 + "]")
+        }
+        return ("[" + pre + a2 + ":." + b2 + "]")
+    }
+
+    sfn toOds:string (formula:string) {
+        def s:string formula
+        def out:[string]
+        def i:int 0
+        def n:int (strlen s)
+        while (i < n) {
+            def ch:int (charAt s i)
+            if (ch == 34) {
+                def j:int (OdsFormula.stringEnd(s i))
+                push out (substring s i j)
+                i = j
+                continue
+            }
+            if (ch == 44) {
+                push out ";"
+                i = (i + 1)
+                continue
+            }
+            ; 'Quoted sheet'!ref
+            if (ch == 39) {
+                def k:int (i + 1)
+                while (k < n) {
+                    if ((charAt s k) == 39) {
+                        if (((k + 1) < n) && ((charAt s (k + 1)) == 39)) {
+                            k = (k + 2)
+                            continue
+                        }
+                        break
+                    }
+                    k = (k + 1)
+                }
+                def sheetQ:string (substring s i (k + 1))
+                if (((k + 1) < n) && ((charAt s (k + 1)) == 33)) {
+                    def used:[int] ([] _:int (0))
+                    def ref:string (OdsFormula.refAt(s (k + 2) sheetQ used))
+                    if ((strlen ref) > 0) {
+                        push out ref
+                        i = (itemAt used 0)
+                        continue
+                    }
+                }
+                push out sheetQ
+                i = (k + 1)
+                continue
+            }
+            if ((OdsFormula.isNameStart(ch)) || (ch == 36) || ((ch >= 48) && (ch <= 57))) {
+                ; A word: a function, a name, a reference, a sheet prefix, a
+                ; number.
+                def e:int i
+                while ((e < n) && ((OdsFormula.isNameChar((charAt s e))) || ((charAt s e) == 58))) {
+                    e = (e + 1)
+                }
+                def word:string (substring s i e)
+                if ((e < n) && ((charAt s e) == 33)) {
+                    def used2:[int] ([] _:int (0))
+                    def ref2:string (OdsFormula.refAt(s (e + 1) word used2))
+                    if ((strlen ref2) > 0) {
+                        push out ref2
+                        i = (itemAt used2 0)
+                        continue
+                    }
+                }
+                if ((e < n) && ((charAt s e) == 40)) {
+                    push out word
+                    i = e
+                    continue
+                }
+                def r:string (OdsFormula.plainRef(word ""))
+                if ((strlen r) > 0) {
+                    push out r
+                } {
+                    push out word
+                }
+                i = e
+                continue
+            }
+            push out (substring s i (i + 1))
+            i = (i + 1)
+        }
+        return ("of:=" + (join out ""))
+    }
+
+    ; "A1", "A1:B2", "A:A", "1:3" (with `sheet` when it had one) as an ODF
+    ; reference, or "" when the word is not a reference.
+    sfn plainRef:string (word:string sheet:string) {
+        def colon:int (indexOf word ":")
+        if (colon < 0) {
+            if (OdsFormula.isCellRef(word)) {
+                return (OdsFormula.refOut(sheet word ""))
+            }
+            return ""
+        }
+        def a:string (substring word 0 colon)
+        def b:string (substring word (colon + 1) (strlen word))
+        if ((indexOf b ":") >= 0) {
+            return ""
+        }
+        if ((OdsFormula.isCellRef(a)) && (OdsFormula.isCellRef(b))) {
+            return (OdsFormula.refOut(sheet a b))
+        }
+        if ((OdsFormula.isColRef(a)) && (OdsFormula.isColRef(b))) {
+            return (OdsFormula.refOut(sheet a b))
+        }
+        if ((OdsFormula.isRowRef(a)) && (OdsFormula.isRowRef(b))) {
+            return (OdsFormula.refOut(sheet a b))
+        }
+        return ""
+    }
+
+    ; The reference after "Sheet!" at `at`; `used` gets the index after it.
+    sfn refAt:string (s:string at:int sheet:string used:[int]) {
+        def e:int at
+        def n:int (strlen s)
+        while ((e < n) && ((OdsFormula.isNameChar((charAt s e))) || ((charAt s e) == 58))) {
+            e = (e + 1)
+        }
+        def word:string (substring s at e)
+        def r:string (OdsFormula.plainRef(word sheet))
+        set_at used 0 e
+        return r
+    }
+}

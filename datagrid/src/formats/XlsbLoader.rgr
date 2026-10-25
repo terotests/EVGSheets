@@ -1,0 +1,352 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; XlsbLoader — the data of an Excel binary workbook (.xlsb).
+; ==============================================================================
+;
+; An .xlsb is the .xlsx package with its parts in BIFF12 records instead of
+; XML: [type: 1-2 bytes, 7 bits each][size: 1-4 bytes, 7 bits each][data].
+; The relationships and content types are still XML, so the package is opened
+; the same way and only the parts are different.
+;
+; Values only, as GridCraft's reader does (crates/xlsx/src/xlsb.rs,
+; MIT/Apache-2.0): numbers, text, booleans, errors, the cached result of each
+; formula, number formats (so dates read as dates), merges, column widths,
+; sheet visibility. A formula's text is not rebuilt; the note on open says so.
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+Import "XlsFormula.rgr"
+Import "../../../ooxml/OpcPackage.rgr"
+Import "../WorkbookModel.rgr"
+Import "../SpreadsheetModel.rgr"
+Import "../CellStyle.rgr"
+Import "../XlsxNumberFormat.rgr"
+
+class XlsbLoader {
+    def lastError:string ""
+    def notes:[string]
+    def data:buffer (buffer_alloc 0)
+    def pos:int 0
+    def recId:int -1
+    def recStart:int 0
+    def recEnd:int 0
+    def date1904:boolean false
+    def sst:[string]
+    def formats:[int:string]
+    def styles:[CellStyle]
+    def sawFormula:boolean false
+
+    Constructor () {
+    }
+
+    ; --- records ----------------------------------------------------------------
+
+    fn next:boolean () {
+        def n:int (buffer_length data)
+        if (pos >= n) {
+            return false
+        }
+        def b0:int (buffer_get data pos)
+        pos = (pos + 1)
+        def id:int (bit_and b0 127)
+        if ((bit_and b0 128) != 0) {
+            def b1:int (SheetBytes.u8(data pos))
+            pos = (pos + 1)
+            id = (id + ((bit_and b1 127) * 128))
+        }
+        def size:int 0
+        def mult:int 1
+        def k:int 0
+        while (k < 4) {
+            def b:int (SheetBytes.u8(data pos))
+            pos = (pos + 1)
+            size = (size + ((bit_and b 127) * mult))
+            mult = (mult * 128)
+            if ((bit_and b 128) == 0) {
+                k = 4
+            }
+            k = (k + 1)
+        }
+        recId = id
+        recStart = pos
+        recEnd = (pos + size)
+        if (recEnd > n) {
+            recEnd = n
+        }
+        pos = recEnd
+        return true
+    }
+
+    ; XLWideString: a u32 count of UTF-16 units, then the units.
+    fn wideAt:string (at:int) {
+        def cch:int (SheetBytes.i32(data at))
+        if ((cch < 0) || ((at + 4 + (cch * 2)) > recEnd)) {
+            return ""
+        }
+        return (SheetBytes.utf16(data (at + 4) cch true))
+    }
+
+    ; --- the workbook -------------------------------------------------------------
+
+    fn loadBytes:boolean (bytes:buffer book:WorkbookModel) {
+        lastError = ""
+        def pkg:OpcPackage (new OpcPackage())
+        if ((pkg.openBytes(bytes "book.xlsb")) == false) {
+            lastError = "could not open the binary workbook: not a zip"
+            return false
+        }
+        def wbPart:string "xl/workbook.bin"
+        def main:string (pkg.mainDocumentPart())
+        if ((strlen main) > 0) {
+            wbPart = main
+        }
+        if ((pkg.hasPart(wbPart)) == false) {
+            pkg.close()
+            lastError = "the binary workbook has no workbook part"
+            return false
+        }
+        def names:[string]
+        def rels:[string]
+        def hidden:[boolean]
+        data = (pkg.readBinary(wbPart))
+        pos = 0
+        while (this.next()) {
+            if (recId == 153) {
+                ; BrtWbProp: bit 0 is the 1904 date system.
+                date1904 = ((bit_and (SheetBytes.u8(data recStart)) 1) != 0)
+            }
+            if (recId == 156) {
+                ; BrtBundleSh: state, id, relationship id, name.
+                def state:int (SheetBytes.i32(data recStart))
+                def relLen:int (SheetBytes.i32(data (recStart + 8)))
+                def rid:string ""
+                def nameAt:int (recStart + 12)
+                if (relLen >= 0) {
+                    rid = (this.wideAt((recStart + 8)))
+                    nameAt = ((recStart + 12) + (relLen * 2))
+                }
+                push hidden (state != 0)
+                push rels rid
+                push names (this.wideAt(nameAt))
+            }
+        }
+        ; Shared strings and styles are found through the workbook's
+        ; relationships, as in the XML form.
+        def sstPart:string (pkg.findRelationshipByType(wbPart "/sharedStrings"))
+        if ((strlen sstPart) > 0) {
+            this.readSst((pkg.readBinary(sstPart)))
+        }
+        def stylePart:string (pkg.findRelationshipByType(wbPart "/styles"))
+        if ((strlen stylePart) > 0) {
+            this.readStyles((pkg.readBinary(stylePart)))
+        }
+        if ((array_length styles) == 0) {
+            push styles (new CellStyle)
+        }
+        book.clear()
+        def i:int 0
+        while (i < (array_length names)) {
+            def part:string (pkg.resolveRelationship(wbPart (itemAt rels i)))
+            if ((strlen part) > 0) {
+                if (pkg.hasPart(part)) {
+                    def sheet:SpreadsheetModel (new SpreadsheetModel)
+                    sheet.name = (itemAt names i)
+                    sheet.sheetHidden = (itemAt hidden i)
+                    sheet.quietWrites = true
+                    this.readSheet((pkg.readBinary(part)) sheet)
+                    sheet.setStylesFrom(styles)
+                    sheet.quietWrites = false
+                    sheet.version = (sheet.version + 1)
+                    book.addSheet(sheet)
+                }
+            }
+            i = (i + 1)
+        }
+        pkg.close()
+        if ((book.sheetCount()) == 0) {
+            lastError = "the binary workbook has no worksheets that can be read"
+            return false
+        }
+        def first:int 0
+        def k:int 0
+        while (k < (book.sheetCount())) {
+            def sh:SpreadsheetModel (book.sheetAt(k))
+            if (sh.sheetHidden == false) {
+                first = k
+                break
+            }
+            k = (k + 1)
+        }
+        book.setActive(first)
+        if sawFormula {
+            push notes "formulas in a binary workbook are imported as their saved results"
+        }
+        return true
+    }
+
+    fn readSst:void (bytes:buffer) {
+        data = bytes
+        pos = 0
+        while (this.next()) {
+            if (recId == 19) {
+                ; BrtSSTItem: flags, then the text; runs and phonetics after.
+                push sst (this.wideAt((recStart + 1)))
+            }
+        }
+    }
+
+    fn readStyles:void (bytes:buffer) {
+        data = bytes
+        pos = 0
+        def inXfs:boolean false
+        while (this.next()) {
+            if (recId == 44) {
+                def ifmt:int (SheetBytes.u16(data recStart))
+                set formats ifmt (this.wideAt((recStart + 2)))
+            }
+            if (recId == 617) {
+                inXfs = true
+            }
+            if (recId == 618) {
+                inXfs = false
+            }
+            if ((recId == 47) && inXfs) {
+                ; BrtXF: parent, number format, font, …
+                def st:CellStyle (new CellStyle)
+                def fid:int (SheetBytes.u16(data (recStart + 2)))
+                if (has formats fid) {
+                    st.numFmt = (unwrap (get formats fid))
+                } {
+                    st.numFmt = (SheetBytes.builtinNumFmt(fid))
+                }
+                push styles st
+            }
+        }
+    }
+
+    fn ensure:void (sheet:SpreadsheetModel row:int col:int) {
+        if (((row + 1) > sheet.rowCount) || ((col + 1) > sheet.colCount)) {
+            def nr:int sheet.rowCount
+            def nc:int sheet.colCount
+            if ((row + 1) > nr) {
+                nr = (row + 1)
+            }
+            if ((col + 1) > nc) {
+                nc = (col + 1)
+            }
+            sheet.growTo(nr nc)
+        }
+    }
+
+    fn numAt:string (xf:int v:double) {
+        def x:double v
+        if (date1904 && (xf >= 0) && (xf < (array_length styles))) {
+            def st:CellStyle (itemAt styles xf)
+            if (XlsxNumberFormat.isDatePattern(st.numFmt)) {
+                x = (v + 1462.0)
+            }
+        }
+        return (SheetBytes.numText(x))
+    }
+
+    fn readSheet:void (bytes:buffer sheet:SpreadsheetModel) {
+        data = bytes
+        pos = 0
+        def row:int 0
+        while (this.next()) {
+            def id:int recId
+            def at:int recStart
+            if (id == 0) {
+                row = (SheetBytes.i32(data at))
+                continue
+            }
+            if (((id >= 1) && (id <= 11)) || (id == 62)) {
+                def col:int (SheetBytes.i32(data at))
+                def xf:int (bit_and (SheetBytes.i32(data (at + 4))) 16777215)
+                def v:int (at + 8)
+                def text:string ""
+                if (id == 2) {
+                    text = (this.numAt(xf (SheetBytes.rk(data v))))
+                }
+                if ((id == 3) || (id == 11)) {
+                    text = (XlsFormula.errorText((SheetBytes.u8(data v))))
+                }
+                if ((id == 4) || (id == 10)) {
+                    if ((SheetBytes.u8(data v)) != 0) {
+                        text = "TRUE"
+                    } {
+                        text = "FALSE"
+                    }
+                }
+                if ((id == 5) || (id == 9)) {
+                    text = (this.numAt(xf (SheetBytes.f64(data v))))
+                }
+                if ((id == 6) || (id == 8)) {
+                    text = (this.wideAt(v))
+                }
+                if (id == 62) {
+                    text = (this.wideAt((v + 1)))
+                }
+                if (id == 7) {
+                    def si:int (SheetBytes.i32(data v))
+                    if ((si >= 0) && (si < (array_length sst))) {
+                        text = (itemAt sst si)
+                    }
+                }
+                if ((id >= 8) && (id <= 11)) {
+                    sawFormula = true
+                }
+                if ((row >= 0) && (row < 1048576) && (col >= 0) && (col < 16384)) {
+                    if (((strlen text) > 0) || (xf > 0)) {
+                        this.ensure(sheet row col)
+                    }
+                    if ((strlen text) > 0) {
+                        sheet.setCellRaw(row col text)
+                    }
+                    if ((xf > 0) && (xf < (array_length styles))) {
+                        sheet.setCellStyleId(row col xf)
+                    }
+                }
+                continue
+            }
+            if (id == 176) {
+                ; BrtMergeCell: first row, last row, first column, last column.
+                def r0:int (SheetBytes.i32(data at))
+                def r1:int (SheetBytes.i32(data (at + 4)))
+                def c0:int (SheetBytes.i32(data (at + 8)))
+                def c1:int (SheetBytes.i32(data (at + 12)))
+                if ((r0 >= 0) && (r1 >= r0) && (c0 >= 0) && (c1 >= c0) && (c1 < 16384)) {
+                    this.ensure(sheet r1 c1)
+                    sheet.addMerge(r0 c0 r1 c1)
+                }
+                continue
+            }
+            if (id == 60) {
+                ; BrtColInfo: first, last, width in 1/256 characters, style,
+                ; flags (bit 0 hidden).
+                def cf:int (SheetBytes.i32(data at))
+                def cl:int (SheetBytes.i32(data (at + 4)))
+                def w:int (SheetBytes.i32(data (at + 8)))
+                def flags:int (SheetBytes.u16(data (at + 16)))
+                if (cl > 1023) {
+                    cl = 1023
+                }
+                def px:int (to_int ((((to_double w) / 256.0) * 7.0) + 0.5))
+                if (px < 16) {
+                    px = 16
+                }
+                def c:int cf
+                while ((c >= 0) && (c <= cl)) {
+                    this.ensure(sheet 0 c)
+                    sheet.setColWidth(c px)
+                    if ((bit_and flags 1) != 0) {
+                        sheet.setColHidden(c true)
+                    }
+                    c = (c + 1)
+                }
+                continue
+            }
+        }
+    }
+}

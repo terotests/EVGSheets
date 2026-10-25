@@ -1,0 +1,356 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; TextWorkbook — a .csv, .tsv or .txt file opened as a workbook of one sheet.
+; ==============================================================================
+;
+; Data › From Text/CSV already adds a file's rows to the open workbook as a new
+; sheet. Opening one is the other thing Excel does with it: the file BECOMES
+; the workbook, named after the file, and Save offers .xlsx.
+;
+; The bytes are decoded the way Excel guesses: a UTF-8 or UTF-16 byte-order
+; mark says so; otherwise UTF-8 when the bytes are valid UTF-8, else
+; Windows-1252. The separator is a tab for .tsv, and for the rest the one of
+; tab, semicolon and comma that splits the first lines most consistently.
+; Quoted fields may hold the separator, quotes ("") and line breaks.
+;
+; Dates written the way DateSerial reads a typed date become dates with the
+; same look; everything else is kept as written and the sheet decides, as it
+; does for typed input, what is a number.
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+Import "../WorkbookModel.rgr"
+Import "../SpreadsheetModel.rgr"
+Import "../CellStyle.rgr"
+Import "../DateSerial.rgr"
+Import "pkg:evg/EVGCodepoint.rgr"
+Import "../../../pdf_writer/src/core/Utf8.rgr"
+
+class TextWorkbook {
+    def lastError:string ""
+    def separator:int 44
+
+    Constructor () {
+    }
+
+    sfn validUtf8:boolean (b:buffer from:int) {
+        def n:int (buffer_length b)
+        def i:int from
+        while (i < n) {
+            def c:int (buffer_get b i)
+            if (c < 128) {
+                i = (i + 1)
+                continue
+            }
+            def need:int 0
+            if ((c >= 194) && (c <= 223)) {
+                need = 1
+            }
+            if ((c >= 224) && (c <= 239)) {
+                need = 2
+            }
+            if ((c >= 240) && (c <= 244)) {
+                need = 3
+            }
+            if (need == 0) {
+                return false
+            }
+            if ((i + need) >= n) {
+                ; A sequence cut off by the end of the file is still UTF-8.
+                return true
+            }
+            def k:int 1
+            while (k <= need) {
+                def cc:int (buffer_get b (i + k))
+                if ((cc < 128) || (cc > 191)) {
+                    return false
+                }
+                k = (k + 1)
+            }
+            i = (i + need + 1)
+        }
+        return true
+    }
+
+    ; The file's text, decoded.
+    sfn decode:string (b:buffer) {
+        def n:int (buffer_length b)
+        if ((n >= 2) && ((buffer_get b 0) == 255) && ((buffer_get b 1) == 254)) {
+            return (SheetBytes.utf16(b 2 (floor ((n - 2) / 2)) true))
+        }
+        if ((n >= 2) && ((buffer_get b 0) == 254) && ((buffer_get b 1) == 255)) {
+            ; Big-endian: swap into little-endian and read that.
+            def sw:buffer (buffer_alloc (n - 2))
+            def i:int 2
+            while ((i + 1) < n) {
+                buffer_set sw (i - 2) (buffer_get b (i + 1))
+                buffer_set sw (i - 1) (buffer_get b i)
+                i = (i + 2)
+            }
+            return (SheetBytes.utf16(sw 0 (floor ((n - 2) / 2)) true))
+        }
+        def start:int 0
+        if ((n >= 3) && ((buffer_get b 0) == 239) && ((buffer_get b 1) == 187) && ((buffer_get b 2) == 191)) {
+            start = 3
+        }
+        if (TextWorkbook.validUtf8(b start)) {
+            def raw:buffer b
+            if (start > 0) {
+                raw = (buffer_slice b start n)
+            }
+            return (Utf8.decode((buffer_to_string raw)))
+        }
+        ; Windows-1252: one character per byte.
+        def parts:[string]
+        def j:int start
+        while (j < n) {
+            def bv:int (buffer_get b j)
+            if (bv < 128) {
+                push parts (strfromcode bv)
+            } {
+                push parts (EVGCodepoint.toStr((Utf8.fromWinAnsi(bv))))
+            }
+            j = (j + 1)
+        }
+        return (join parts "")
+    }
+
+    ; How many fields `sep` splits the first lines into, if it splits all of
+    ; them alike; 0 when it does not.
+    sfn consistency:int (text:string sep:int) {
+        def lines:int 0
+        def fields:int -1
+        def count:int 1
+        def inQ:boolean false
+        def i:int 0
+        def n:int (strlen text)
+        while ((i < n) && (lines < 10)) {
+            def ch:int (charAt text i)
+            if (ch == 34) {
+                inQ = (inQ == false)
+            }
+            if ((inQ == false) && (ch == sep)) {
+                count = (count + 1)
+            }
+            if ((inQ == false) && (ch == 10)) {
+                if (fields < 0) {
+                    fields = count
+                } {
+                    if (count != fields) {
+                        return 0
+                    }
+                }
+                lines = (lines + 1)
+                count = 1
+            }
+            i = (i + 1)
+        }
+        if (fields < 0) {
+            fields = count
+        }
+        if (fields < 2) {
+            return 0
+        }
+        return fields
+    }
+
+    sfn guessSeparator:int (text:string) {
+        def best:int 44
+        def bestN:int 0
+        def cands:[int] ([] _:int (9 59 44 124))
+        def i:int 0
+        while (i < (array_length cands)) {
+            def s:int (itemAt cands i)
+            def n:int (TextWorkbook.consistency(text s))
+            if (n > bestN) {
+                best = s
+                bestN = n
+            }
+            i = (i + 1)
+        }
+        return best
+    }
+
+    ; Every record of the text, each a list of fields.
+    sfn records:[[string]] (text:string sep:int) {
+        def out:[[string]]
+        def row:[string]
+        def cur:string ""
+        def inQ:boolean false
+        def run:int 0
+        def i:int 0
+        def n:int (strlen text)
+        while (i < n) {
+            def ch:int (charAt text i)
+            if inQ {
+                if (ch == 34) {
+                    cur = (cur + (substring text run i))
+                    if (((i + 1) < n) && ((charAt text (i + 1)) == 34)) {
+                        cur = (cur + "\"")
+                        i = (i + 2)
+                        run = i
+                        continue
+                    }
+                    inQ = false
+                    i = (i + 1)
+                    run = i
+                    continue
+                }
+                i = (i + 1)
+                continue
+            }
+            if (ch == 34) {
+                cur = (cur + (substring text run i))
+                inQ = true
+                i = (i + 1)
+                run = i
+                continue
+            }
+            if ((ch == sep) || (ch == 10) || (ch == 13)) {
+                cur = (cur + (substring text run i))
+                push row cur
+                cur = ""
+                if (ch != sep) {
+                    if ((ch == 13) && ((i + 1) < n) && ((charAt text (i + 1)) == 10)) {
+                        i = (i + 1)
+                    }
+                    push out row
+                    def fresh:[string]
+                    row = fresh
+                }
+                i = (i + 1)
+                run = i
+                continue
+            }
+            i = (i + 1)
+        }
+        cur = (cur + (substring text run n))
+        if (((strlen cur) > 0) || ((array_length row) > 0)) {
+            push row cur
+            push out row
+        }
+        return out
+    }
+
+    fn loadBytes:boolean (bytes:buffer name:string kind:string book:WorkbookModel) {
+        lastError = ""
+        def text:string (TextWorkbook.decode(bytes))
+        if (kind == "tsv") {
+            separator = 9
+        } {
+            separator = (TextWorkbook.guessSeparator(text))
+        }
+        def rows:[[string]] (TextWorkbook.records(text separator))
+        book.clear()
+        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def base:string (SheetBytes.withExt(name ""))
+        def slash:int -1
+        def k:int 0
+        while (k < (strlen base)) {
+            if (((charAt base k) == 47) || ((charAt base k) == 92)) {
+                slash = k
+            }
+            k = (k + 1)
+        }
+        base = (substring base (slash + 1) ((strlen base) - 1))
+        if ((strlen base) == 0) {
+            base = "Sheet1"
+        }
+        if ((strlen base) > 31) {
+            base = (substring base 0 31)
+        }
+        sheet.name = base
+        sheet.quietWrites = true
+        def styles:[CellStyle]
+        push styles (new CellStyle)
+        def dateStyle:[string:int]
+        def maxC:int 0
+        def r:int 0
+        while (r < (array_length rows)) {
+            def fields:[string] (itemAt rows r)
+            if ((array_length fields) > maxC) {
+                maxC = (array_length fields)
+            }
+            r = (r + 1)
+        }
+        if ((array_length rows) > 0) {
+            def nr:int (array_length rows)
+            def nc:int maxC
+            if (nr < sheet.rowCount) {
+                nr = sheet.rowCount
+            }
+            if (nc < sheet.colCount) {
+                nc = sheet.colCount
+            }
+            sheet.growTo(nr nc)
+        }
+        def ri:int 0
+        while (ri < (array_length rows)) {
+            def fs:[string] (itemAt rows ri)
+            def ci:int 0
+            while (ci < (array_length fs)) {
+                def v:string (itemAt fs ci)
+                if ((strlen v) > 0) {
+                    def ok:[boolean]
+                    def serial:double 0.0
+                    if (((strlen v) >= 6) && ((strlen v) <= 10)) {
+                        serial = (DateSerial.parseDate(v ok))
+                    }
+                    def isDate:boolean false
+                    if ((array_length ok) > 0) {
+                        isDate = (itemAt ok 0)
+                    }
+                    if isDate {
+                        def fmt:string (DateSerial.formatForTyped(v))
+                        if ((has dateStyle fmt) == false) {
+                            def st:CellStyle (new CellStyle)
+                            st.numFmt = fmt
+                            set dateStyle fmt (array_length styles)
+                            push styles st
+                        }
+                        sheet.setCellRaw(ri ci (to_string (to_int serial)))
+                        sheet.setCellStyleId(ri ci (unwrap (get dateStyle fmt)))
+                    } {
+                        sheet.setCellRaw(ri ci v)
+                    }
+                }
+                ci = (ci + 1)
+            }
+            ri = (ri + 1)
+        }
+        sheet.setStylesFrom(styles)
+        sheet.quietWrites = false
+        sheet.version = (sheet.version + 1)
+        book.addSheet(sheet)
+        book.setActive(0)
+        return true
+    }
+
+    ; The sheet as delimited text: what each cell shows, quoted where the
+    ; separator, a quote or a line break would split it.
+    sfn sheetText:string (sh:SpreadsheetModel sep:int) {
+        def out:[string]
+        def lr:int (sh.usedRow())
+        def lc:int (sh.usedCol())
+        def sepText:string (strfromcode sep)
+        def r:int 0
+        while (r <= lr) {
+            def line:[string]
+            def c:int 0
+            while (c <= lc) {
+                def v:string (sh.getDisplay(r c))
+                def q:boolean (((indexOf v sepText) >= 0) || ((indexOf v "\"") >= 0) || ((indexOf v "\n") >= 0) || ((indexOf v "\r") >= 0))
+                if q {
+                    push line ("\"" + (join (strsplit v "\"") "\"\"") + "\"")
+                } {
+                    push line v
+                }
+                c = (c + 1)
+            }
+            push out ((join line sepText) + "\r\n")
+            r = (r + 1)
+        }
+        return (join out "")
+    }
+}

@@ -1,0 +1,307 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; FormatsTest — the workbook formats other than .xlsx, in and out.
+; ==============================================================================
+;
+; The fixtures under fixtures/formats/ are this repository's own .xlsx
+; fixtures as LibreOffice saves them in the other formats
+; (tools/make_format_fixtures.sh), so every check here can say what the cell
+; should hold: the same thing the .xlsx holds.
+; ==============================================================================
+
+Import "../src/GridApp.rgr"
+Import "../src/formats/WorkbookImport.rgr"
+Import "../src/formats/OdsWriter.rgr"
+
+class FormatChecker {
+    def passed:int 0
+    def failed:int 0
+
+    fn ok:void (name:string cond:boolean) {
+        if cond {
+            passed = (passed + 1)
+            print ("  PASS " + name)
+        } {
+            failed = (failed + 1)
+            print ("  FAIL " + name)
+        }
+    }
+
+    fn eqStr:void (name:string got:string want:string) {
+        this.ok((name + " (got '" + got + "' want '" + want + "')") (got == want))
+    }
+
+    fn eqInt:void (name:string got:int want:int) {
+        this.ok((name + " (got " + (to_string got) + " want " + (to_string want) + ")") (got == want))
+    }
+}
+
+class FormatsTest {
+    sfn fixture:buffer (name:string) {
+        return (buffer_read_file "gallery/datagrid/fixtures/formats" name)
+    }
+
+    sfn sheetNamed:SpreadsheetModel (book:WorkbookModel name:string) {
+        def i:int 0
+        while (i < (book.sheetCount())) {
+            def sh:SpreadsheetModel (book.sheetAt(i))
+            if (sh.name == name) {
+                return sh
+            }
+            i = (i + 1)
+        }
+        return (book.sheetAt(0))
+    }
+
+    ; Two workbooks hold the same text in the same cells, sheet by sheet —
+    ; the displayed text, so a number format that went missing shows up.
+    sfn sameCells:void (c:FormatChecker label:string want:WorkbookModel got:WorkbookModel) {
+        c.eqInt((label + " sheet count") (got.sheetCount()) (want.sheetCount()))
+        def i:int 0
+        while ((i < (want.sheetCount())) && (i < (got.sheetCount()))) {
+            def a:SpreadsheetModel (want.sheetAt(i))
+            def b:SpreadsheetModel (got.sheetAt(i))
+            c.eqStr((label + " sheet " + (to_string i) + " name") b.name a.name)
+            def diffs:int 0
+            def firstDiff:string ""
+            def r:int 0
+            def lr:int (a.usedRow())
+            def lc:int (a.usedCol())
+            while (r <= lr) {
+                def col:int 0
+                while (col <= lc) {
+                    def va:string (FormatsTest.cellText(a r col))
+                    def vb:string (FormatsTest.cellText(b r col))
+                    if (va != vb) {
+                        if (diffs == 0) {
+                            firstDiff = ((XlsFormula.colName(col)) + (to_string (r + 1)) + ": '" + vb + "' want '" + va + "'")
+                        }
+                        diffs = (diffs + 1)
+                    }
+                    col = (col + 1)
+                }
+                r = (r + 1)
+            }
+            c.ok((label + " " + a.name + " cells and formulas match" + " " + firstDiff) (diffs == 0))
+            i = (i + 1)
+        }
+    }
+
+    ; What a cell holds: its formula when it has one (spaces dropped, as
+    ; writers differ in them), else its value — numbers compared as numbers.
+    sfn cellText:string (sh:SpreadsheetModel r:int c:int) {
+        def f:string (sh.getFormula(r c))
+        ; LibreOffice writes a TRUE it was given as the formula =TRUE.
+        if ((f == "TRUE") || (f == "FALSE") || (f == "TRUE()") || (f == "FALSE()")) {
+            return (substring f 0 (indexOf (f + "(") "("))
+        }
+        if ((strlen f) > 0) {
+            return ("=" + (to_uppercase (join (strsplit f " ") "")))
+        }
+        def v:string (sh.getCell(r c))
+        def d@(optional):double (to_double v)
+        if ((!null? d) && ((strlen v) > 0)) {
+            def x:double (unwrap d)
+            ; Ten significant digits: what survives every writer's rounding.
+            return (to_string ((to_double (to_int ((x * 10000000000.0) + 0.5))) / 10000000000.0))
+        }
+        return v
+    }
+
+    ; The text each cell shows: number formats, dates and percentages made
+    ; the trip too.
+    sfn sameDisplay:void (c:FormatChecker label:string want:WorkbookModel got:WorkbookModel) {
+        def i:int 0
+        while ((i < (want.sheetCount())) && (i < (got.sheetCount()))) {
+            def a:SpreadsheetModel (want.sheetAt(i))
+            def b:SpreadsheetModel (got.sheetAt(i))
+            def diffs:int 0
+            def firstDiff:string ""
+            def r:int 0
+            while (r <= (a.usedRow())) {
+                def col:int 0
+                while (col <= (a.usedCol())) {
+                    def va:string (a.getDisplay(r col))
+                    def vb:string (b.getDisplay(r col))
+                    if (va != vb) {
+                        if (diffs == 0) {
+                            firstDiff = ((XlsFormula.colName(col)) + (to_string (r + 1)) + ": '" + vb + "' want '" + va + "' fmt '" + ((b.getCellStyle(r col)).numFmt) + "' vs '" + ((a.getCellStyle(r col)).numFmt) + "'")
+                        }
+                        diffs = (diffs + 1)
+                    }
+                    col = (col + 1)
+                }
+                r = (r + 1)
+            }
+            c.ok((label + " " + a.name + " shows the same " + firstDiff) (diffs == 0))
+            i = (i + 1)
+        }
+    }
+
+    sfn sameBytes:boolean (a:buffer b:buffer) {
+        if ((buffer_length a) != (buffer_length b)) {
+            return false
+        }
+        if ((buffer_length a) == 0) {
+            return false
+        }
+        def i:int 0
+        while (i < (buffer_length a)) {
+            if ((buffer_get a i) != (buffer_get b i)) {
+                return false
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    sfn loadXlsx:WorkbookModel (name:string) {
+        def app:GridApp (new GridApp)
+        app.init("gallery/pdf_writer/assets/fonts")
+        app.loadXlsx(("gallery/datagrid/fixtures/" + name))
+        return app.book
+    }
+
+    sfn loadOther:GridApp (name:string) {
+        def app:GridApp (new GridApp)
+        app.init("gallery/pdf_writer/assets/fonts")
+        def ok:boolean (app.loadXlsxBytes((FormatsTest.fixture(name)) name))
+        if (ok == false) {
+            print ("    load error: " + app.loadError)
+        }
+        return app
+    }
+
+    sfn main:void () {
+        def c:FormatChecker (new FormatChecker)
+
+        print "== format detection =="
+        c.eqStr("xls" (WorkbookImport.kindOf((FormatsTest.fixture("formulas.xls")) "formulas.xls")) "xls")
+        c.eqStr("ods" (WorkbookImport.kindOf((FormatsTest.fixture("formulas.ods")) "formulas.ods")) "ods")
+        c.eqStr("xlsx" (WorkbookImport.kindOf((buffer_read_file "gallery/datagrid/fixtures" "formulas.xlsx") "x.xlsx")) "xlsx")
+        c.eqStr("csv by name" (WorkbookImport.kindOf((buffer_from_string "a,b\n1,2\n") "data.csv")) "csv")
+        c.eqStr("tsv by name" (WorkbookImport.kindOf((buffer_from_string "a\tb\n1\t2\n") "data.tsv")) "tsv")
+
+        print "== .xls =="
+        def names:[string] ([] _:string ("formulas" "styles-showcase" "merged" "business-workbook" "accented-text" "sales"))
+        def i:int 0
+        while (i < (array_length names)) {
+            def nm:string (itemAt names i)
+            def want:WorkbookModel (FormatsTest.loadXlsx((nm + ".xlsx")))
+            def app:GridApp (FormatsTest.loadOther((nm + ".xls")))
+            FormatsTest.sameCells(c (nm + ".xls") want app.book)
+            i = (i + 1)
+        }
+
+        print "== .ods =="
+        def oi:int 0
+        while (oi < (array_length names)) {
+            def onm:string (itemAt names oi)
+            def owant:WorkbookModel (FormatsTest.loadXlsx((onm + ".xlsx")))
+            def oapp:GridApp (FormatsTest.loadOther((onm + ".ods")))
+            FormatsTest.sameCells(c (onm + ".ods") owant oapp.book)
+            oi = (oi + 1)
+        }
+
+        print "== .ods out and back =="
+        def wi:int 0
+        while (wi < (array_length names)) {
+            def wnm:string (itemAt names wi)
+            def src:WorkbookModel (FormatsTest.loadXlsx((wnm + ".xlsx")))
+            def w:OdsWriter (new OdsWriter)
+            def bytes:buffer (w.writeToBuffer(src))
+            c.ok((wnm + " written") ((buffer_length bytes) > 0))
+            buffer_write_file "gallery/datagrid/harness/out/export" (wnm + ".ods") bytes
+            def back:GridApp (new GridApp)
+            back.init("gallery/pdf_writer/assets/fonts")
+            c.ok((wnm + ".ods reads back") (back.loadXlsxBytes(bytes (wnm + ".ods"))))
+            FormatsTest.sameCells(c (wnm + " round trip") src back.book)
+            FormatsTest.sameDisplay(c (wnm + " round trip") src back.book)
+            wi = (wi + 1)
+        }
+
+        print "== .xlsb (values) =="
+        def xb:GridApp (FormatsTest.loadOther("values.xlsb"))
+        c.eqInt("xlsb sheets" (xb.book.sheetCount()) 2)
+        def d:SpreadsheetModel (FormatsTest.sheetNamed(xb.book "Data"))
+        c.eqStr("xlsb shared string" (d.getCell(0 0)) "Region")
+        c.eqStr("xlsb RK integer" (d.getCell(1 1)) "120")
+        c.eqStr("xlsb RK hundredths" (d.getCell(1 2)) "9.5")
+        c.eqStr("xlsb date shown as a date" (d.getDisplay(1 3)) (XlsxNumberFormat.format("45306" "m/d/yyyy")))
+        c.ok("xlsb date format kept" ((d.getCellStyle(1 3)).numFmt == "m/d/yyyy"))
+        c.eqStr("xlsb boolean" (d.getCell(1 4)) "TRUE")
+        c.eqStr("xlsb error" (d.getCell(1 5)) "#DIV/0!")
+        c.eqStr("xlsb cached formula number" (d.getCell(1 6)) "1140")
+        c.eqStr("xlsb cached formula string" (d.getCell(1 7)) "done")
+        c.eqStr("xlsb non-ASCII text" (d.getCell(2 0)) "Hämeenlinna")
+        c.eqStr("xlsb double" (d.getCell(2 1)) "3.25")
+        c.eqStr("xlsb custom format" (d.getDisplay(2 5)) "12.50%")
+        c.ok("xlsb merge" ((strlen (d.mergeAt(4 1))) > 0))
+        c.ok("xlsb column width" ((d.rawColWidth(0)) == 140))
+        def hs:SpreadsheetModel (FormatsTest.sheetNamed(xb.book "Hidden"))
+        c.ok("xlsb hidden sheet" hs.sheetHidden)
+        c.eqStr("xlsb hidden sheet value" (hs.getCell(0 0)) "42")
+        c.ok("xlsb notes say formulas are values" ((array_length xb.importNotes) > 0))
+
+        print "== text =="
+        def cs:GridApp (FormatsTest.loadOther("semicolons.csv"))
+        def s0:SpreadsheetModel (cs.book.sheetAt(0))
+        c.eqStr("csv sheet named after the file" s0.name "semicolons")
+        c.eqStr("csv semicolon separator, quoted field" (s0.getCell(1 0)) "Smith; John")
+        c.eqStr("csv quoted quote and line break" (s0.getCell(2 0)) "He said \"hi\"\nthen left")
+        c.eqStr("csv ISO date" (s0.getDisplay(1 2)) "2024-03-15")
+        c.eqStr("csv dotted date" (s0.getDisplay(2 2)) "15.03.2024")
+        c.eqStr("csv number" (s0.getCell(2 1)) "7")
+        def ts:GridApp (FormatsTest.loadOther("units.tsv"))
+        def t0:SpreadsheetModel (ts.book.sheetAt(0))
+        c.eqStr("tsv BOM dropped" (t0.getCell(0 0)) "Region")
+        c.eqStr("tsv UTF-8" (t0.getCell(1 0)) "Hämeenlinna")
+        c.eqStr("tsv value" (t0.getCell(2 1)) "80")
+        def lt:GridApp (FormatsTest.loadOther("latin1.txt"))
+        c.eqStr("txt Windows-1252" ((lt.book.sheetAt(0)).getCell(0 0)) "Café")
+        c.eqStr("tsv save name" (ts.suggestSaveName()) "units.xlsx")
+        def tsvOut:string (TextWorkbook.sheetText(t0 9))
+        c.ok("tsv out" ((indexOf tsvOut "Hämeenlinna\t120") >= 0))
+
+        print "== .xlsm and .xltx =="
+        def xm:GridApp (FormatsTest.loadOther("sales.xlsm"))
+        c.ok("xlsm opens" ((xm.book.sheetCount()) > 0))
+        c.eqStr("xlsm keeps its name on save" (xm.suggestSaveName()) "sales.xlsm")
+        xm.model.setCellRaw(0 0 "Edited")
+        def xmBytes:buffer (xm.saveBytesAs("sales.xlsm"))
+        def xmPkg:OpcPackage (new OpcPackage())
+        c.ok("xlsm saved as a package" (xmPkg.openBytes(xmBytes "sales.xlsm")))
+        def inPkg:OpcPackage (new OpcPackage())
+        inPkg.openBytes((FormatsTest.fixture("sales.xlsm")) "sales.xlsm")
+        def vbaIn:buffer (inPkg.readBinary("xl/vbaProject.bin"))
+        def vbaOut:buffer (xmPkg.readBinary("xl/vbaProject.bin"))
+        c.ok("xlsm VBA project kept byte for byte" (FormatsTest.sameBytes(vbaIn vbaOut)))
+        def ct:string (xmPkg.readXml("[Content_Types].xml"))
+        c.ok("xlsm stays macro-enabled" ((indexOf ct "macroEnabled.main+xml") >= 0))
+        c.ok("xlsm relationship to the VBA project kept" ((indexOf (xmPkg.readXml("xl/_rels/workbook.xml.rels")) "vbaProject") >= 0))
+        def again:GridApp (new GridApp)
+        again.init("gallery/pdf_writer/assets/fonts")
+        c.ok("xlsm reads back" (again.loadXlsxBytes(xmBytes "sales.xlsm")))
+        c.eqStr("xlsm edit kept" ((again.book.sheetAt(0)).getCell(0 0)) "Edited")
+        def xt:GridApp (FormatsTest.loadOther("sales.xltx"))
+        def xtBytes:buffer (xt.saveBytesAs("sales.xltx"))
+        def xtPkg:OpcPackage (new OpcPackage())
+        xtPkg.openBytes(xtBytes "sales.xltx")
+        c.ok("xltx stays a template" ((indexOf (xtPkg.readXml("[Content_Types].xml")) "template.main+xml") >= 0))
+
+        print "== save names =="
+        c.eqStr("xls saves as xlsx" (WorkbookImport.saveNameFor("old.xls")) "old.xlsx")
+        c.eqStr("xlsb saves as xlsx" (WorkbookImport.saveNameFor("big.xlsb")) "big.xlsx")
+        c.eqStr("ods keeps its name" (WorkbookImport.saveNameFor("calc.ods")) "calc.ods")
+        c.eqStr("xltm keeps its name" (WorkbookImport.saveNameFor("t.xltm")) "t.xltm")
+        def od:GridApp (FormatsTest.loadOther("formulas.ods"))
+        def odBytes:buffer (od.saveBytesAs((od.suggestSaveName())))
+        c.ok("an .ods saves as .ods" (WorkbookImport.isZip(odBytes) && ((WorkbookImport.kindOf(odBytes "x")) == "ods")))
+
+        print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
+        if (c.failed == 0) {
+            print "ALL PASS"
+        }
+    }
+}

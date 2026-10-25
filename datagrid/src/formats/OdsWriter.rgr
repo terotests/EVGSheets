@@ -1,0 +1,939 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; OdsWriter — a WorkbookModel out as an OpenDocument spreadsheet (.ods).
+; ==============================================================================
+;
+; The package is four parts: `mimetype` (first, stored, so a reader can tell
+; what the file is from its first bytes), the manifest, styles.xml with the
+; default cell style, and content.xml with every sheet.
+;
+; Written: values with their types (numbers, text, booleans, dates, times,
+; percentages), formulas (Excel text turned into OpenFormula, `OdsFormula`)
+; with their last results, cell styles (font, colour, fill, borders,
+; alignment, wrap, number format), merges, column widths, row heights,
+; hidden rows, columns and sheets, workbook names.
+; Not written: charts, pictures, notes, conditional formats, validation,
+; freeze panes, scripts — an .ods made here is the data and its look.
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+Import "OdsFormula.rgr"
+Import "../xlsx/XlsxWriter.rgr"
+Import "../WorkbookModel.rgr"
+Import "../SpreadsheetModel.rgr"
+Import "../CellStyle.rgr"
+Import "../DateSerial.rgr"
+Import "../XlsxNumberFormat.rgr"
+Import "../../zip/ZipWriter.rgr"
+
+class OdsWriter {
+    def lastError:string ""
+    def styleKeys:[string:string]
+    def styleXml:[string]
+    def numKeys:[string:string]
+    def numXml:[string]
+    def numKinds:[string:string]
+    def colKeys:[string:string]
+    def colXml:[string]
+    def rowKeys:[string:string]
+    def rowXml:[string]
+
+    Constructor () {
+    }
+
+    sfn esc:string (s:string) {
+        return (XlsxWriter.esc(s))
+    }
+
+    sfn inches:string (px:int) {
+        def v:double ((to_double px) / 96.0)
+        return ((to_string ((to_double (to_int ((v * 10000.0) + 0.5))) / 10000.0)) + "in")
+    }
+
+    sfn pt:string (v:double) {
+        return ((to_string ((to_double (to_int ((v * 100.0) + 0.5))) / 100.0)) + "pt")
+    }
+
+    sfn two:string (v:int) {
+        if (v < 10) {
+            return ("0" + (to_string v))
+        }
+        return (to_string v)
+    }
+
+    ; --- number formats ---------------------------------------------------------
+
+    ; The format code with quoted text, escapes and colour/locale brackets
+    ; taken out, so the letters left are the format's own.
+    sfn bare:string (code:string) {
+        def out:string ""
+        def i:int 0
+        def n:int (strlen code)
+        while (i < n) {
+            def ch:int (charAt code i)
+            if (ch == 34) {
+                def j:int (i + 1)
+                while ((j < n) && ((charAt code j) != 34)) {
+                    j = (j + 1)
+                }
+                i = (j + 1)
+                continue
+            }
+            if ((ch == 92) || (ch == 95) || (ch == 42)) {
+                i = (i + 2)
+                continue
+            }
+            if (ch == 91) {
+                def k:int (i + 1)
+                while ((k < n) && ((charAt code k) != 93)) {
+                    k = (k + 1)
+                }
+                def inner:string (to_lowercase (substring code (i + 1) k))
+                if ((inner == "h") || (inner == "hh") || (inner == "m") || (inner == "mm") || (inner == "s") || (inner == "ss")) {
+                    out = (out + inner)
+                }
+                i = (k + 1)
+                continue
+            }
+            out = (out + (substring code i (i + 1)))
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; "date", "time", "percentage", "currency", "text", "number" or "" for
+    ; General.
+    sfn kindOf:string (code:string) {
+        if (((strlen code) == 0) || ((to_lowercase code) == "general")) {
+            return ""
+        }
+        def first:string (itemAt (strsplit code ";") 0)
+        def b:string (to_lowercase (OdsWriter.bare(first)))
+        if (b == "@") {
+            return "text"
+        }
+        def hasDate:boolean (((indexOf b "y") >= 0) || ((indexOf b "d") >= 0))
+        def hasTime:boolean (((indexOf b "h") >= 0) || ((indexOf b "s") >= 0))
+        if ((indexOf b "m") >= 0) {
+            if ((hasTime == false) && (hasDate == false)) {
+                hasDate = true
+            }
+        }
+        if hasDate {
+            return "date"
+        }
+        if hasTime {
+            return "time"
+        }
+        if ((indexOf b "%") >= 0) {
+            return "percentage"
+        }
+        if (((indexOf first "$") >= 0) || ((indexOf first "€") >= 0) || ((indexOf first "£") >= 0)) {
+            return "currency"
+        }
+        return "number"
+    }
+
+    ; The digits part of a number section, as <number:number>.
+    sfn numberElement:string (b:string) {
+        def dot:int (indexOf b ".")
+        def ip:string b
+        def fp:string ""
+        if (dot >= 0) {
+            ip = (substring b 0 dot)
+            fp = (substring b (dot + 1) (strlen b))
+        }
+        def zeros:int 0
+        def i:int 0
+        while (i < (strlen ip)) {
+            if ((charAt ip i) == 48) {
+                zeros = (zeros + 1)
+            }
+            i = (i + 1)
+        }
+        def dec:int 0
+        def j:int 0
+        while (j < (strlen fp)) {
+            def ch:int (charAt fp j)
+            if ((ch == 48) || (ch == 35) || (ch == 63)) {
+                dec = (dec + 1)
+            }
+            if ((ch == 69) || (ch == 101)) {
+                j = (strlen fp)
+            }
+            j = (j + 1)
+        }
+        def out:string ("<number:number number:decimal-places=\"" + (to_string dec) + "\" number:min-decimal-places=\"" + (to_string dec) + "\" number:min-integer-digits=\"" + (to_string zeros) + "\"")
+        if ((indexOf ip ",") >= 0) {
+            out = (out + " number:grouping=\"true\"")
+        }
+        return (out + "/>")
+    }
+
+    ; One date or time section, token by token.
+    sfn dateElements:string (code:string) {
+        def out:string ""
+        def i:int 0
+        def n:int (strlen code)
+        def lastWasHour:boolean false
+        def lit:string ""
+        while (i < n) {
+            def ch:int (charAt code i)
+            def lower:int ch
+            if ((ch >= 65) && (ch <= 90)) {
+                lower = (ch + 32)
+            }
+            if ((lower == 121) || (lower == 100) || (lower == 109) || (lower == 104) || (lower == 115)) {
+                def j:int i
+                while ((j < n) && ((charAt (to_lowercase (substring code j (j + 1))) 0) == lower)) {
+                    j = (j + 1)
+                }
+                def cnt:int (j - i)
+                if ((strlen lit) > 0) {
+                    out = (out + "<number:text>" + (OdsWriter.esc(lit)) + "</number:text>")
+                    lit = ""
+                }
+                if (lower == 121) {
+                    if (cnt > 2) {
+                        out = (out + "<number:year number:style=\"long\"/>")
+                    } {
+                        out = (out + "<number:year/>")
+                    }
+                }
+                if (lower == 100) {
+                    if (cnt == 1) {
+                        out = (out + "<number:day/>")
+                    }
+                    if (cnt == 2) {
+                        out = (out + "<number:day number:style=\"long\"/>")
+                    }
+                    if (cnt == 3) {
+                        out = (out + "<number:day-of-week/>")
+                    }
+                    if (cnt >= 4) {
+                        out = (out + "<number:day-of-week number:style=\"long\"/>")
+                    }
+                }
+                if (lower == 109) {
+                    ; Minutes after an hour or before seconds; a month otherwise.
+                    def nextS:boolean false
+                    def k:int j
+                    while ((k < n) && (((charAt code k) == 58) || ((charAt code k) == 32))) {
+                        k = (k + 1)
+                    }
+                    if ((k < n) && (((charAt code k) == 115) || ((charAt code k) == 83))) {
+                        nextS = true
+                    }
+                    if ((lastWasHour || nextS) && (cnt <= 2)) {
+                        if (cnt == 2) {
+                            out = (out + "<number:minutes number:style=\"long\"/>")
+                        } {
+                            out = (out + "<number:minutes/>")
+                        }
+                    } {
+                        if (cnt == 1) {
+                            out = (out + "<number:month/>")
+                        }
+                        if (cnt == 2) {
+                            out = (out + "<number:month number:style=\"long\"/>")
+                        }
+                        if (cnt == 3) {
+                            out = (out + "<number:month number:textual=\"true\"/>")
+                        }
+                        if (cnt >= 4) {
+                            out = (out + "<number:month number:style=\"long\" number:textual=\"true\"/>")
+                        }
+                    }
+                }
+                if (lower == 104) {
+                    if (cnt >= 2) {
+                        out = (out + "<number:hours number:style=\"long\"/>")
+                    } {
+                        out = (out + "<number:hours/>")
+                    }
+                }
+                if (lower == 115) {
+                    if (cnt >= 2) {
+                        out = (out + "<number:seconds number:style=\"long\"/>")
+                    } {
+                        out = (out + "<number:seconds/>")
+                    }
+                }
+                lastWasHour = (lower == 104)
+                i = j
+                continue
+            }
+            if (((lower == 97) && ((indexOf (to_lowercase (substring code i n)) "am/pm") == 0))) {
+                if ((strlen lit) > 0) {
+                    out = (out + "<number:text>" + (OdsWriter.esc(lit)) + "</number:text>")
+                    lit = ""
+                }
+                out = (out + "<number:am-pm/>")
+                i = (i + 5)
+                continue
+            }
+            lit = (lit + (substring code i (i + 1)))
+            i = (i + 1)
+        }
+        if ((strlen lit) > 0) {
+            out = (out + "<number:text>" + (OdsWriter.esc(lit)) + "</number:text>")
+        }
+        return out
+    }
+
+    ; The data style for a format code (written once), and its name.
+    fn dataStyleFor:string (code:string) {
+        def kind:string (OdsWriter.kindOf(code))
+        if ((strlen kind) == 0) {
+            return ""
+        }
+        if (has numKeys code) {
+            return (unwrap (get numKeys code))
+        }
+        def name:string ("N" + (to_string ((array_length numXml) + 1)))
+        def first:string (itemAt (strsplit code ";") 0)
+        def b:string (OdsWriter.bare(first))
+        def body:string ""
+        def tag:string "number:number-style"
+        if (kind == "text") {
+            tag = "number:text-style"
+            body = "<number:text-content/>"
+        }
+        if ((kind == "date") || (kind == "time")) {
+            tag = "number:date-style"
+            if (kind == "time") {
+                tag = "number:time-style"
+            }
+            body = (OdsWriter.dateElements(b))
+        }
+        if (kind == "percentage") {
+            tag = "number:percentage-style"
+            body = ((OdsWriter.numberElement(b)) + "<number:text>%</number:text>")
+        }
+        if (kind == "currency") {
+            tag = "number:currency-style"
+            def sym:string "$"
+            if ((indexOf first "€") >= 0) {
+                sym = "€"
+            }
+            if ((indexOf first "£") >= 0) {
+                sym = "£"
+            }
+            def symAt:int (indexOf first sym)
+            def digitAt:int (indexOf b "0")
+            if ((digitAt >= 0) && (symAt > digitAt)) {
+                body = ((OdsWriter.numberElement(b)) + "<number:text> </number:text><number:currency-symbol>" + sym + "</number:currency-symbol>")
+            } {
+                body = ("<number:currency-symbol>" + sym + "</number:currency-symbol>" + (OdsWriter.numberElement(b)))
+            }
+        }
+        if (kind == "number") {
+            if (((indexOf b "E") >= 0) || ((indexOf b "e") >= 0)) {
+                def ep:int (indexOf (to_uppercase b) "E")
+                def mant:string (substring b 0 ep)
+                def ed:int ((strlen b) - (ep + 2))
+                if (ed < 1) {
+                    ed = 1
+                }
+                def dot:int (indexOf mant ".")
+                def sdec:int 0
+                if (dot >= 0) {
+                    sdec = ((strlen mant) - (dot + 1))
+                }
+                body = ("<number:scientific-number number:decimal-places=\"" + (to_string sdec) + "\" number:min-integer-digits=\"1\" number:min-exponent-digits=\"" + (to_string ed) + "\"/>")
+            } {
+                body = (OdsWriter.numberElement(b))
+            }
+        }
+        push numXml ("<" + tag + " style:name=\"" + name + "\">" + body + "</" + tag + ">")
+        set numKeys code name
+        set numKinds name kind
+        return name
+    }
+
+    ; --- cell styles ------------------------------------------------------------
+
+    sfn borderSpec:string (b:CellBorder) {
+        if ((b.has()) == false) {
+            return "none"
+        }
+        def width:string "0.74pt"
+        def kind:string "solid"
+        def s:string b.style
+        if ((s == "medium") || (s == "mediumDashed") || (s == "mediumDashDot") || (s == "mediumDashDotDot")) {
+            width = "1.75pt"
+        }
+        if (s == "thick") {
+            width = "2.5pt"
+        }
+        if (s == "hair") {
+            width = "0.26pt"
+        }
+        if (s == "double") {
+            width = "2.01pt"
+            kind = "double"
+        }
+        if ((indexOf s "ash") >= 0) {
+            kind = "dashed"
+        }
+        if (s == "dotted") {
+            kind = "dotted"
+        }
+        def rgb:string b.rgb
+        if ((strlen rgb) != 7) {
+            rgb = "#000000"
+        }
+        return (width + " " + kind + " " + (to_lowercase rgb))
+    }
+
+    ; The automatic style for a cell's look, written once; "" for none.
+    fn cellStyleFor:string (st:CellStyle) {
+        if (st.isPlain()) {
+            return ""
+        }
+        def cell:string ""
+        def para:string ""
+        def text:string ""
+        if (st.hasFill && ((strlen st.fillRgb) == 7)) {
+            cell = (cell + " fo:background-color=\"" + (to_lowercase st.fillRgb) + "\"")
+        }
+        if st.wrapText {
+            cell = (cell + " fo:wrap-option=\"wrap\"")
+        }
+        if (st.valign == "top") {
+            cell = (cell + " style:vertical-align=\"top\"")
+        }
+        if (st.valign == "center") {
+            cell = (cell + " style:vertical-align=\"middle\"")
+        }
+        if (st.textRotation > 0) {
+            def deg:int st.textRotation
+            if (deg > 90) {
+                deg = (360 - (deg - 90))
+            }
+            cell = (cell + " style:rotation-angle=\"" + (to_string deg) + "\"")
+        }
+        if st.hasBorder {
+            cell = (cell + " fo:border-top=\"" + (OdsWriter.borderSpec(st.borderTop)) + "\" fo:border-right=\"" + (OdsWriter.borderSpec(st.borderRight)) + "\" fo:border-bottom=\"" + (OdsWriter.borderSpec(st.borderBottom)) + "\" fo:border-left=\"" + (OdsWriter.borderSpec(st.borderLeft)) + "\"")
+        }
+        if st.alignSet {
+            def ta:string ""
+            if (st.align == "left") {
+                ta = "start"
+            }
+            if ((st.align == "center") || (st.align == "centerContinuous")) {
+                ta = "center"
+            }
+            if (st.align == "right") {
+                ta = "end"
+            }
+            if ((st.align == "justify") || (st.align == "distributed")) {
+                ta = "justify"
+            }
+            if ((strlen ta) > 0) {
+                cell = (cell + " style:text-align-source=\"fix\"")
+                para = (para + " fo:text-align=\"" + ta + "\"")
+            }
+        }
+        if (st.indent > 0) {
+            para = (para + " fo:margin-left=\"" + (OdsWriter.pt(((to_double st.indent) * 6.75))) + "\"")
+        }
+        if st.bold {
+            text = (text + " fo:font-weight=\"bold\" style:font-weight-asian=\"bold\" style:font-weight-complex=\"bold\"")
+        }
+        if st.italic {
+            text = (text + " fo:font-style=\"italic\" style:font-style-asian=\"italic\" style:font-style-complex=\"italic\"")
+        }
+        if st.underline {
+            text = (text + " style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"")
+        }
+        if st.strike {
+            text = (text + " style:text-line-through-style=\"solid\"")
+        }
+        if ((strlen st.textRgb) == 7) {
+            text = (text + " fo:color=\"" + (to_lowercase st.textRgb) + "\"")
+        }
+        if (st.fontSizePt != 11.0) {
+            text = (text + " fo:font-size=\"" + (OdsWriter.pt(st.fontSizePt)) + "\"")
+        }
+        if ((strlen st.fontName) > 0) {
+            text = (text + " fo:font-family=\"" + (OdsWriter.esc(st.fontName)) + "\"")
+        }
+        def data:string (this.dataStyleFor(st.numFmt))
+        def key:string (cell + "|" + para + "|" + text + "|" + data)
+        if (key == "|||") {
+            return ""
+        }
+        if (has styleKeys key) {
+            return (unwrap (get styleKeys key))
+        }
+        def name:string ("ce" + (to_string ((array_length styleXml) + 1)))
+        def xml:string ("<style:style style:name=\"" + name + "\" style:family=\"table-cell\" style:parent-style-name=\"Default\"")
+        if ((strlen data) > 0) {
+            xml = (xml + " style:data-style-name=\"" + data + "\"")
+        }
+        xml = (xml + ">")
+        if ((strlen cell) > 0) {
+            xml = (xml + "<style:table-cell-properties" + cell + "/>")
+        }
+        if ((strlen para) > 0) {
+            xml = (xml + "<style:paragraph-properties" + para + "/>")
+        }
+        if ((strlen text) > 0) {
+            xml = (xml + "<style:text-properties" + text + "/>")
+        }
+        xml = (xml + "</style:style>")
+        push styleXml xml
+        set styleKeys key name
+        return name
+    }
+
+    fn colStyleFor:string (px:int) {
+        def key:string (to_string px)
+        if (has colKeys key) {
+            return (unwrap (get colKeys key))
+        }
+        def name:string ("co" + (to_string ((array_length colXml) + 1)))
+        push colXml ("<style:style style:name=\"" + name + "\" style:family=\"table-column\"><style:table-column-properties fo:break-before=\"auto\" style:column-width=\"" + (OdsWriter.inches(px)) + "\"/></style:style>")
+        set colKeys key name
+        return name
+    }
+
+    fn rowStyleFor:string (px:int custom:boolean) {
+        def key:string ((to_string px) + "," + (to_string custom))
+        if (has rowKeys key) {
+            return (unwrap (get rowKeys key))
+        }
+        def name:string ("ro" + (to_string ((array_length rowXml) + 1)))
+        def opt:string "true"
+        if custom {
+            opt = "false"
+        }
+        push rowXml ("<style:style style:name=\"" + name + "\" style:family=\"table-row\"><style:table-row-properties style:row-height=\"" + (OdsWriter.inches(px)) + "\" fo:break-before=\"auto\" style:use-optimal-row-height=\"" + opt + "\"/></style:style>")
+        set rowKeys key name
+        return name
+    }
+
+    ; --- text -------------------------------------------------------------------
+
+    ; A cell's text as <text:p> paragraphs, runs of spaces coded as ODF wants.
+    sfn paragraphs:string (s:string) {
+        def lines:[string] (strsplit s "\n")
+        def out:string ""
+        def li:int 0
+        while (li < (array_length lines)) {
+            def line:string (itemAt lines li)
+            def p:string ""
+            def i:int 0
+            def n:int (strlen line)
+            def run:int 0
+            while (i < n) {
+                def ch:int (charAt line i)
+                if ((ch == 32) && (((i + 1) < n) && ((charAt line (i + 1)) == 32)) || ((ch == 32) && ((i == 0) || (i == (n - 1))))) {
+                    if (i > run) {
+                        p = (p + (OdsWriter.esc((substring line run i))))
+                    }
+                    def j:int i
+                    while ((j < n) && ((charAt line j) == 32)) {
+                        j = (j + 1)
+                    }
+                    p = (p + "<text:s text:c=\"" + (to_string (j - i)) + "\"/>")
+                    i = j
+                    run = j
+                    continue
+                }
+                if (ch == 9) {
+                    if (i > run) {
+                        p = (p + (OdsWriter.esc((substring line run i))))
+                    }
+                    p = (p + "<text:tab/>")
+                    run = (i + 1)
+                }
+                i = (i + 1)
+            }
+            if (n > run) {
+                p = (p + (OdsWriter.esc((substring line run n))))
+            }
+            out = (out + "<text:p>" + p + "</text:p>")
+            li = (li + 1)
+        }
+        return out
+    }
+
+    sfn isNumber:boolean (s:string) {
+        if ((strlen s) == 0) {
+            return false
+        }
+        def v@(optional):double (to_double s)
+        if (null? v) {
+            return false
+        }
+        ; to_double is generous ("12abc" on some targets); a number is only
+        ; digits, a sign, a point and an exponent.
+        def i:int 0
+        while (i < (strlen s)) {
+            def ch:int (charAt s i)
+            def ok:boolean ((((ch >= 48) && (ch <= 57)) || (ch == 46) || (ch == 45) || (ch == 43) || (ch == 69) || (ch == 101)))
+            if (ok == false) {
+                return false
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    ; office:date-value / office:time-value for a serial.
+    sfn isoDate:string (serial:double withTime:boolean) {
+        def ymd:[int]
+        DateSerial.toYMD(serial ymd)
+        def out:string ((to_string (itemAt ymd 0)) + "-" + (OdsWriter.two((itemAt ymd 1))) + "-" + (OdsWriter.two((itemAt ymd 2))))
+        if withTime {
+            def frac:double (serial - (to_double (floor serial)))
+            def secs:int (to_int ((frac * 86400.0) + 0.5))
+            out = (out + "T" + (OdsWriter.two((floor (secs / 3600)))) + ":" + (OdsWriter.two(((floor (secs / 60)) % 60))) + ":" + (OdsWriter.two((secs % 60))))
+        }
+        return out
+    }
+
+    sfn isoDuration:string (serial:double) {
+        def secs:int (to_int ((serial * 86400.0) + 0.5))
+        return ("PT" + (OdsWriter.two((floor (secs / 3600)))) + "H" + (OdsWriter.two(((floor (secs / 60)) % 60))) + "M" + (OdsWriter.two((secs % 60))) + "S")
+    }
+
+    fn cellXml:string (sh:SpreadsheetModel r:int c:int styleName:string) {
+        def raw:string (sh.getCell(r c))
+        def f:string (sh.getFormula(r c))
+        def attrs:string ""
+        if ((strlen styleName) > 0) {
+            attrs = (" table:style-name=\"" + styleName + "\"")
+        }
+        if ((strlen f) > 0) {
+            attrs = (attrs + " table:formula=\"" + (OdsWriter.esc((OdsFormula.toOds(f)))) + "\"")
+        }
+        if (((strlen raw) == 0) && ((strlen f) == 0)) {
+            return ("<table:table-cell" + attrs + "/>")
+        }
+        def st:CellStyle (sh.getCellStyle(r c))
+        def kind:string (OdsWriter.kindOf(st.numFmt))
+        def shown:string (sh.getDisplay(r c))
+        if ((raw == "TRUE") || (raw == "FALSE")) {
+            attrs = (attrs + " office:value-type=\"boolean\" office:boolean-value=\"" + (to_lowercase raw) + "\"")
+        } {
+            if (OdsWriter.isNumber(raw)) {
+                def vo@(optional):double (to_double raw)
+                def v:double (unwrap vo)
+                if ((kind == "date") && (v >= 0.0)) {
+                    def withTime:boolean (v != (to_double (floor v)))
+                    def b:string (to_lowercase (OdsWriter.bare(st.numFmt)))
+                    if (((indexOf b "h") >= 0) || ((indexOf b "s") >= 0)) {
+                        withTime = true
+                    }
+                    attrs = (attrs + " office:value-type=\"date\" office:date-value=\"" + (OdsWriter.isoDate(v withTime)) + "\"")
+                } {
+                    if ((kind == "time") && (v >= 0.0)) {
+                        attrs = (attrs + " office:value-type=\"time\" office:time-value=\"" + (OdsWriter.isoDuration(v)) + "\"")
+                    } {
+                        def vt:string "float"
+                        if (kind == "percentage") {
+                            vt = "percentage"
+                        }
+                        if (kind == "currency") {
+                            vt = "currency"
+                        }
+                        attrs = (attrs + " office:value-type=\"" + vt + "\" office:value=\"" + raw + "\"")
+                    }
+                }
+            } {
+                attrs = (attrs + " office:value-type=\"string\"")
+            }
+        }
+        return ("<table:table-cell" + attrs + ">" + (OdsWriter.paragraphs(shown)) + "</table:table-cell>")
+    }
+
+    ; --- one sheet ----------------------------------------------------------------
+
+    ; The last row and column with anything — a value, a formula or a style.
+    fn extent:[int] (sh:SpreadsheetModel) {
+        def lr:int -1
+        def lc:int -1
+        if ((sh.usedMaxRow >= 0) && (sh.usedMaxCol >= 0)) {
+            lr = (sh.usedRow())
+            lc = (sh.usedCol())
+        }
+        def ks:[string] sh.formulaKeys
+        def k:int 0
+        while (k < (array_length ks)) {
+            def p:[string] (strsplit (itemAt ks k) ",")
+            def fr:int (OdsWriter.toInt((itemAt p 0)))
+            def fc:int (OdsWriter.toInt((itemAt p 1)))
+            if (fr > lr) {
+                lr = fr
+            }
+            if (fc > lc) {
+                lc = fc
+            }
+            k = (k + 1)
+        }
+        def out:[int]
+        push out lr
+        push out lc
+        return out
+    }
+
+    sfn toInt:int (s:string) {
+        def v@(optional):int (to_int s)
+        if (null? v) {
+            return 0
+        }
+        return (unwrap v)
+    }
+
+    fn sheetXml:string (sh:SpreadsheetModel tableStyle:string) {
+        def out:[string]
+        push out ("<table:table table:name=\"" + (OdsWriter.esc(sh.name)) + "\" table:style-name=\"" + tableStyle + "\">")
+        def ext:[int] (this.extent(sh))
+        def lr:int (itemAt ext 0)
+        def lc:int (itemAt ext 1)
+        if (lc < 0) {
+            lc = 0
+        }
+        ; Columns, runs of equal width and visibility together.
+        def c:int 0
+        while (c <= lc) {
+            def w:int (sh.rawColWidth(c))
+            def hid:boolean (sh.isColHidden(c))
+            def j:int (c + 1)
+            while ((j <= lc) && ((sh.rawColWidth(j)) == w) && ((sh.isColHidden(j)) == hid)) {
+                j = (j + 1)
+            }
+            def col:string ("<table:table-column table:style-name=\"" + (this.colStyleFor(w)) + "\"")
+            if ((j - c) > 1) {
+                col = (col + " table:number-columns-repeated=\"" + (to_string (j - c)) + "\"")
+            }
+            if hid {
+                col = (col + " table:visibility=\"collapse\"")
+            }
+            push out (col + " table:default-cell-style-name=\"Default\"/>")
+            c = j
+        }
+        ; Merges: the corner spans, the rest are covered.
+        def spanAt:[string:string]
+        def covered:[string:boolean]
+        def m:int 0
+        while (m < (array_length sh.merges)) {
+            def parts:[string] (strsplit (itemAt sh.merges m) ",")
+            if ((array_length parts) == 4) {
+                def r1:int (OdsWriter.toInt((itemAt parts 0)))
+                def c1:int (OdsWriter.toInt((itemAt parts 1)))
+                def r2:int (OdsWriter.toInt((itemAt parts 2)))
+                def c2:int (OdsWriter.toInt((itemAt parts 3)))
+                set spanAt ((to_string r1) + "," + (to_string c1)) ((to_string ((r2 - r1) + 1)) + "," + (to_string ((c2 - c1) + 1)))
+                if (r2 > lr) {
+                    lr = r2
+                }
+                def rr:int r1
+                while (rr <= r2) {
+                    def cc:int c1
+                    while (cc <= c2) {
+                        if ((rr != r1) || (cc != c1)) {
+                            set covered ((to_string rr) + "," + (to_string cc)) true
+                        }
+                        cc = (cc + 1)
+                    }
+                    rr = (rr + 1)
+                }
+            }
+            m = (m + 1)
+        }
+        def r:int 0
+        while (r <= lr) {
+            def h:int (sh.rawRowHeight(r))
+            def rowAttr:string (" table:style-name=\"" + (this.rowStyleFor(h (h != sh.defaultRowH))) + "\"")
+            if (sh.isRowHidden(r)) {
+                rowAttr = (rowAttr + " table:visibility=\"collapse\"")
+            }
+            def cells:[string]
+            def cc2:int 0
+            def pendingEmpty:int 0
+            while (cc2 <= lc) {
+                def key:string ((to_string r) + "," + (to_string cc2))
+                def hasStyle:boolean ((sh.getCellStyleId(r cc2)) >= 0)
+                def empty:boolean (((strlen (sh.getCell(r cc2))) == 0) && ((sh.hasFormula(r cc2)) == false) && (hasStyle == false))
+                if ((empty == true) && ((has covered key) == false) && ((has spanAt key) == false)) {
+                    pendingEmpty = (pendingEmpty + 1)
+                    cc2 = (cc2 + 1)
+                    continue
+                }
+                if (pendingEmpty > 0) {
+                    if (pendingEmpty == 1) {
+                        push cells "<table:table-cell/>"
+                    } {
+                        push cells ("<table:table-cell table:number-columns-repeated=\"" + (to_string pendingEmpty) + "\"/>")
+                    }
+                    pendingEmpty = 0
+                }
+                if (has covered key) {
+                    push cells "<table:covered-table-cell/>"
+                    cc2 = (cc2 + 1)
+                    continue
+                }
+                def sname:string ""
+                if hasStyle {
+                    sname = (this.cellStyleFor((sh.getCellStyle(r cc2))))
+                }
+                def xml:string (this.cellXml(sh r cc2 sname))
+                if (has spanAt key) {
+                    def sp:[string] (strsplit (unwrap (get spanAt key)) ",")
+                    def spanAttr:string (" table:number-columns-spanned=\"" + (itemAt sp 1) + "\" table:number-rows-spanned=\"" + (itemAt sp 0) + "\"")
+                    xml = ("<table:table-cell" + spanAttr + (substring xml 17 (strlen xml)))
+                }
+                push cells xml
+                cc2 = (cc2 + 1)
+            }
+            if ((array_length cells) == 0) {
+                push cells "<table:table-cell/>"
+            }
+            push out ("<table:table-row" + rowAttr + ">" + (join cells "") + "</table:table-row>")
+            r = (r + 1)
+        }
+        push out "</table:table>"
+        return (join out "")
+    }
+
+    ; --- the package --------------------------------------------------------------
+
+    sfn ns:string () {
+        return " xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:number=\"urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0\" xmlns:of=\"urn:oasis:names:tc:opendocument:xmlns:of:1.2\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" office:version=\"1.3\""
+    }
+
+    ; "Sheet1!$A$1:$B$2" → "$Sheet1.$A$1:.$B$2", what a named range holds.
+    sfn rangeAddress:string (ref:string) {
+        def odf:string (OdsFormula.toOds(ref))
+        def s:string (substring odf 4 (strlen odf))
+        if (((strlen s) > 2) && ((charAt s 0) == 91) && ((charAt s ((strlen s) - 1)) == 93)) {
+            return (substring s 1 ((strlen s) - 1))
+        }
+        return ""
+    }
+
+    fn contentXml:string (book:WorkbookModel) {
+        def tables:[string]
+        def i:int 0
+        while (i < (book.sheetCount())) {
+            def sh:SpreadsheetModel (book.sheetAt(i))
+            def ts:string "ta1"
+            if sh.sheetHidden {
+                ts = "ta2"
+            }
+            push tables (this.sheetXml(sh ts))
+            i = (i + 1)
+        }
+        def names:string ""
+        def k:int 0
+        while (k < (array_length book.nameOrder)) {
+            def key:string (itemAt book.nameOrder k)
+            def ref:string (book.nameRef(key))
+            def addr:string (OdsWriter.rangeAddress(ref))
+            if ((strlen addr) > 0) {
+                str_append names ("<table:named-range table:name=\"" + (OdsWriter.esc(key)) + "\" table:base-cell-address=\"" + (OdsWriter.esc((itemAt (strsplit addr ":") 0))) + "\" table:cell-range-address=\"" + (OdsWriter.esc(addr)) + "\"/>")
+            } {
+                def odf:string (OdsFormula.toOds(ref))
+                def s0:SpreadsheetModel (book.sheetAt(0))
+                str_append names ("<table:named-expression table:name=\"" + (OdsWriter.esc(key)) + "\" table:base-cell-address=\"$" + (OdsWriter.esc(s0.name)) + ".$A$1\" table:expression=\"" + (OdsWriter.esc(odf)) + "\"/>")
+            }
+            k = (k + 1)
+        }
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        str_append out ("<office:document-content" + (OdsWriter.ns()) + ">")
+        str_append out "<office:automatic-styles>"
+        str_append out (join colXml "")
+        str_append out (join rowXml "")
+        str_append out "<style:style style:name=\"ta1\" style:family=\"table\" style:master-page-name=\"Default\"><style:table-properties table:display=\"true\" style:writing-mode=\"lr-tb\"/></style:style>"
+        str_append out "<style:style style:name=\"ta2\" style:family=\"table\" style:master-page-name=\"Default\"><style:table-properties table:display=\"false\" style:writing-mode=\"lr-tb\"/></style:style>"
+        str_append out (join numXml "")
+        str_append out (join styleXml "")
+        str_append out "</office:automatic-styles>"
+        str_append out "<office:body><office:spreadsheet>"
+        str_append out (join tables "")
+        if ((strlen names) > 0) {
+            str_append out ("<table:named-expressions>" + names + "</table:named-expressions>")
+        }
+        str_append out "</office:spreadsheet></office:body></office:document-content>"
+        return out
+    }
+
+    sfn stylesXml:string (book:WorkbookModel) {
+        def size:string "11pt"
+        def face:string "Calibri"
+        if ((book.sheetCount()) > 0) {
+            def first:SpreadsheetModel (book.sheetAt(0))
+            size = (OdsWriter.pt(first.defaultFontPt))
+            if ((strlen first.defaultFontName) > 0) {
+                face = first.defaultFontName
+            }
+        }
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        str_append out ("<office:document-styles" + (OdsWriter.ns()) + ">")
+        str_append out "<office:styles><style:default-style style:family=\"table-cell\"><style:paragraph-properties style:tab-stop-distance=\"0.5in\"/></style:default-style>"
+        str_append out ("<style:style style:name=\"Default\" style:family=\"table-cell\"><style:text-properties fo:font-family=\"" + (OdsWriter.esc(face)) + "\" fo:font-size=\"" + size + "\"/></style:style>")
+        str_append out "</office:styles>"
+        str_append out "<office:automatic-styles><style:page-layout style:name=\"pm1\"/></office:automatic-styles>"
+        str_append out "<office:master-styles><style:master-page style:name=\"Default\" style:page-layout-name=\"pm1\"/></office:master-styles>"
+        str_append out "</office:document-styles>"
+        return out
+    }
+
+    sfn manifestXml:string () {
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        str_append out "<manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\" manifest:version=\"1.3\">"
+        str_append out "<manifest:file-entry manifest:full-path=\"/\" manifest:version=\"1.3\" manifest:media-type=\"application/vnd.oasis.opendocument.spreadsheet\"/>"
+        str_append out "<manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/>"
+        str_append out "<manifest:file-entry manifest:full-path=\"styles.xml\" manifest:media-type=\"text/xml\"/>"
+        str_append out "<manifest:file-entry manifest:full-path=\"meta.xml\" manifest:media-type=\"text/xml\"/>"
+        str_append out "</manifest:manifest>"
+        return out
+    }
+
+    sfn metaXml:string (book:WorkbookModel) {
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        str_append out "<office:document-meta xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:meta=\"urn:oasis:names:tc:opendocument:xmlns:meta:1.0\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" office:version=\"1.3\"><office:meta><meta:generator>EVGSheets</meta:generator>"
+        if ((strlen book.propTitle) > 0) {
+            str_append out ("<dc:title>" + (OdsWriter.esc(book.propTitle)) + "</dc:title>")
+        }
+        if ((strlen book.propSubject) > 0) {
+            str_append out ("<dc:subject>" + (OdsWriter.esc(book.propSubject)) + "</dc:subject>")
+        }
+        if ((strlen book.propAuthor) > 0) {
+            str_append out ("<meta:initial-creator>" + (OdsWriter.esc(book.propAuthor)) + "</meta:initial-creator>")
+        }
+        str_append out "</office:meta></office:document-meta>"
+        return out
+    }
+
+    fn writeToBuffer:buffer (book:WorkbookModel) {
+        lastError = ""
+        if ((book.sheetCount()) == 0) {
+            lastError = "workbook has no sheets"
+            return (buffer_alloc 0)
+        }
+        def content:string (this.contentXml(book))
+        def z:ZipWriter (new ZipWriter)
+        z.create()
+        XlsxWriter.addPart(z "mimetype" "application/vnd.oasis.opendocument.spreadsheet")
+        XlsxWriter.addPart(z "META-INF/manifest.xml" (OdsWriter.manifestXml()))
+        XlsxWriter.addPart(z "meta.xml" (OdsWriter.metaXml(book)))
+        XlsxWriter.addPart(z "styles.xml" (OdsWriter.stylesXml(book)))
+        XlsxWriter.addPart(z "content.xml" content)
+        return (z.toBuffer())
+    }
+
+    fn write:boolean (book:WorkbookModel dir:string name:string) {
+        def data:buffer (this.writeToBuffer(book))
+        if ((buffer_length data) == 0) {
+            return false
+        }
+        buffer_write_file dir name data
+        return true
+    }
+}

@@ -1,0 +1,211 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; WorkbookImport — which kind of workbook a file is, and the readers for the
+; kinds that are not .xlsx.
+; ==============================================================================
+;
+; The contents decide, not the name: a .xls renamed .xlsx is still a compound
+; file, and a .xlsm is the same package as a .xlsx. The name only decides
+; between the text formats, which have no signature, and is the fallback when
+; bytes say nothing.
+;
+;   xlsx       a SpreadsheetML package (.xlsx .xlsm .xltx .xltm) — XlsxLoader
+;   encrypted  a password-protected OOXML package — XlsxLoader decrypts it
+;   xls        Excel 97-2003 (.xls .xlt) — XlsLoader
+;   xlsb       Excel binary workbook — XlsbLoader (values only)
+;   ods        OpenDocument spreadsheet — OdsLoader
+;   csv, tsv   text — TextWorkbook
+;
+; An import is a new workbook: it has no package to write back over, so Save
+; writes .xlsx (or .ods, which OdsWriter can write) — see `saveNameFor`.
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+Import "Cfb.rgr"
+Import "XlsLoader.rgr"
+Import "OdsLoader.rgr"
+Import "XlsbLoader.rgr"
+Import "TextWorkbook.rgr"
+Import "../../../ooxml/OpcPackage.rgr"
+Import "../WorkbookModel.rgr"
+Import "../FormulaEngine.rgr"
+
+class WorkbookImport {
+    def lastError:string ""
+    def notes:[string]
+    def engine:FormulaEngine (new FormulaEngine)
+
+    Constructor () {
+    }
+
+    sfn isZip:boolean (b:buffer) {
+        if ((buffer_length b) < 4) {
+            return false
+        }
+        return (((buffer_get b 0) == 80) && ((buffer_get b 1) == 75) && ((buffer_get b 2) == 3) && ((buffer_get b 3) == 4))
+    }
+
+    sfn textKindOf:string (name:string) {
+        def ext:string (SheetBytes.extOf(name))
+        if ((ext == "tsv") || (ext == "tab")) {
+            return "tsv"
+        }
+        if ((ext == "csv") || (ext == "txt") || (ext == "prn")) {
+            return "csv"
+        }
+        return ""
+    }
+
+    sfn kindOf:string (bytes:buffer name:string) {
+        if (WorkbookImport.isZip(bytes)) {
+            def pkg:OpcPackage (new OpcPackage())
+            if (pkg.openBytes(bytes name)) {
+                def kind:string "zip"
+                if (pkg.hasPart("xl/workbook.xml")) {
+                    kind = "xlsx"
+                } {
+                    if (pkg.hasPart("xl/workbook.bin")) {
+                        kind = "xlsb"
+                    } {
+                        if (pkg.hasPart("content.xml")) {
+                            def mt:string (pkg.readXml("mimetype"))
+                            if (((indexOf mt "opendocument.spreadsheet") >= 0) || ((strlen mt) == 0)) {
+                                kind = "ods"
+                            }
+                        }
+                    }
+                }
+                pkg.close()
+                if (kind != "zip") {
+                    return kind
+                }
+            }
+            ; A ZIP that is none of these: let the .xlsx reader say what is
+            ; wrong with it.
+            return "xlsx"
+        }
+        if (Cfb.isCompound(bytes)) {
+            def cf:Cfb (new Cfb)
+            if (cf.open(bytes)) {
+                if ((cf.hasStream("EncryptionInfo")) || (cf.hasStream("EncryptedPackage"))) {
+                    return "encrypted"
+                }
+                if ((cf.hasStream("Workbook")) || (cf.hasStream("Book"))) {
+                    return "xls"
+                }
+            }
+            return "encrypted"
+        }
+        def text:string (WorkbookImport.textKindOf(name))
+        if ((strlen text) > 0) {
+            return text
+        }
+        def ext:string (SheetBytes.extOf(name))
+        if ((ext == "xlsx") || (ext == "xlsm") || (ext == "xltx") || (ext == "xltm")) {
+            return "xlsx"
+        }
+        if (WorkbookImport.looksLikeText(bytes)) {
+            return "csv"
+        }
+        return "unknown"
+    }
+
+    ; No NUL bytes in the first few kilobytes, and something in it.
+    sfn looksLikeText:boolean (b:buffer) {
+        def n:int (buffer_length b)
+        if (n == 0) {
+            return false
+        }
+        if (n > 4096) {
+            n = 4096
+        }
+        def i:int 0
+        while (i < n) {
+            if ((buffer_get b i) == 0) {
+                return false
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    ; Is this a kind `load` reads (the rest go to XlsxLoader)?
+    sfn isImportKind:boolean (kind:string) {
+        return ((kind == "xls") || (kind == "xlsb") || (kind == "ods") || (kind == "csv") || (kind == "tsv"))
+    }
+
+    ; What a Save should be called after opening `source`: the formats this
+    ; editor can write keep their name, the rest become .xlsx beside it.
+    sfn saveNameFor:string (source:string) {
+        def ext:string (SheetBytes.extOf(source))
+        if ((ext == "xlsx") || (ext == "xlsm") || (ext == "xltx") || (ext == "xltm") || (ext == "ods")) {
+            return source
+        }
+        if ((strlen source) == 0) {
+            return source
+        }
+        return (SheetBytes.withExt(source "xlsx"))
+    }
+
+    fn load:boolean (bytes:buffer name:string book:WorkbookModel) {
+        lastError = ""
+        clear notes
+        def kind:string (WorkbookImport.kindOf(bytes name))
+        def ok:boolean false
+        if (kind == "xls") {
+            def xl:XlsLoader (new XlsLoader)
+            ok = (xl.loadBytes(bytes book))
+            lastError = xl.lastError
+            this.takeNotes(xl.notes)
+            if ok {
+                this.note("opened an Excel 97-2003 workbook; charts, pictures, notes and conditional formats are not imported; Save writes .xlsx")
+            }
+        }
+        if (kind == "ods") {
+            def od:OdsLoader (new OdsLoader)
+            ok = (od.loadBytes(bytes book))
+            lastError = od.lastError
+            this.takeNotes(od.notes)
+            if ok {
+                this.note("opened an OpenDocument spreadsheet; charts, pictures, notes and conditional formats are not imported")
+            }
+        }
+        if (kind == "xlsb") {
+            def xb:XlsbLoader (new XlsbLoader)
+            ok = (xb.loadBytes(bytes book))
+            lastError = xb.lastError
+            this.takeNotes(xb.notes)
+            if ok {
+                this.note("opened an Excel binary workbook: values and number formats only; Save writes .xlsx")
+            }
+        }
+        if ((kind == "csv") || (kind == "tsv")) {
+            def tw:TextWorkbook (new TextWorkbook)
+            ok = (tw.loadBytes(bytes name kind book))
+            lastError = tw.lastError
+        }
+        if ((kind == "unknown") || (kind == "xlsx") || (kind == "encrypted")) {
+            lastError = "not a workbook this reader opens"
+            return false
+        }
+        if ok {
+            book.sourceBytes = (buffer_alloc 0)
+            engine.attach(book)
+            engine.rebuildAll()
+        }
+        return ok
+    }
+
+    fn note:void (msg:string) {
+        push notes msg
+    }
+
+    fn takeNotes:void (list:[string]) {
+        def i:int 0
+        while (i < (array_length list)) {
+            push notes (itemAt list i)
+            i = (i + 1)
+        }
+    }
+}

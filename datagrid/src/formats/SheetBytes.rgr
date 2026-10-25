@@ -1,0 +1,219 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; SheetBytes — little-endian numbers and UTF-16 text out of a byte buffer.
+; ==============================================================================
+;
+; The binary workbook formats (.xls, .xlsb, and the compound file around the
+; first) are all little-endian records of fixed-width integers, IEEE doubles
+; and UTF-16 strings. Ranger has `buffer_get` and nothing wider, so the rest is
+; built here once.
+;
+; 32-bit values are read SIGNED (`i32`). Sector ids and record sizes in these
+; formats are below 2^31 when they are real, and the special ids (end of chain,
+; free sector) are the negative ones, which is easier to test for than numbers
+; near 2^32 on a target whose `int` is 32 bits.
+; ==============================================================================
+
+Import "pkg:evg/EVGCodepoint.rgr"
+
+class SheetBytes {
+
+    sfn u8:int (b:buffer at:int) {
+        if ((at < 0) || (at >= (buffer_length b))) {
+            return 0
+        }
+        return (buffer_get b at)
+    }
+
+    sfn u16:int (b:buffer at:int) {
+        return ((SheetBytes.u8(b at)) + ((SheetBytes.u8(b (at + 1))) * 256))
+    }
+
+    sfn i32:int (b:buffer at:int) {
+        def lo:int (SheetBytes.u16(b at))
+        def hi:int (SheetBytes.u16(b (at + 2)))
+        if (hi >= 32768) {
+            hi = (hi - 65536)
+        }
+        return ((hi * 65536) + lo)
+    }
+
+    ; 2^n for the exponents a double can have, by squaring.
+    sfn pow2:double (n:int) {
+        def out:double 1.0
+        def base:double 2.0
+        def e:int n
+        if (n < 0) {
+            base = 0.5
+            e = (0 - n)
+        }
+        while (e > 0) {
+            if ((e % 2) == 1) {
+                out = (out * base)
+            }
+            base = (base * base)
+            e = (floor (e / 2))
+        }
+        return out
+    }
+
+    ; An IEEE 754 double, assembled from its bytes: sign, 11-bit exponent,
+    ; 52-bit mantissa. Every step is exact in a double. NaN and infinity come
+    ; back as 0, which no spreadsheet cell can hold anyway.
+    sfn f64:double (b:buffer at:int) {
+        def b7:int (SheetBytes.u8(b (at + 7)))
+        def b6:int (SheetBytes.u8(b (at + 6)))
+        def neg:boolean (b7 >= 128)
+        def exp:int ((((b7 % 128) * 16)) + (floor (b6 / 16)))
+        def mant:double (to_double (b6 % 16))
+        def k:int 5
+        while (k >= 0) {
+            mant = ((mant * 256.0) + (to_double (SheetBytes.u8(b (at + k)))))
+            k = (k - 1)
+        }
+        if (exp == 2047) {
+            return 0.0
+        }
+        def v:double 0.0
+        if (exp == 0) {
+            v = (mant * (SheetBytes.pow2(-1074)))
+        } {
+            v = ((1.0 + (mant * (SheetBytes.pow2(-52)))) * (SheetBytes.pow2((exp - 1023))))
+        }
+        if neg {
+            return (0.0 - v)
+        }
+        return v
+    }
+
+    ; Excel's RK number: a 30-bit integer or the top 30 bits of a double, and
+    ; a flag that says the value was multiplied by 100.
+    sfn rk:double (b:buffer at:int) {
+        def b0:int (SheetBytes.u8(b at))
+        def v:double 0.0
+        if ((bit_and b0 2) != 0) {
+            def raw:int (SheetBytes.i32(b at))
+            v = (to_double (floor (raw / 4)))
+        } {
+            def d:buffer (buffer_alloc 8)
+            buffer_set d 4 (bit_and b0 252)
+            buffer_set d 5 (SheetBytes.u8(b (at + 1)))
+            buffer_set d 6 (SheetBytes.u8(b (at + 2)))
+            buffer_set d 7 (SheetBytes.u8(b (at + 3)))
+            v = (SheetBytes.f64(d 0))
+        }
+        if ((bit_and b0 1) != 0) {
+            v = (v / 100.0)
+        }
+        return v
+    }
+
+    ; `n` UTF-16LE code units from `at`, or `n` single bytes when `wide` is
+    ; false (the "compressed" Latin-1 form .xls writes when it can).
+    sfn utf16:string (b:buffer at:int n:int wide:boolean) {
+        def parts:[string]
+        def i:int 0
+        def pos:int at
+        while (i < n) {
+            def u:int 0
+            if wide {
+                u = (SheetBytes.u16(b pos))
+                pos = (pos + 2)
+            } {
+                u = (SheetBytes.u8(b pos))
+                pos = (pos + 1)
+            }
+            if ((u >= 55296) && (u < 56320) && ((i + 1) < n) && wide) {
+                def lo:int (SheetBytes.u16(b pos))
+                if ((lo >= 56320) && (lo < 57344)) {
+                    pos = (pos + 2)
+                    i = (i + 1)
+                    u = ((((u - 55296) * 1024) + (lo - 56320)) + 65536)
+                }
+            }
+            push parts (EVGCodepoint.toStr(u))
+            i = (i + 1)
+        }
+        return (join parts "")
+    }
+
+    ; Code units collected one at a time — a string continued across records
+    ; changes width in the middle, so it cannot be read in one call.
+    sfn unitsToString:string (units:[int]) {
+        def parts:[string]
+        def i:int 0
+        def n:int (array_length units)
+        while (i < n) {
+            def u:int (itemAt units i)
+            if ((u >= 55296) && (u < 56320) && ((i + 1) < n)) {
+                def lo:int (itemAt units (i + 1))
+                if ((lo >= 56320) && (lo < 57344)) {
+                    u = ((((u - 55296) * 1024) + (lo - 56320)) + 65536)
+                    i = (i + 1)
+                }
+            }
+            push parts (EVGCodepoint.toStr(u))
+            i = (i + 1)
+        }
+        return (join parts "")
+    }
+
+    ; A number as a cell's raw text: integers without a decimal point, the
+    ; rest as the shortest form that reads back the same.
+    sfn numText:string (v:double) {
+        def lim:double 1000000000000000.0
+        if ((v < lim) && (v > (0.0 - lim)) && (v == (to_double (to_int v)))) {
+            return (to_string (to_int v))
+        }
+        return (to_string v)
+    }
+
+    sfn lower:string (s:string) {
+        return (to_lowercase s)
+    }
+
+    ; The extension of a file name, lowercased, without the dot.
+    sfn extOf:string (name:string) {
+        def dot:int -1
+        def i:int 0
+        def n:int (strlen name)
+        while (i < n) {
+            def ch:int (charAt name i)
+            if (ch == 46) {
+                dot = i
+            }
+            if ((ch == 47) || (ch == 92)) {
+                dot = -1
+            }
+            i = (i + 1)
+        }
+        if (dot < 0) {
+            return ""
+        }
+        return (to_lowercase (substring name (dot + 1) n))
+    }
+
+    ; The same name with another extension.
+    sfn withExt:string (name:string ext:string) {
+        def old:string (SheetBytes.extOf(name))
+        if ((strlen old) == 0) {
+            return (name + "." + ext)
+        }
+        return ((substring name 0 (((strlen name) - (strlen old)) - 1)) + "." + ext)
+    }
+
+    ; Built-in number formats 0-49, as [MS-XLS] 2.5.165 and ECMA-376 18.8.30
+    ; list them, in the en-US spelling Excel shows.
+    sfn builtinNumFmt:string (id:int) {
+        def table:[string] ([] _:string ("General" "0" "0.00" "#,##0" "#,##0.00" "\"$\"#,##0_);(\"$\"#,##0)" "\"$\"#,##0_);[Red](\"$\"#,##0)" "\"$\"#,##0.00_);(\"$\"#,##0.00)" "\"$\"#,##0.00_);[Red](\"$\"#,##0.00)" "0%" "0.00%" "0.00E+00" "# ?/?" "# ??/??" "m/d/yyyy" "d-mmm-yy" "d-mmm" "mmm-yy" "h:mm AM/PM" "h:mm:ss AM/PM" "h:mm" "h:mm:ss" "m/d/yyyy h:mm" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "#,##0_);(#,##0)" "#,##0_);[Red](#,##0)" "#,##0.00_);(#,##0.00)" "#,##0.00_);[Red](#,##0.00)" "_(* #,##0_);_(* (#,##0);_(* \"-\"_);_(@_)" "_(\"$\"* #,##0_);_(\"$\"* (#,##0);_(\"$\"* \"-\"_);_(@_)" "_(* #,##0.00_);_(* (#,##0.00);_(* \"-\"??_);_(@_)" "_(\"$\"* #,##0.00_);_(\"$\"* (#,##0.00);_(\"$\"* \"-\"??_);_(@_)" "mm:ss" "[h]:mm:ss" "mm:ss.0" "##0.0E+0" "@"))
+        if ((id < 0) || (id >= (array_length table))) {
+            return "General"
+        }
+        def code:string (itemAt table id)
+        if ((strlen code) == 0) {
+            return "General"
+        }
+        return code
+    }
+}
