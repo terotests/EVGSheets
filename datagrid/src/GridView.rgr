@@ -472,7 +472,7 @@ class GridView {
     ; Where `general` alignment puts the value of the cell being painted:
     ; "right" for a number, "center" for TRUE, FALSE and errors, "" for text.
     ; A text format (@) keeps everything as text.
-    sfn generalSide:string (raw:string numFmt:string) {
+    sfn generalSideOf:string (raw:string numFmt:string) {
         if ((strlen raw) == 0) {
             return ""
         }
@@ -1104,7 +1104,7 @@ class GridView {
             }
         }
         def txt:string (model.getDisplay(r c))
-        generalSide = (GridView.generalSide((model.getCell(r c)) st.numFmt))
+        generalSide = (GridView.generalSideOf((model.getCell(r c)) st.numFmt))
         ; Formulas > Show Formulas: the formula itself, on the left.
         if model.showFormulas {
             if (model.hasFormula(r c)) {
