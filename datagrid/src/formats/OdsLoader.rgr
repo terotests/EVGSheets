@@ -1,0 +1,1198 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; OdsLoader — an OpenDocument spreadsheet (.ods) into a WorkbookModel.
+; ==============================================================================
+;
+; An .ods is a ZIP whose content.xml holds every sheet:
+;
+;   <table:table table:name="Sheet1">
+;     <table:table-column table:style-name="co1" table:number-columns-repeated="3"/>
+;     <table:table-row table:style-name="ro1">
+;       <table:table-cell office:value-type="float" office:value="3"
+;                         table:formula="of:=[.A1]+1" table:style-name="ce1">
+;         <text:p>3</text:p>
+;       </table:table-cell>
+;       <table:covered-table-cell/>          (under a merge)
+;
+; Rows and cells are run-length coded (`number-rows-repeated`,
+; `number-columns-repeated`), and a sheet usually ends in one empty row
+; repeated a million times — so repeats are honoured only for what has
+; content, and an empty run is a jump.
+;
+; Read: values (numbers, text, booleans, dates, times, percentages,
+; currencies), formulas (OpenFormula turned into Excel text, `OdsFormula`),
+; cell styles (font, colour, fill, borders, alignment, wrap, number format),
+; merges, column widths, row heights, hidden rows, columns and sheets,
+; named ranges. Not read: charts, pictures, comments, conditional formats.
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+Import "OdsFormula.rgr"
+Import "../xlsx/XmlLite.rgr"
+Import "../../../ooxml/OpcPackage.rgr"
+Import "../WorkbookModel.rgr"
+Import "../SpreadsheetModel.rgr"
+Import "../CellStyle.rgr"
+Import "../DateSerial.rgr"
+
+; A table-cell style as read, before its parent is folded in.
+class OdsCellStyle {
+    def name:string ""
+    def parent:string ""
+    def dataStyle:string ""
+    def st:CellStyle (new CellStyle)
+    ; Which properties this style itself stated, so a parent fills the rest.
+    def marks:[string:boolean]
+
+    Constructor () {
+    }
+
+    fn mark:void (k:string) {
+        set marks k true
+    }
+
+    fn stated:boolean (k:string) {
+        return (has marks k)
+    }
+}
+
+class OdsLoader {
+    def lastError:string ""
+    def notes:[string]
+    def cellStyles:[string:OdsCellStyle]
+    def numFormats:[string:string]
+    def numMaps:[string:string]
+    def colWidths:[string:int]
+    def rowHeights:[string:int]
+    def tableHidden:[string:boolean]
+    def resolved:[string:CellStyle]
+    def styleIds:[string:int]
+    ; Index 0 is what a cell with no style is drawn in.
+    def styleList:[CellStyle]
+
+    Constructor () {
+        push styleList (new CellStyle)
+    }
+
+    fn note:void (msg:string) {
+        def i:int 0
+        while (i < (array_length notes)) {
+            if ((itemAt notes i) == msg) {
+                return
+            }
+            i = (i + 1)
+        }
+        push notes msg
+    }
+
+    ; "0.889in", "2.26cm", "12pt" → pixels at 96 per inch.
+    sfn lengthPx:double (s:string) {
+        def n:int (strlen s)
+        def i:int 0
+        while ((i < n) && ((((charAt s i) >= 48) && ((charAt s i) <= 57)) || ((charAt s i) == 46) || ((charAt s i) == 45))) {
+            i = (i + 1)
+        }
+        def v@(optional):double (to_double (substring s 0 i))
+        if (null? v) {
+            return 0.0
+        }
+        def x:double (unwrap v)
+        def unit:string (substring s i n)
+        if (unit == "in") {
+            return (x * 96.0)
+        }
+        if (unit == "cm") {
+            return ((x * 96.0) / 2.54)
+        }
+        if (unit == "mm") {
+            return ((x * 96.0) / 25.4)
+        }
+        if (unit == "pt") {
+            return ((x * 96.0) / 72.0)
+        }
+        if (unit == "pc") {
+            return (x * 16.0)
+        }
+        return x
+    }
+
+    sfn lengthPt:double (s:string) {
+        return (((OdsLoader.lengthPx(s)) * 72.0) / 96.0)
+    }
+
+    sfn toInt:int (s:string fallback:int) {
+        def v@(optional):int (to_int s)
+        if (null? v) {
+            return fallback
+        }
+        return (unwrap v)
+    }
+
+    fn loadBytes:boolean (bytes:buffer book:WorkbookModel) {
+        lastError = ""
+        def pkg:OpcPackage (new OpcPackage())
+        if ((pkg.openBytes(bytes "book.ods")) == false) {
+            lastError = "could not open the OpenDocument file: not a zip"
+            return false
+        }
+        if (pkg.hasPart("META-INF/manifest.xml")) {
+            def man:string (pkg.readXml("META-INF/manifest.xml"))
+            if ((indexOf man "encryption-data") >= 0) {
+                pkg.close()
+                lastError = "this .ods file is password-protected; remove the password in LibreOffice and try again"
+                return false
+            }
+        }
+        def content:string (pkg.readXml("content.xml"))
+        if ((strlen content) == 0) {
+            pkg.close()
+            lastError = "the OpenDocument file has no content.xml"
+            return false
+        }
+        ; Common styles first: automatic ones name them as parents.
+        if (pkg.hasPart("styles.xml")) {
+            this.readStyles((pkg.readXml("styles.xml")))
+        }
+        this.readStyles(content)
+        pkg.close()
+        if (has cellStyles "Default") {
+            set_at styleList 0 (this.resolve("Default" 0))
+        }
+        book.clear()
+        this.readBody(content book)
+        if ((book.sheetCount()) == 0) {
+            lastError = "the OpenDocument file has no sheets"
+            return false
+        }
+        def first:int 0
+        def k:int 0
+        while (k < (book.sheetCount())) {
+            def sh:SpreadsheetModel (book.sheetAt(k))
+            if (sh.sheetHidden == false) {
+                first = k
+                break
+            }
+            k = (k + 1)
+        }
+        book.setActive(first)
+        return true
+    }
+
+    ; --- styles -----------------------------------------------------------------
+
+    fn readStyles:void (xml:string) {
+        def p:XmlLite (new XmlLite)
+        p.reset(xml)
+        def cur:OdsCellStyle (new OdsCellStyle)
+        def inCell:boolean false
+        def family:string ""
+        def styleName:string ""
+        ; number styles
+        def numName:string ""
+        def numParts:[string]
+        def numKind:string ""
+        def numMap:string ""
+        while true {
+            def t:XmlTag (p.nextTag())
+            if (t.valid == false) {
+                break
+            }
+            def nm:string t.name
+            if ((nm == "style") && (t.isEnd == false)) {
+                family = (t.attr("style:family"))
+                styleName = (t.attr("style:name"))
+                if (family == "table-cell") {
+                    def cs:OdsCellStyle (new OdsCellStyle)
+                    cs.name = styleName
+                    cs.parent = (t.attr("style:parent-style-name"))
+                    cs.dataStyle = (t.attr("style:data-style-name"))
+                    set cellStyles styleName cs
+                    cur = cs
+                    inCell = true
+                } {
+                    inCell = false
+                }
+                if t.selfClose {
+                    family = ""
+                }
+                continue
+            }
+            if ((nm == "style") && t.isEnd) {
+                family = ""
+                continue
+            }
+            if ((nm == "table-column-properties") && (family == "table-column")) {
+                def w:string (t.attr("style:column-width"))
+                if ((strlen w) > 0) {
+                    set colWidths styleName (to_int ((OdsLoader.lengthPx(w)) + 0.5))
+                }
+                continue
+            }
+            if ((nm == "table-row-properties") && (family == "table-row")) {
+                def h:string (t.attr("style:row-height"))
+                def optimal:string (t.attr("style:use-optimal-row-height"))
+                if (((strlen h) > 0) && (optimal != "true")) {
+                    set rowHeights styleName (to_int ((OdsLoader.lengthPx(h)) + 0.5))
+                }
+                continue
+            }
+            if ((nm == "table-properties") && (family == "table")) {
+                if ((t.attr("table:display")) == "false") {
+                    set tableHidden styleName true
+                }
+                continue
+            }
+            if ((family == "table-cell") && inCell) {
+                def cs2:OdsCellStyle cur
+                if (nm == "table-cell-properties") {
+                    this.cellProps(t cs2)
+                }
+                if (nm == "paragraph-properties") {
+                    def ta:string (t.attr("fo:text-align"))
+                    if ((strlen ta) > 0) {
+                        if ((ta == "start") || (ta == "left")) {
+                            cs2.st.align = "left"
+                        }
+                        if (ta == "center") {
+                            cs2.st.align = "center"
+                        }
+                        if ((ta == "end") || (ta == "right")) {
+                            cs2.st.align = "right"
+                        }
+                        if (ta == "justify") {
+                            cs2.st.align = "justify"
+                        }
+                        cs2.st.alignSet = true
+                        cs2.mark("align")
+                    }
+                    def ml:string (t.attr("fo:margin-left"))
+                    if ((strlen ml) > 0) {
+                        def ind:int (to_int (((OdsLoader.lengthPx(ml)) / 9.0) + 0.5))
+                        if (ind > 0) {
+                            cs2.st.indent = ind
+                            cs2.mark("indent")
+                        }
+                    }
+                }
+                if (nm == "text-properties") {
+                    this.textProps(t cs2)
+                }
+                continue
+            }
+            ; --- number styles
+            if (((nm == "number-style") || (nm == "percentage-style") || (nm == "currency-style") || (nm == "date-style") || (nm == "time-style") || (nm == "text-style") || (nm == "boolean-style")) && (t.isEnd == false)) {
+                numName = (t.attr("style:name"))
+                numKind = nm
+                clear numParts
+                numMap = ""
+                if (nm == "time-style") {
+                    if ((t.attr("number:truncate-on-overflow")) == "false") {
+                        numKind = "duration"
+                    }
+                }
+                if t.selfClose {
+                    this.endNumStyle(numName numKind numParts numMap)
+                    numName = ""
+                }
+                continue
+            }
+            if (((nm == "number-style") || (nm == "percentage-style") || (nm == "currency-style") || (nm == "date-style") || (nm == "time-style") || (nm == "text-style") || (nm == "boolean-style")) && t.isEnd) {
+                if ((strlen numName) > 0) {
+                    this.endNumStyle(numName numKind numParts numMap)
+                }
+                numName = ""
+                continue
+            }
+            if ((strlen numName) > 0) {
+                this.numPart(p t numParts numKind)
+                if ((nm == "map") && ((t.attr("style:condition")) == "value()>=0")) {
+                    numMap = (t.attr("style:apply-style-name"))
+                }
+            }
+        }
+    }
+
+    fn cellProps:void (t:XmlTag cs:OdsCellStyle) {
+        def bg:string (t.attr("fo:background-color"))
+        if (((strlen bg) == 7) && ((charAt bg 0) == 35)) {
+            cs.st.hasFill = true
+            cs.st.fillRgb = (to_uppercase bg)
+            cs.mark("fill")
+        }
+        if (bg == "transparent") {
+            cs.st.hasFill = false
+            cs.mark("fill")
+        }
+        def wrap:string (t.attr("fo:wrap-option"))
+        if (wrap == "wrap") {
+            cs.st.wrapText = true
+            cs.mark("wrap")
+        }
+        def va:string (t.attr("style:vertical-align"))
+        if (va == "top") {
+            cs.st.valign = "top"
+            cs.mark("valign")
+        }
+        if (va == "middle") {
+            cs.st.valign = "center"
+            cs.mark("valign")
+        }
+        if (va == "bottom") {
+            cs.st.valign = "bottom"
+            cs.mark("valign")
+        }
+        def rot:string (t.attr("style:rotation-angle"))
+        if ((strlen rot) > 0) {
+            def deg:int (OdsLoader.toInt(rot 0))
+            if ((deg > 0) && (deg <= 90)) {
+                cs.st.textRotation = deg
+                cs.mark("rotation")
+            }
+            if ((deg >= 270) && (deg < 360)) {
+                cs.st.textRotation = (90 + (360 - deg))
+                cs.mark("rotation")
+            }
+        }
+        def all:string (t.attr("fo:border"))
+        if ((strlen all) > 0) {
+            this.border(all cs.st.borderTop)
+            this.border(all cs.st.borderRight)
+            this.border(all cs.st.borderBottom)
+            this.border(all cs.st.borderLeft)
+            cs.mark("border")
+        }
+        if (t.has("fo:border-top")) {
+            this.border((t.attr("fo:border-top")) cs.st.borderTop)
+            cs.mark("border")
+        }
+        if (t.has("fo:border-right")) {
+            this.border((t.attr("fo:border-right")) cs.st.borderRight)
+            cs.mark("border")
+        }
+        if (t.has("fo:border-bottom")) {
+            this.border((t.attr("fo:border-bottom")) cs.st.borderBottom)
+            cs.mark("border")
+        }
+        if (t.has("fo:border-left")) {
+            this.border((t.attr("fo:border-left")) cs.st.borderLeft)
+            cs.mark("border")
+        }
+        cs.st.hasBorder = ((cs.st.borderTop.has()) || (cs.st.borderRight.has()) || (cs.st.borderBottom.has()) || (cs.st.borderLeft.has()))
+    }
+
+    ; "0.74pt solid #000000" → thin, black.
+    fn border:void (spec:string b:CellBorder) {
+        if ((spec == "none") || ((strlen spec) == 0)) {
+            b.style = ""
+            return
+        }
+        def parts:[string] (strsplit spec " ")
+        def width:double 0.75
+        def kind:string "solid"
+        def rgb:string "#000000"
+        def i:int 0
+        while (i < (array_length parts)) {
+            def p:string (itemAt parts i)
+            if ((strlen p) > 0) {
+                if ((charAt p 0) == 35) {
+                    rgb = (to_uppercase p)
+                } {
+                    if (((charAt p 0) >= 48) && ((charAt p 0) <= 57)) {
+                        width = (OdsLoader.lengthPt(p))
+                    } {
+                        kind = p
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+        def style:string "thin"
+        if (width > 1.6) {
+            style = "medium"
+        }
+        if (width > 2.6) {
+            style = "thick"
+        }
+        if (kind == "double") {
+            style = "double"
+        }
+        if ((kind == "dashed") || (kind == "dash")) {
+            style = "dashed"
+            if (width > 1.6) {
+                style = "mediumDashed"
+            }
+        }
+        if (kind == "dotted") {
+            style = "dotted"
+        }
+        if (width < 0.3) {
+            style = "hair"
+        }
+        b.style = style
+        b.rgb = rgb
+    }
+
+    fn textProps:void (t:XmlTag cs:OdsCellStyle) {
+        if ((t.attr("fo:font-weight")) == "bold") {
+            cs.st.bold = true
+            cs.mark("bold")
+        }
+        if ((t.attr("fo:font-weight")) == "normal") {
+            cs.st.bold = false
+            cs.mark("bold")
+        }
+        if ((t.attr("fo:font-style")) == "italic") {
+            cs.st.italic = true
+            cs.mark("italic")
+        }
+        def ul:string (t.attr("style:text-underline-style"))
+        if ((strlen ul) > 0) {
+            cs.st.underline = (ul != "none")
+            cs.mark("underline")
+        }
+        def lt:string (t.attr("style:text-line-through-style"))
+        if ((strlen lt) > 0) {
+            cs.st.strike = (lt != "none")
+            cs.mark("strike")
+        }
+        def col:string (t.attr("fo:color"))
+        if (((strlen col) == 7) && ((charAt col 0) == 35)) {
+            cs.st.textRgb = (to_uppercase col)
+            cs.mark("color")
+        }
+        def fs:string (t.attr("fo:font-size"))
+        if ((strlen fs) > 0) {
+            if ((indexOf fs "%") < 0) {
+                cs.st.fontSizePt = (OdsLoader.lengthPt(fs))
+                cs.mark("size")
+            }
+        }
+        def face:string (t.attr("style:font-name"))
+        if ((strlen face) > 0) {
+            cs.st.fontName = face
+            cs.mark("font")
+        }
+    }
+
+    ; One element of a number style, as Excel format-code text.
+    fn numPart:void (p:XmlLite t:XmlTag parts:[string] kind:string) {
+        def nm:string t.name
+        if (t.isEnd) {
+            return
+        }
+        def isLong:boolean ((t.attr("number:style")) == "long")
+        if (nm == "number") {
+            def dec:int (OdsLoader.toInt((t.attr("number:decimal-places")) 0))
+            if (t.has("number:min-decimal-places")) {
+                def mind:int (OdsLoader.toInt((t.attr("number:min-decimal-places")) dec))
+                if (mind < dec) {
+                    dec = mind
+                }
+            }
+            def minInt:int (OdsLoader.toInt((t.attr("number:min-integer-digits")) 1))
+            def grouping:boolean ((t.attr("number:grouping")) == "true")
+            push parts (OdsLoader.numberPattern(minInt dec grouping))
+            return
+        }
+        if (nm == "scientific-number") {
+            def sdec:int (OdsLoader.toInt((t.attr("number:decimal-places")) 2))
+            def ed:int (OdsLoader.toInt((t.attr("number:min-exponent-digits")) 2))
+            def exp:string ""
+            def k:int 0
+            while (k < ed) {
+                exp = (exp + "0")
+                k = (k + 1)
+            }
+            push parts ((OdsLoader.numberPattern(1 sdec false)) + "E+" + exp)
+            return
+        }
+        if (nm == "fraction") {
+            def dd:int (OdsLoader.toInt((t.attr("number:min-denominator-digits")) 1))
+            def q:string ""
+            def k2:int 0
+            while (k2 < dd) {
+                q = (q + "?")
+                k2 = (k2 + 1)
+            }
+            push parts ("# " + q + "/" + q)
+            return
+        }
+        if (nm == "day") {
+            if isLong {
+                push parts "dd"
+            } {
+                push parts "d"
+            }
+            return
+        }
+        if (nm == "month") {
+            if ((t.attr("number:textual")) == "true") {
+                if isLong {
+                    push parts "mmmm"
+                } {
+                    push parts "mmm"
+                }
+            } {
+                if isLong {
+                    push parts "mm"
+                } {
+                    push parts "m"
+                }
+            }
+            return
+        }
+        if (nm == "year") {
+            if isLong {
+                push parts "yyyy"
+            } {
+                push parts "yy"
+            }
+            return
+        }
+        if (nm == "day-of-week") {
+            if isLong {
+                push parts "dddd"
+            } {
+                push parts "ddd"
+            }
+            return
+        }
+        if (nm == "hours") {
+            def hh:string "h"
+            if isLong {
+                hh = "hh"
+            }
+            if (kind == "duration") {
+                hh = ("[" + hh + "]")
+            }
+            push parts hh
+            return
+        }
+        if (nm == "minutes") {
+            if isLong {
+                push parts "mm"
+            } {
+                push parts "m"
+            }
+            return
+        }
+        if (nm == "seconds") {
+            def ss:string "s"
+            if isLong {
+                ss = "ss"
+            }
+            def sd:int (OdsLoader.toInt((t.attr("number:decimal-places")) 0))
+            if (sd > 0) {
+                ss = (ss + ".")
+                def k3:int 0
+                while (k3 < sd) {
+                    ss = (ss + "0")
+                    k3 = (k3 + 1)
+                }
+            }
+            push parts ss
+            return
+        }
+        if (nm == "am-pm") {
+            push parts "AM/PM"
+            return
+        }
+        if (nm == "text-content") {
+            push parts "@"
+            return
+        }
+        if ((nm == "text") && (t.selfClose == false)) {
+            push parts (OdsLoader.literal((p.readTextUntilEnd("text"))))
+            return
+        }
+        if ((nm == "currency-symbol") && (t.selfClose == false)) {
+            def sym:string (p.readTextUntilEnd("currency-symbol"))
+            ; Quoted rather than Excel's [$€-40B] locale form: the symbol
+            ; is what the cell shows, and every formatter reads a literal.
+            push parts ("\"" + sym + "\"")
+            return
+        }
+    }
+
+    sfn numberPattern:string (minInt:int dec:int grouping:boolean) {
+        def ip:string ""
+        def k:int 0
+        while (k < minInt) {
+            ip = (ip + "0")
+            k = (k + 1)
+        }
+        if ((strlen ip) == 0) {
+            ip = "#"
+        }
+        if grouping {
+            while ((strlen ip) < 4) {
+                ip = ("#" + ip)
+            }
+            ip = ((substring ip 0 ((strlen ip) - 3)) + "," + (substring ip ((strlen ip) - 3) (strlen ip)))
+        }
+        if (dec > 0) {
+            ip = (ip + ".")
+            def d:int 0
+            while (d < dec) {
+                ip = (ip + "0")
+                d = (d + 1)
+            }
+        }
+        return ip
+    }
+
+    ; Literal text in a format code: punctuation as it is, the rest quoted.
+    sfn literal:string (s:string) {
+        if ((strlen s) == 0) {
+            return ""
+        }
+        def plain:boolean true
+        def i:int 0
+        while (i < (strlen s)) {
+            def ch:int (charAt s i)
+            if ((ch != 45) && (ch != 47) && (ch != 58) && (ch != 46) && (ch != 44) && (ch != 32) && (ch != 37) && (ch != 40) && (ch != 41)) {
+                plain = false
+            }
+            i = (i + 1)
+        }
+        if plain {
+            return s
+        }
+        return ("\"" + (join (strsplit s "\"") "") + "\"")
+    }
+
+    fn endNumStyle:void (name:string kind:string parts:[string] mapName:string) {
+        def code:string (join parts "")
+        if (kind == "boolean-style") {
+            code = "General"
+        }
+        if (kind == "text-style") {
+            if ((strlen code) == 0) {
+                code = "@"
+            }
+        }
+        if ((strlen code) == 0) {
+            code = "General"
+        }
+        set numFormats name code
+        if ((strlen mapName) > 0) {
+            set numMaps name mapName
+        }
+    }
+
+    ; The Excel code for a data style, with its positive section in front
+    ; when it is the negative half of a pair (`style:map`).
+    fn numFmtFor:string (dataStyle:string) {
+        if ((strlen dataStyle) == 0) {
+            return "General"
+        }
+        if ((has numFormats dataStyle) == false) {
+            return "General"
+        }
+        def code:string (unwrap (get numFormats dataStyle))
+        if (has numMaps dataStyle) {
+            def pos:string (unwrap (get numMaps dataStyle))
+            if (has numFormats pos) {
+                return ((unwrap (get numFormats pos)) + ";" + code)
+            }
+        }
+        return code
+    }
+
+    ; A cell style's CellStyle with its parents folded in, as an index into
+    ; the sheet's style list; -1 for none.
+    fn styleIdOf:int (name:string) {
+        if ((strlen name) == 0) {
+            return -1
+        }
+        if (has styleIds name) {
+            return (unwrap (get styleIds name))
+        }
+        def st:CellStyle (this.resolve(name 0))
+        def id:int -1
+        if ((st.isPlain()) == false) {
+            id = (array_length styleList)
+            push styleList st
+        }
+        set styleIds name id
+        return id
+    }
+
+    fn resolve:CellStyle (name:string depth:int) {
+        if ((has cellStyles name) == false) {
+            return (new CellStyle)
+        }
+        def cs:OdsCellStyle (unwrap (get cellStyles name))
+        def out:CellStyle (new CellStyle)
+        if (((strlen cs.parent) > 0) && (depth < 8)) {
+            out = ((this.resolve(cs.parent (depth + 1))).copy())
+        }
+        def s:CellStyle cs.st
+        if (cs.stated("fill")) {
+            out.hasFill = s.hasFill
+            out.fillRgb = s.fillRgb
+        }
+        if (cs.stated("wrap")) {
+            out.wrapText = s.wrapText
+        }
+        if (cs.stated("valign")) {
+            out.valign = s.valign
+        }
+        if (cs.stated("rotation")) {
+            out.textRotation = s.textRotation
+        }
+        if (cs.stated("border")) {
+            out.borderTop.copyFrom(s.borderTop)
+            out.borderRight.copyFrom(s.borderRight)
+            out.borderBottom.copyFrom(s.borderBottom)
+            out.borderLeft.copyFrom(s.borderLeft)
+            out.hasBorder = s.hasBorder
+        }
+        if (cs.stated("align")) {
+            out.align = s.align
+            out.alignSet = true
+        }
+        if (cs.stated("indent")) {
+            out.indent = s.indent
+        }
+        if (cs.stated("bold")) {
+            out.bold = s.bold
+        }
+        if (cs.stated("italic")) {
+            out.italic = s.italic
+        }
+        if (cs.stated("underline")) {
+            out.underline = s.underline
+        }
+        if (cs.stated("strike")) {
+            out.strike = s.strike
+        }
+        if (cs.stated("color")) {
+            out.textRgb = s.textRgb
+        }
+        if (cs.stated("size")) {
+            out.fontSizePt = s.fontSizePt
+        }
+        if (cs.stated("font")) {
+            out.fontName = s.fontName
+        }
+        if ((strlen cs.dataStyle) > 0) {
+            out.numFmt = (this.numFmtFor(cs.dataStyle))
+        }
+        return out
+    }
+
+    ; --- the sheets -------------------------------------------------------------
+
+    fn ensure:void (sheet:SpreadsheetModel row:int col:int) {
+        if (((row + 1) > sheet.rowCount) || ((col + 1) > sheet.colCount)) {
+            def nr:int sheet.rowCount
+            def nc:int sheet.colCount
+            if ((row + 1) > nr) {
+                nr = (row + 1)
+            }
+            if ((col + 1) > nc) {
+                nc = (col + 1)
+            }
+            sheet.growTo(nr nc)
+        }
+    }
+
+    ; "2024-01-31" or "2024-01-31T12:30:00" → a serial.
+    sfn dateSerial:double (s:string) {
+        if ((strlen s) < 10) {
+            return 0.0
+        }
+        def y:int (OdsLoader.toInt((substring s 0 4) 1900))
+        def m:int (OdsLoader.toInt((substring s 5 7) 1))
+        def d:int (OdsLoader.toInt((substring s 8 10) 1))
+        def v:double (DateSerial.fromYMD(y m d))
+        def tAt:int (indexOf s "T")
+        if (tAt > 0) {
+            def tp:string (substring s (tAt + 1) (strlen s))
+            def hms:[string] (strsplit tp ":")
+            def h:double 0.0
+            def mi:double 0.0
+            def se:double 0.0
+            if ((array_length hms) > 0) {
+                h = (OdsLoader.dbl((itemAt hms 0)))
+            }
+            if ((array_length hms) > 1) {
+                mi = (OdsLoader.dbl((itemAt hms 1)))
+            }
+            if ((array_length hms) > 2) {
+                se = (OdsLoader.dbl((itemAt hms 2)))
+            }
+            v = (v + ((((h * 3600.0) + (mi * 60.0)) + se) / 86400.0))
+        }
+        return v
+    }
+
+    sfn dbl:double (s:string) {
+        def v@(optional):double (to_double s)
+        if (null? v) {
+            return 0.0
+        }
+        return (unwrap v)
+    }
+
+    ; "PT12H30M05S" (or "P1DT2H") → a fraction of a day.
+    sfn durationDays:double (s:string) {
+        def total:double 0.0
+        def num:string ""
+        def inTime:boolean false
+        def i:int 0
+        while (i < (strlen s)) {
+            def ch:int (charAt s i)
+            if ((((ch >= 48) && (ch <= 57)) || (ch == 46))) {
+                num = (num + (substring s i (i + 1)))
+            } {
+                def v:double (OdsLoader.dbl(num))
+                if (ch == 84) {
+                    inTime = true
+                }
+                if ((ch == 68) && (inTime == false)) {
+                    total = (total + v)
+                }
+                if ((ch == 72) && inTime) {
+                    total = (total + (v / 24.0))
+                }
+                if ((ch == 77) && inTime) {
+                    total = (total + (v / 1440.0))
+                }
+                if ((ch == 83) && inTime) {
+                    total = (total + (v / 86400.0))
+                }
+                num = ""
+            }
+            i = (i + 1)
+        }
+        return total
+    }
+
+    fn readBody:void (xml:string book:WorkbookModel) {
+        def p:XmlLite (new XmlLite)
+        p.reset(xml)
+        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def inSheet:boolean false
+        def row:int 0
+        def col:int 0
+        def rowRepeat:int 1
+        def rowStart:int 0
+        def colAt:int 0
+        def colDefault:[int:string]
+        while true {
+            def t:XmlTag (p.nextTag())
+            if (t.valid == false) {
+                break
+            }
+            def nm:string t.name
+            if ((nm == "table") && (t.isEnd == false)) {
+                def sh:SpreadsheetModel (new SpreadsheetModel)
+                sh.name = (t.attr("table:name"))
+                sh.quietWrites = true
+                def ts:string (t.attr("table:style-name"))
+                if (has tableHidden ts) {
+                    sh.sheetHidden = true
+                }
+                sheet = sh
+                inSheet = true
+                row = 0
+                colAt = 0
+                def noDefaults:[int:string]
+                colDefault = noDefaults
+                continue
+            }
+            if ((nm == "table") && t.isEnd) {
+                if inSheet {
+                    this.finishSheet(sheet)
+                    book.addSheet(sheet)
+                }
+                inSheet = false
+                continue
+            }
+            if (inSheet == false) {
+                continue
+            }
+            def sh2:SpreadsheetModel sheet
+            if (nm == "table-column") {
+                def rep:int (OdsLoader.toInt((t.attr("table:number-columns-repeated")) 1))
+                def cst:string (t.attr("table:style-name"))
+                def hidden:boolean ((t.attr("table:visibility")) == "collapse")
+                def dcs:string (t.attr("table:default-cell-style-name"))
+                def k:int 0
+                while ((k < rep) && (colAt < 1024)) {
+                    if (has colWidths cst) {
+                        this.ensure(sh2 0 colAt)
+                        sh2.setColWidth(colAt (unwrap (get colWidths cst)))
+                    }
+                    if hidden {
+                        this.ensure(sh2 0 colAt)
+                        sh2.setColHidden(colAt true)
+                    }
+                    if (((strlen dcs) > 0) && (dcs != "Default")) {
+                        set colDefault colAt dcs
+                    }
+                    colAt = (colAt + 1)
+                    k = (k + 1)
+                }
+                if (k < rep) {
+                    colAt = (colAt + (rep - k))
+                }
+                continue
+            }
+            if ((nm == "table-row") && (t.isEnd == false)) {
+                rowRepeat = (OdsLoader.toInt((t.attr("table:number-rows-repeated")) 1))
+                rowStart = row
+                col = 0
+                def rst:string (t.attr("table:style-name"))
+                def rhide:boolean ((t.attr("table:visibility")) == "collapse")
+                ; Height and hiding only for the first few repeats: a run of a
+                ; million rows is the sheet's empty tail.
+                def rk:int 0
+                while ((rk < rowRepeat) && (rk < 1024)) {
+                    if (has rowHeights rst) {
+                        this.ensure(sh2 (row + rk) 0)
+                        sh2.setRowHeight((row + rk) (unwrap (get rowHeights rst)))
+                    }
+                    if rhide {
+                        this.ensure(sh2 (row + rk) 0)
+                        sh2.setRowHidden((row + rk) true)
+                    }
+                    rk = (rk + 1)
+                }
+                if t.selfClose {
+                    row = (row + rowRepeat)
+                }
+                continue
+            }
+            if ((nm == "table-row") && t.isEnd) {
+                row = (rowStart + rowRepeat)
+                continue
+            }
+            if (((nm == "table-cell") || (nm == "covered-table-cell")) && (t.isEnd == false)) {
+                ; Read before the cell: reading its text moves the scanner,
+                ; and the tag is the scanner's.
+                def crep:int (OdsLoader.toInt((t.attr("table:number-columns-repeated")) 1))
+                this.readCell(p t sh2 row col rowRepeat colDefault)
+                col = (col + crep)
+                continue
+            }
+            if ((nm == "named-range") || (nm == "named-expression")) {
+                def nn:string (t.attr("table:name"))
+                def expr:string (t.attr("table:cell-range-address"))
+                if ((strlen expr) == 0) {
+                    expr = (t.attr("table:expression"))
+                }
+                if (((strlen nn) > 0) && ((strlen expr) > 0)) {
+                    def ref:string (OdsFormula.toExcel(("[" + (OdsLoader.absolute(expr)) + "]")))
+                    if ((indexOf expr "[") >= 0) {
+                        ref = (OdsFormula.toExcel(expr))
+                    }
+                    book.setName(nn ref)
+                }
+                continue
+            }
+        }
+    }
+
+    ; "$Sheet1.$A$1:.$B$2" as a cell-range-address is written without
+    ; brackets; the same text works inside them.
+    sfn absolute:string (s:string) {
+        return s
+    }
+
+    ; Text in a <text:p>, with ODF's coded whitespace expanded. Annotations
+    ; (comments) carry their own <text:p> and are left out.
+    fn cellText:string (p:XmlLite) {
+        def paras:[string]
+        def cur:string ""
+        def inP:int 0
+        def skip:int 0
+        def anyP:boolean false
+        def depth:int 1
+        def last:int p.pos
+        while true {
+            def t:XmlTag (p.nextTag())
+            if (t.valid == false) {
+                break
+            }
+            if ((inP > 0) && (skip == 0)) {
+                cur = (cur + (XmlLite.decodeEntities((substring p.src last t.startPos))))
+            }
+            last = t.endPos
+            def nm:string t.name
+            if ((nm == "table-cell") || (nm == "covered-table-cell")) {
+                if t.isEnd {
+                    depth = (depth - 1)
+                    if (depth == 0) {
+                        break
+                    }
+                } {
+                    if (t.selfClose == false) {
+                        depth = (depth + 1)
+                    }
+                }
+                continue
+            }
+            if ((nm == "annotation") || (nm == "frame")) {
+                if t.isEnd {
+                    skip = (skip - 1)
+                } {
+                    if (t.selfClose == false) {
+                        skip = (skip + 1)
+                    }
+                }
+                continue
+            }
+            if (skip > 0) {
+                continue
+            }
+            if ((nm == "p") || (nm == "h")) {
+                if t.isEnd {
+                    inP = (inP - 1)
+                    push paras cur
+                    cur = ""
+                } {
+                    anyP = true
+                    if t.selfClose {
+                        push paras ""
+                    } {
+                        inP = (inP + 1)
+                    }
+                }
+                continue
+            }
+            if ((inP > 0) && (nm == "s")) {
+                def cnt:int (OdsLoader.toInt((t.attr("text:c")) 1))
+                def k:int 0
+                while (k < cnt) {
+                    cur = (cur + " ")
+                    k = (k + 1)
+                }
+            }
+            if ((inP > 0) && (nm == "tab")) {
+                cur = (cur + "\t")
+            }
+            if ((inP > 0) && (nm == "line-break")) {
+                cur = (cur + "\n")
+            }
+        }
+        if (anyP == false) {
+            return ""
+        }
+        return (join paras "\n")
+    }
+
+    fn readCell:void (p:XmlLite t:XmlTag sheet:SpreadsheetModel row:int col:int rowRepeat:int colDefault:[int:string]) {
+        def covered:boolean (t.name == "covered-table-cell")
+        def rep:int (OdsLoader.toInt((t.attr("table:number-columns-repeated")) 1))
+        def vtype:string (t.attr("office:value-type"))
+        def formula:string (t.attr("table:formula"))
+        def styleName:string (t.attr("table:style-name"))
+        def spanC:int (OdsLoader.toInt((t.attr("table:number-columns-spanned")) 1))
+        def spanR:int (OdsLoader.toInt((t.attr("table:number-rows-spanned")) 1))
+        def value:string ""
+        if ((vtype == "float") || (vtype == "percentage") || (vtype == "currency")) {
+            value = (SheetBytes.numText((OdsLoader.dbl((t.attr("office:value"))))))
+        }
+        if (vtype == "date") {
+            value = (SheetBytes.numText((OdsLoader.dateSerial((t.attr("office:date-value"))))))
+        }
+        if (vtype == "time") {
+            value = (SheetBytes.numText((OdsLoader.durationDays((t.attr("office:time-value"))))))
+        }
+        if (vtype == "boolean") {
+            def bv:string (t.attr("office:boolean-value"))
+            if ((bv == "true") || (bv == "1")) {
+                value = "TRUE"
+            } {
+                value = "FALSE"
+            }
+        }
+        def text:string ""
+        if (t.selfClose == false) {
+            text = (this.cellText(p))
+        }
+        if ((vtype == "string") || ((strlen vtype) == 0)) {
+            if (t.has("office:string-value")) {
+                value = (t.attr("office:string-value"))
+                if (((strlen value) == 0) && ((strlen text) > 0)) {
+                    value = text
+                }
+            } {
+                value = text
+            }
+        }
+        def excelF:string ""
+        if ((strlen formula) > 0) {
+            excelF = (OdsFormula.toExcel(formula))
+        }
+        if covered {
+            return
+        }
+        def hasContent:boolean (((strlen value) > 0) || ((strlen excelF) > 0))
+        def sid:int -1
+        if ((strlen styleName) > 0) {
+            sid = (this.styleIdOf(styleName))
+        }
+        if ((sid < 0) && (has colDefault col)) {
+            sid = (this.styleIdOf((unwrap (get colDefault col))))
+        }
+        if ((hasContent == false) && (sid < 0)) {
+            return
+        }
+        ; A styled empty run is drawn only when it is short; LibreOffice
+        ; repeats a styled blank to the last column.
+        def maxRep:int rep
+        def maxRows:int rowRepeat
+        if (hasContent == false) {
+            if (maxRep > 256) {
+                return
+            }
+            if (maxRows > 64) {
+                maxRows = 1
+            }
+        } {
+            if (maxRep > 1024) {
+                maxRep = 1024
+            }
+            if (maxRows > 1024) {
+                maxRows = 1024
+            }
+        }
+        def rr:int 0
+        while (rr < maxRows) {
+            def k:int 0
+            while (k < maxRep) {
+                def r:int (row + rr)
+                def c:int (col + k)
+                this.ensure(sheet r c)
+                if ((strlen value) > 0) {
+                    sheet.setCellRaw(r c value)
+                }
+                if ((strlen excelF) > 0) {
+                    sheet.setFormula(r c excelF)
+                }
+                if (sid >= 0) {
+                    sheet.setCellStyleId(r c sid)
+                }
+                k = (k + 1)
+            }
+            rr = (rr + 1)
+        }
+        if ((spanC > 1) || (spanR > 1)) {
+            this.ensure(sheet ((row + spanR) - 1) ((col + spanC) - 1))
+            sheet.addMerge(row col ((row + spanR) - 1) ((col + spanC) - 1))
+        }
+    }
+
+    fn finishSheet:void (sheet:SpreadsheetModel) {
+        sheet.setStylesFrom(styleList)
+        def base:CellStyle (itemAt styleList 0)
+        sheet.defaultFontName = base.fontName
+        sheet.quietWrites = false
+        sheet.version = (sheet.version + 1)
+    }
+}

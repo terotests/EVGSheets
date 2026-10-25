@@ -19,6 +19,8 @@ Import "SheetView.rgr"
 Import "FormulaEngine.rgr"
 Import "xlsx/XlsxLoader.rgr"
 Import "xlsx/XlsxWriter.rgr"
+Import "formats/WorkbookImport.rgr"
+Import "formats/OdsWriter.rgr"
 Import "DateSerial.rgr"
 Import "pkg:evg/EVGCommands.rgr"
 Import "GridCursor.rgr"
@@ -399,6 +401,8 @@ class GridApp {
     def formatBrushArmed:boolean false
     def clipCut:boolean false
     def loadError:string ""
+    ; What the last import (.xls, .ods, …) could not carry over.
+    def importNotes:[string]
     ; Where the last save went, so a host can tell the user — and so a test
     ; can check that it went anywhere at all.
     def savedPath:string ""
@@ -516,6 +520,11 @@ class GridApp {
     }
 
     fn loadXlsxBytesPassword:boolean (bytes:buffer name:string password:string) {
+        ; .xls, .xlsb, .ods and text are not packages; they are read into the
+        ; same model by their own readers.
+        if (WorkbookImport.isImportKind((WorkbookImport.kindOf(bytes name)))) {
+            return (this.importBytes(bytes name))
+        }
         def loader:XlsxLoader (new XlsxLoader)
         def ok:boolean (loader.loadBytesPassword(bytes book password))
         if ok {
@@ -647,11 +656,48 @@ class GridApp {
         }
     }
 
+    ; A name whose extension is one of the imported formats.
+    sfn isImportName:boolean (path:string) {
+        def ext:string (SheetBytes.extOf(path))
+        return ((ext == "xls") || (ext == "xlt") || (ext == "xlsb") || (ext == "ods") || (ext == "csv") || (ext == "tsv") || (ext == "txt") || (ext == "tab"))
+    }
+
     fn loadXlsx:boolean (fullPath:string) {
         return (this.loadXlsxPassword(fullPath ""))
     }
 
+    ; A workbook in another format: a new, unsaved workbook with what the
+    ; reader could carry over, and a status line that says what it could not.
+    fn importBytes:boolean (bytes:buffer name:string) {
+        def imp:WorkbookImport (new WorkbookImport)
+        if (imp.load(bytes name book)) {
+            view.chartLayer.removeAll(windows)
+            book.sourcePath = name
+            engine = imp.engine
+            this.syncActiveModel()
+            loadError = ""
+            importNotes = imp.notes
+            view.status = ("loaded " + (GridApp.baseName(name)))
+            if ((array_length imp.notes) > 0) {
+                view.status = (view.status + " - " + (join imp.notes "; "))
+            }
+            return true
+        }
+        loadError = imp.lastError
+        view.status = loadError
+        return false
+    }
+
     fn loadXlsxPassword:boolean (fullPath:string password:string) {
+        if (WorkbookImport.isImportKind((WorkbookImport.textKindOf(fullPath))) || (GridApp.isImportName(fullPath))) {
+            def dirs:[string]
+            def names:[string]
+            OpcPackage.splitPath(fullPath dirs names)
+            def bytes:buffer (buffer_read_file (itemAt dirs 0) (itemAt names 0))
+            if (WorkbookImport.isImportKind((WorkbookImport.kindOf(bytes fullPath)))) {
+                return (this.importBytes(bytes fullPath))
+            }
+        }
         def loader:XlsxLoader (new XlsxLoader)
         def ok:boolean (loader.loadPathPassword(fullPath book password))
         if ok {
@@ -2349,6 +2395,19 @@ class GridApp {
         if editing {
             this.commitEdit()
         }
+        def ext:string (SheetBytes.extOf(name))
+        if ((ext == "ods") || (ext == "csv") || (ext == "tsv") || (ext == "txt")) {
+            def data:buffer (this.saveBytesAs(name))
+            if ((buffer_length data) == 0) {
+                savedPath = ""
+                return false
+            }
+            buffer_write_file dir name data
+            savedPath = (dir + "/" + name)
+            book.sourcePath = savedPath
+            view.status = ("saved " + savedPath)
+            return true
+        }
         def w:XlsxWriter (new XlsxWriter)
         def ok:boolean false
         if preserveOnSave {
@@ -2402,7 +2461,36 @@ class GridApp {
         if ((strlen n) == 0) {
             return "workbook.xlsx"
         }
-        return n
+        ; A workbook opened from .xls, .xlsb or text is saved as .xlsx: those
+        ; are formats this editor reads but does not write.
+        return (WorkbookImport.saveNameFor(n))
+    }
+
+    ; The workbook as the file `name` asks for: .ods, a sheet of .csv/.tsv
+    ; text, or .xlsx (and its macro-enabled and template forms, which are the
+    ; package written back over itself).
+    fn saveBytesAs:buffer (name:string) {
+        if editing {
+            this.commitEdit()
+        }
+        def ext:string (SheetBytes.extOf(name))
+        if (ext == "ods") {
+            def w:OdsWriter (new OdsWriter)
+            def data:buffer (w.writeToBuffer(book))
+            if ((strlen w.lastError) > 0) {
+                view.status = ("save failed: " + w.lastError)
+            }
+            return data
+        }
+        if ((ext == "csv") || (ext == "tsv") || (ext == "txt")) {
+            def sep:int 44
+            if (ext != "csv") {
+                sep = 9
+            }
+            ; A byte-order mark, so Excel reads the text as UTF-8.
+            return (XlsxWriter.utf8Buffer(((strfromcode 65279) + (TextWorkbook.sheetText(model sep)))))
+        }
+        return (this.saveXlsxBytes())
     }
 
     ; Where Ctrl+S puts it when nobody said: beside the file it came from, with
@@ -2485,7 +2573,7 @@ class GridApp {
             view.status = "save a workbook as…"
             return true
         }
-        return (this.saveXlsx((GridApp.exportDir(src)) (GridApp.baseName(src))))
+        return (this.saveXlsx((GridApp.exportDir(src)) (WorkbookImport.saveNameFor((GridApp.baseName(src))))))
     }
 
     ; Write without prompting — used by CLI `--save` and tests.
@@ -2494,7 +2582,7 @@ class GridApp {
         if ((strlen src) == 0) {
             return (this.saveXlsx("." "workbook-export.xlsx"))
         }
-        return (this.saveXlsx((GridApp.exportDir(src)) (GridApp.baseName(src))))
+        return (this.saveXlsx((GridApp.exportDir(src)) (WorkbookImport.saveNameFor((GridApp.baseName(src))))))
     }
 
     fn setActiveSheet:void (i:int) {
@@ -5950,6 +6038,8 @@ class GridApp {
         commands.add("view.pageBreakPreview" "Page Break Preview" "View" "")
         commands.add("file.exportCsv" "Export CSV" "File" "")
         commands.add("file.exportHtml" "Export HTML" "File" "")
+        commands.add("file.exportOds" "Export OpenDocument (.ods)" "File" "")
+        commands.add("file.exportTsv" "Export TSV" "File" "")
         commands.add("file.close" "Close" "File" "Ctrl+W")
         commands.addArg("insert.table" "Table" "Insert" "Ctrl+T")
         commands.addArg("insert.symbol" "Symbol" "Insert" "")
@@ -13874,6 +13964,14 @@ class GridApp {
         }
         if (id == "file.exportHtml") {
             fileRequest = "exportHtml"
+            return true
+        }
+        if (id == "file.exportOds") {
+            fileRequest = "exportOds"
+            return true
+        }
+        if (id == "file.exportTsv") {
+            fileRequest = "exportTsv"
             return true
         }
         if (id == "file.close") {

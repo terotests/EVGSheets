@@ -1,0 +1,319 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; Cfb — the OLE compound file a .xls (and an encrypted .xlsx) is stored in.
+; ==============================================================================
+;
+; [MS-CFB]: a little FAT file system. A 512-byte header names the sector size,
+; where the FAT sectors are (the first 109 in the header, the rest in a DIFAT
+; chain), where the directory starts and where the mini stream's FAT starts.
+; Streams under the cutoff (4096 bytes) live in 64-byte mini sectors inside
+; the root entry's own stream.
+;
+; Only reading, and only what a workbook needs: find a stream in the root
+; storage by name and hand back its bytes. Every chain walk is bounded, so a
+; damaged file ends in `lastError`, not in a loop.
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+
+class CfbEntry {
+    def name:string ""
+    def kind:int 0
+    def left:int -1
+    def right:int -1
+    def child:int -1
+    def start:int -2
+    def size:int 0
+
+    Constructor () {
+    }
+}
+
+class Cfb {
+    def data:buffer (buffer_alloc 0)
+    def sectorSize:int 512
+    def miniCutoff:int 4096
+    def fat:[int]
+    def miniFat:[int]
+    def entries:[CfbEntry]
+    def miniStream:buffer (buffer_alloc 0)
+    def lastError:string ""
+
+    Constructor () {
+    }
+
+    sfn isCompound:boolean (b:buffer) {
+        if ((buffer_length b) < 512) {
+            return false
+        }
+        def sig:[int] ([] _:int (208 207 17 224 161 177 26 225))
+        def i:int 0
+        while (i < 8) {
+            if ((buffer_get b i) != (itemAt sig i)) {
+                return false
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    fn sectorAt:int (id:int) {
+        return ((id + 1) * sectorSize)
+    }
+
+    fn open:boolean (b:buffer) {
+        lastError = ""
+        data = b
+        if ((Cfb.isCompound(b)) == false) {
+            lastError = "not a compound file"
+            return false
+        }
+        def shift:int (SheetBytes.u16(b 30))
+        if (shift == 9) {
+            sectorSize = 512
+        } {
+            if (shift == 12) {
+                sectorSize = 4096
+            } {
+                lastError = "damaged compound file: unsupported sector size"
+                return false
+            }
+        }
+        def per:int (floor (sectorSize / 4))
+        def nSectors:int ((floor ((buffer_length b) / sectorSize)) - 1)
+        miniCutoff = (SheetBytes.i32(b 56))
+        if (miniCutoff <= 0) {
+            miniCutoff = 4096
+        }
+        ; --- the FAT sectors: 109 in the header, then the DIFAT chain
+        def fatSectors:[int]
+        def i:int 0
+        while (i < 109) {
+            def s:int (SheetBytes.i32(b (76 + (i * 4))))
+            if (s >= 0) {
+                push fatSectors s
+            }
+            i = (i + 1)
+        }
+        def next:int (SheetBytes.i32(b 68))
+        def hops:int 0
+        while (next >= 0) {
+            hops = (hops + 1)
+            if (hops > (nSectors + 1)) {
+                lastError = "damaged compound file: DIFAT chain loops"
+                return false
+            }
+            def at:int (this.sectorAt(next))
+            def k:int 0
+            while (k < (per - 1)) {
+                def s2:int (SheetBytes.i32(b (at + (k * 4))))
+                if (s2 >= 0) {
+                    push fatSectors s2
+                }
+                k = (k + 1)
+            }
+            next = (SheetBytes.i32(b (at + ((per - 1) * 4))))
+        }
+        def f:int 0
+        while (f < (array_length fatSectors)) {
+            def at2:int (this.sectorAt((itemAt fatSectors f)))
+            if ((at2 + sectorSize) > (buffer_length b)) {
+                lastError = "damaged compound file: FAT sector out of range"
+                return false
+            }
+            def k2:int 0
+            while (k2 < per) {
+                push fat (SheetBytes.i32(b (at2 + (k2 * 4))))
+                k2 = (k2 + 1)
+            }
+            f = (f + 1)
+        }
+        ; --- the directory
+        def dir:buffer (this.readChain((SheetBytes.i32(b 48)) -1))
+        if ((strlen lastError) > 0) {
+            return false
+        }
+        def nEnt:int (floor ((buffer_length dir) / 128))
+        def e:int 0
+        while (e < nEnt) {
+            def base:int (e * 128)
+            def ent:CfbEntry (new CfbEntry)
+            def nameLen:int (SheetBytes.u16(dir (base + 64)))
+            if (nameLen > 64) {
+                nameLen = 64
+            }
+            def units:int 0
+            if (nameLen >= 2) {
+                units = (floor ((nameLen - 2) / 2))
+            }
+            ent.name = (SheetBytes.utf16(dir base units true))
+            ent.kind = (SheetBytes.u8(dir (base + 66)))
+            ent.left = (SheetBytes.i32(dir (base + 68)))
+            ent.right = (SheetBytes.i32(dir (base + 72)))
+            ent.child = (SheetBytes.i32(dir (base + 76)))
+            ent.start = (SheetBytes.i32(dir (base + 116)))
+            ent.size = (SheetBytes.i32(dir (base + 120)))
+            push entries ent
+            e = (e + 1)
+        }
+        if ((array_length entries) == 0) {
+            lastError = "damaged compound file: missing root entry"
+            return false
+        }
+        def root:CfbEntry (itemAt entries 0)
+        if (root.kind != 5) {
+            lastError = "damaged compound file: missing root entry"
+            return false
+        }
+        ; --- the mini FAT and the mini stream it indexes
+        def miniStart:int (SheetBytes.i32(b 60))
+        if (miniStart >= 0) {
+            def raw:buffer (this.readChain(miniStart -1))
+            if ((strlen lastError) > 0) {
+                return false
+            }
+            def m:int 0
+            def nm:int (floor ((buffer_length raw) / 4))
+            while (m < nm) {
+                push miniFat (SheetBytes.i32(raw (m * 4)))
+                m = (m + 1)
+            }
+        }
+        if (root.start >= 0) {
+            miniStream = (this.readChain(root.start root.size))
+            if ((strlen lastError) > 0) {
+                return false
+            }
+        }
+        return true
+    }
+
+    ; The sectors of a chain, joined. `limit` < 0 means the whole chain.
+    fn readChain:buffer (start:int limit:int) {
+        def ids:[int]
+        def id:int start
+        def guard:int 0
+        def n:int (array_length fat)
+        while (id >= 0) {
+            if (id >= n) {
+                lastError = "damaged compound file: sector missing from the FAT"
+                return (buffer_alloc 0)
+            }
+            guard = (guard + 1)
+            if (guard > (n + 1)) {
+                lastError = "damaged compound file: sector chain loops"
+                return (buffer_alloc 0)
+            }
+            push ids id
+            if ((limit >= 0) && (((array_length ids) * sectorSize) >= limit)) {
+                break
+            }
+            id = (itemAt fat id)
+        }
+        def total:int ((array_length ids) * sectorSize)
+        if ((limit >= 0) && (limit < total)) {
+            total = limit
+        }
+        def out:buffer (buffer_alloc total)
+        def k:int 0
+        def written:int 0
+        while (k < (array_length ids)) {
+            def at:int (this.sectorAt((itemAt ids k)))
+            def take:int sectorSize
+            if ((written + take) > total) {
+                take = (total - written)
+            }
+            if ((at + take) > (buffer_length data)) {
+                lastError = "damaged compound file: sector out of range (the file may be truncated)"
+                return (buffer_alloc 0)
+            }
+            buffer_copy out written data at take
+            written = (written + take)
+            k = (k + 1)
+        }
+        return out
+    }
+
+    fn readMiniChain:buffer (start:int limit:int) {
+        def out:buffer (buffer_alloc limit)
+        def id:int start
+        def written:int 0
+        def guard:int 0
+        def n:int (array_length miniFat)
+        while ((id >= 0) && (written < limit)) {
+            if (id >= n) {
+                lastError = "damaged compound file: mini sector missing from the mini FAT"
+                return (buffer_alloc 0)
+            }
+            guard = (guard + 1)
+            if (guard > (n + 1)) {
+                lastError = "damaged compound file: mini sector chain loops"
+                return (buffer_alloc 0)
+            }
+            def at:int (id * 64)
+            def take:int 64
+            if ((written + take) > limit) {
+                take = (limit - written)
+            }
+            if ((at + take) > (buffer_length miniStream)) {
+                lastError = "damaged compound file: mini sector out of range"
+                return (buffer_alloc 0)
+            }
+            buffer_copy out written miniStream at take
+            written = (written + take)
+            id = (itemAt miniFat id)
+        }
+        return out
+    }
+
+    ; The index of a stream directly under the root storage, or -1. The
+    ; directory is a red-black tree per storage; walking all of it is cheaper
+    ; to get right than following the comparisons, and a workbook has a
+    ; handful of entries.
+    fn findRootStream:int (name:string) {
+        def want:string (to_lowercase name)
+        def root:CfbEntry (itemAt entries 0)
+        def stack:[int]
+        push stack root.child
+        def seen:int 0
+        def n:int (array_length entries)
+        while ((array_length stack) > 0) {
+            def i:int (itemAt stack ((array_length stack) - 1))
+            removeLast stack
+            if ((i < 0) || (i >= n)) {
+                continue
+            }
+            seen = (seen + 1)
+            if (seen > n) {
+                return -1
+            }
+            def e:CfbEntry (itemAt entries i)
+            if ((e.kind == 2) && ((to_lowercase e.name) == want)) {
+                return i
+            }
+            push stack e.left
+            push stack e.right
+        }
+        return -1
+    }
+
+    fn hasStream:boolean (name:string) {
+        return ((this.findRootStream(name)) >= 0)
+    }
+
+    fn stream:buffer (name:string) {
+        def i:int (this.findRootStream(name))
+        if (i < 0) {
+            return (buffer_alloc 0)
+        }
+        def e:CfbEntry (itemAt entries i)
+        if (e.size <= 0) {
+            return (buffer_alloc 0)
+        }
+        if (e.size < miniCutoff) {
+            return (this.readMiniChain(e.start e.size))
+        }
+        return (this.readChain(e.start e.size))
+    }
+}

@@ -1,0 +1,617 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; XlsFormula — a BIFF8 parsed formula (Rgce, [MS-XLS] 2.5.198) back to text.
+; ==============================================================================
+;
+; A .xls keeps no formula text. It keeps the formula compiled to reverse
+; Polish tokens: operands push, operators and function calls pop. Turning that
+; back into text is a stack of strings. Parentheses are tokens of their own
+; (tParen) wherever the author wrote them, so nothing here has to work out
+; precedence: printing the operators in the order they pop reproduces it.
+;
+; What it cannot turn into text — a data table, a reference into another
+; workbook, a token it has never heard of — sets `failure`, and the caller
+; keeps the cell's cached value instead.
+; ==============================================================================
+
+Import "SheetBytes.rgr"
+Import "XlsFunctionTable.rgr"
+
+; Where 3-D references and external names point: the EXTERNSHEET (XTI) table,
+; the SUPBOOK records it indexes, and the workbook's own sheet and name lists.
+class XlsLinks {
+    def sheets:[string]
+    def names:[string]
+    def bookInternal:[boolean]
+    def bookNames:[[string]]
+    def xtiBook:[int]
+    def xtiFirst:[int]
+    def xtiLast:[int]
+
+    Constructor () {
+    }
+}
+
+class XlsFormula {
+    def links:XlsLinks (new XlsLinks)
+    def failure:string ""
+    def fnIndex:[int:int]
+    def fnNames:[string]
+    def fnArgs:[int]
+
+    Constructor () {
+        def ids:[int] (XlsFunctionTable.ids())
+        fnNames = (XlsFunctionTable.names())
+        fnArgs = (XlsFunctionTable.argCounts())
+        def i:int 0
+        while (i < (array_length ids)) {
+            set fnIndex (itemAt ids i) i
+            i = (i + 1)
+        }
+    }
+
+    sfn colName:string (col:int) {
+        def out:string ""
+        def c:int (col + 1)
+        while (c > 0) {
+            def m:int ((c - 1) % 26)
+            out = ((strfromcode (65 + m)) + out)
+            c = (floor ((c - 1) / 26))
+        }
+        return out
+    }
+
+    sfn errorText:string (code:int) {
+        if (code == 0) {
+            return "#NULL!"
+        }
+        if (code == 7) {
+            return "#DIV/0!"
+        }
+        if (code == 15) {
+            return "#VALUE!"
+        }
+        if (code == 23) {
+            return "#REF!"
+        }
+        if (code == 29) {
+            return "#NAME?"
+        }
+        if (code == 36) {
+            return "#NUM!"
+        }
+        if (code == 43) {
+            return "#GETTING_DATA"
+        }
+        return "#N/A"
+    }
+
+    ; A sheet name as a formula writes it: quoted unless it is a plain word.
+    sfn sheetRef:string (name:string) {
+        def plain:boolean ((strlen name) > 0)
+        def i:int 0
+        while (i < (strlen name)) {
+            def ch:int (charAt name i)
+            def ok:boolean false
+            if ((ch >= 65) && (ch <= 90)) {
+                ok = true
+            }
+            if ((ch >= 97) && (ch <= 122)) {
+                ok = true
+            }
+            if ((ch == 95) || (ch == 46) || (ch > 127)) {
+                ok = true
+            }
+            if ((ch >= 48) && (ch <= 57) && (i > 0)) {
+                ok = true
+            }
+            if (ok == false) {
+                plain = false
+            }
+            i = (i + 1)
+        }
+        if plain {
+            return name
+        }
+        return ("'" + (join (strsplit name "'") "''") + "'")
+    }
+
+    ; One cell anchor. `rel` reads the row and column as offsets from the
+    ; base cell (tRefN / tAreaN in a shared formula).
+    fn anchor:string (row:int colField:int baseRow:int baseCol:int rel:boolean) {
+        def col:int (colField % 16384)
+        def colRel:boolean ((bit_and colField 16384) != 0)
+        def rowRel:boolean ((bit_and colField 32768) != 0)
+        def r:int row
+        def c:int (col % 256)
+        if rel {
+            if rowRel {
+                if (r >= 32768) {
+                    r = (r - 65536)
+                }
+                r = ((r + baseRow) % 65536)
+                if (r < 0) {
+                    r = (r + 65536)
+                }
+            }
+            if colRel {
+                if (c >= 128) {
+                    c = (c - 256)
+                }
+                c = ((c + baseCol) % 256)
+                if (c < 0) {
+                    c = (c + 256)
+                }
+            }
+        }
+        def out:string ""
+        if (colRel == false) {
+            out = "$"
+        }
+        out = (out + (XlsFormula.colName(c)))
+        if (rowRel == false) {
+            out = (out + "$")
+        }
+        return (out + (to_string (r + 1)))
+    }
+
+    fn area:string (r0:int r1:int c0:int c1:int baseRow:int baseCol:int rel:boolean) {
+        ; Whole columns and whole rows are written the short way.
+        if ((r0 == 0) && (r1 == 65535)) {
+            def a:string (this.anchor(0 c0 baseRow baseCol rel))
+            def b:string (this.anchor(0 c1 baseRow baseCol rel))
+            return ((XlsFormula.colPart(a)) + ":" + (XlsFormula.colPart(b)))
+        }
+        if (((c0 % 256) == 0) && ((c1 % 256) == 255)) {
+            def a2:string (this.anchor(r0 c0 baseRow baseCol rel))
+            def b2:string (this.anchor(r1 c1 baseRow baseCol rel))
+            return ((XlsFormula.rowPart(a2)) + ":" + (XlsFormula.rowPart(b2)))
+        }
+        return ((this.anchor(r0 c0 baseRow baseCol rel)) + ":" + (this.anchor(r1 c1 baseRow baseCol rel)))
+    }
+
+    ; "$A$1" → "$A", and → "$1": the halves of an anchor.
+    sfn colPart:string (a:string) {
+        def i:int 0
+        if ((strlen a) > 0) {
+            if ((charAt a 0) == 36) {
+                i = 1
+            }
+        }
+        while (i < (strlen a)) {
+            def ch:int (charAt a i)
+            if ((ch == 36) || ((ch >= 48) && (ch <= 57))) {
+                return (substring a 0 i)
+            }
+            i = (i + 1)
+        }
+        return a
+    }
+
+    sfn rowPart:string (a:string) {
+        def cp:string (XlsFormula.colPart(a))
+        return (substring a (strlen cp) (strlen a))
+    }
+
+    ; The sheet prefix of a 3-D reference, or "#REF" when it points nowhere
+    ; this reader can follow.
+    fn sheetPrefix:string (ixti:int) {
+        if ((ixti < 0) || (ixti >= (array_length links.xtiBook))) {
+            failure = "a reference to a missing sheet link"
+            return ""
+        }
+        def book:int (itemAt links.xtiBook ixti)
+        if ((book < 0) || (book >= (array_length links.bookInternal))) {
+            failure = "a reference to a missing workbook link"
+            return ""
+        }
+        if ((itemAt links.bookInternal book) == false) {
+            failure = "references to other workbooks"
+            return ""
+        }
+        def first:int (itemAt links.xtiFirst ixti)
+        def last:int (itemAt links.xtiLast ixti)
+        def n:int (array_length links.sheets)
+        if ((first < 0) || (first >= n) || (last < 0) || (last >= n)) {
+            return "#REF"
+        }
+        if (first == last) {
+            return (XlsFormula.sheetRef((itemAt links.sheets first)))
+        }
+        return ((XlsFormula.sheetRef((itemAt links.sheets first))) + ":" + (XlsFormula.sheetRef((itemAt links.sheets last))))
+    }
+
+    fn externName:string (ixti:int index:int) {
+        if ((ixti < 0) || (ixti >= (array_length links.xtiBook))) {
+            failure = "a reference to a missing name link"
+            return ""
+        }
+        def book:int (itemAt links.xtiBook ixti)
+        if ((book < 0) || (book >= (array_length links.bookNames))) {
+            failure = "a reference to a missing workbook link"
+            return ""
+        }
+        def names:[string] (itemAt links.bookNames book)
+        if ((index < 1) || (index > (array_length names))) {
+            failure = "a reference to a missing name"
+            return ""
+        }
+        return (itemAt names (index - 1))
+    }
+
+    sfn fnName:string (raw:string) {
+        def n:string raw
+        if ((indexOf n "_xlfn.") == 0) {
+            n = (substring n 6 (strlen n))
+        }
+        if ((indexOf n "_xlws.") == 0) {
+            n = (substring n 6 (strlen n))
+        }
+        return (to_uppercase n)
+    }
+
+    sfn quoteText:string (s:string) {
+        return ("\"" + (join (strsplit s "\"") "\"\"") + "\"")
+    }
+
+    ; Pop `n` operands, oldest first.
+    fn popN:[string] (stack:[string] n:int) {
+        def out:[string]
+        def len:int (array_length stack)
+        if (n > len) {
+            failure = "a malformed formula (an argument is missing)"
+            return out
+        }
+        def i:int (len - n)
+        while (i < len) {
+            push out (itemAt stack i)
+            i = (i + 1)
+        }
+        def k:int 0
+        while (k < n) {
+            removeLast stack
+            k = (k + 1)
+        }
+        return out
+    }
+
+    fn pop1:string (stack:[string]) {
+        def len:int (array_length stack)
+        if (len == 0) {
+            failure = "a malformed formula (an operand is missing)"
+            return ""
+        }
+        def v:string (itemAt stack (len - 1))
+        removeLast stack
+        return v
+    }
+
+    ; The formula text without its leading "=", or "" with `failure` set.
+    ; `shared` reads tRefN / tAreaN against (baseRow, baseCol).
+    fn decode:string (rgce:buffer rgcb:buffer baseRow:int baseCol:int) {
+        failure = ""
+        def stack:[string]
+        def t:int 0
+        def x:int 0
+        def n:int (buffer_length rgce)
+        while ((t < n) && ((strlen failure) == 0)) {
+            def ptg:int (buffer_get rgce t)
+            t = (t + 1)
+            def id:int ptg
+            if ((bit_and ptg 96) != 0) {
+                id = (bit_or 32 (bit_and ptg 31))
+            }
+            if ((id >= 3) && (id <= 17)) {
+                def ops:[string] ([] _:string ("+" "-" "*" "/" "^" "&" "<" "<=" "=" ">=" ">" "<>" " " "," ":"))
+                def b:string (this.pop1(stack))
+                def a:string (this.pop1(stack))
+                push stack (a + (itemAt ops (id - 3)) + b)
+                continue
+            }
+            if (id == 18) {
+                push stack ("+" + (this.pop1(stack)))
+                continue
+            }
+            if (id == 19) {
+                push stack ("-" + (this.pop1(stack)))
+                continue
+            }
+            if (id == 20) {
+                push stack ((this.pop1(stack)) + "%")
+                continue
+            }
+            if (id == 21) {
+                push stack ("(" + (this.pop1(stack)) + ")")
+                continue
+            }
+            if (id == 22) {
+                push stack ""
+                continue
+            }
+            if (id == 23) {
+                def cch:int (SheetBytes.u8(rgce t))
+                def wide:boolean ((bit_and (SheetBytes.u8(rgce (t + 1))) 1) != 0)
+                t = (t + 2)
+                push stack (XlsFormula.quoteText((SheetBytes.utf16(rgce t cch wide))))
+                if wide {
+                    t = (t + (cch * 2))
+                } {
+                    t = (t + cch)
+                }
+                continue
+            }
+            if (id == 25) {
+                ; tAttr: a jump, a space, a choose table — or SUM with one
+                ; argument, which is the only kind that changes the text.
+                def kind:int (SheetBytes.u8(rgce t))
+                t = (t + 1)
+                if ((bit_and kind 4) != 0) {
+                    def cnt:int ((SheetBytes.u16(rgce t)) + 1)
+                    t = (t + 2 + (cnt * 2))
+                } {
+                    t = (t + 2)
+                }
+                if ((bit_and kind 16) != 0) {
+                    push stack ("SUM(" + (this.pop1(stack)) + ")")
+                }
+                continue
+            }
+            if (id == 28) {
+                push stack (XlsFormula.errorText((SheetBytes.u8(rgce t))))
+                t = (t + 1)
+                continue
+            }
+            if (id == 29) {
+                if ((SheetBytes.u8(rgce t)) != 0) {
+                    push stack "TRUE"
+                } {
+                    push stack "FALSE"
+                }
+                t = (t + 1)
+                continue
+            }
+            if (id == 30) {
+                push stack (to_string (SheetBytes.u16(rgce t)))
+                t = (t + 2)
+                continue
+            }
+            if (id == 31) {
+                push stack (SheetBytes.numText((SheetBytes.f64(rgce t))))
+                t = (t + 8)
+                continue
+            }
+            if (id == 32) {
+                t = (t + 7)
+                def arr:[int] ([] _:int (0))
+                set_at arr 0 x
+                push stack (this.arrayConstant(rgcb arr))
+                x = (itemAt arr 0)
+                continue
+            }
+            if (id == 33) {
+                def iftab:int (SheetBytes.u16(rgce t))
+                t = (t + 2)
+                if ((has fnIndex iftab) == false) {
+                    failure = "an unknown function"
+                    continue
+                }
+                def fi:int (unwrap (get fnIndex iftab))
+                def argc:int (itemAt fnArgs fi)
+                if (argc < 0) {
+                    failure = "an unknown function argument count"
+                    continue
+                }
+                def args:[string] (this.popN(stack argc))
+                push stack ((itemAt fnNames fi) + "(" + (join args ",") + ")")
+                continue
+            }
+            if (id == 34) {
+                def argn:int (SheetBytes.u8(rgce t))
+                def tab:int (SheetBytes.u16(rgce (t + 1)))
+                t = (t + 3)
+                if (tab >= 32768) {
+                    failure = "macro sheet commands"
+                    continue
+                }
+                def vargs:[string] (this.popN(stack argn))
+                if (tab == 255) {
+                    ; A newer function: its name is the first operand.
+                    if ((array_length vargs) == 0) {
+                        failure = "a malformed function call"
+                        continue
+                    }
+                    def fname:string (XlsFormula.fnName((itemAt vargs 0)))
+                    def rest:[string]
+                    def vi:int 1
+                    while (vi < (array_length vargs)) {
+                        push rest (itemAt vargs vi)
+                        vi = (vi + 1)
+                    }
+                    push stack (fname + "(" + (join rest ",") + ")")
+                    continue
+                }
+                if ((has fnIndex tab) == false) {
+                    failure = "an unknown function"
+                    continue
+                }
+                def vfi:int (unwrap (get fnIndex tab))
+                push stack ((itemAt fnNames vfi) + "(" + (join vargs ",") + ")")
+                continue
+            }
+            if (id == 35) {
+                def ni:int (SheetBytes.i32(rgce t))
+                t = (t + 4)
+                if ((ni < 1) || (ni > (array_length links.names))) {
+                    failure = "a reference to a missing defined name"
+                    continue
+                }
+                push stack (itemAt links.names (ni - 1))
+                continue
+            }
+            if ((id == 36) || (id == 44)) {
+                def rr:int (SheetBytes.u16(rgce t))
+                def cc:int (SheetBytes.u16(rgce (t + 2)))
+                t = (t + 4)
+                push stack (this.anchor(rr cc baseRow baseCol (id == 44)))
+                continue
+            }
+            if ((id == 37) || (id == 45)) {
+                def ar0:int (SheetBytes.u16(rgce t))
+                def ar1:int (SheetBytes.u16(rgce (t + 2)))
+                def ac0:int (SheetBytes.u16(rgce (t + 4)))
+                def ac1:int (SheetBytes.u16(rgce (t + 6)))
+                t = (t + 8)
+                push stack (this.area(ar0 ar1 ac0 ac1 baseRow baseCol (id == 45)))
+                continue
+            }
+            if (id == 38) {
+                ; tMemArea: the area is in the operand that follows; its
+                ; rectangles ride in the extra data and say nothing new.
+                t = (t + 6)
+                def cnt2:int (SheetBytes.u16(rgcb x))
+                x = (x + 2 + (cnt2 * 8))
+                continue
+            }
+            if ((id == 39) || (id == 40)) {
+                t = (t + 6)
+                continue
+            }
+            if (id == 41) {
+                t = (t + 2)
+                continue
+            }
+            if (id == 42) {
+                t = (t + 4)
+                push stack "#REF!"
+                continue
+            }
+            if (id == 43) {
+                t = (t + 8)
+                push stack "#REF!"
+                continue
+            }
+            if (id == 57) {
+                def xi:int (SheetBytes.u16(rgce t))
+                def xn:int (SheetBytes.i32(rgce (t + 2)))
+                t = (t + 6)
+                push stack (this.externName(xi xn))
+                continue
+            }
+            if (id == 58) {
+                def x3:int (SheetBytes.u16(rgce t))
+                def r3:int (SheetBytes.u16(rgce (t + 2)))
+                def c3:int (SheetBytes.u16(rgce (t + 4)))
+                t = (t + 6)
+                def pre:string (this.sheetPrefix(x3))
+                if (pre == "#REF") {
+                    push stack "#REF!"
+                } {
+                    push stack (pre + "!" + (this.anchor(r3 c3 0 0 false)))
+                }
+                continue
+            }
+            if (id == 59) {
+                def x4:int (SheetBytes.u16(rgce t))
+                def q0:int (SheetBytes.u16(rgce (t + 2)))
+                def q1:int (SheetBytes.u16(rgce (t + 4)))
+                def k0:int (SheetBytes.u16(rgce (t + 6)))
+                def k1:int (SheetBytes.u16(rgce (t + 8)))
+                t = (t + 10)
+                def pre2:string (this.sheetPrefix(x4))
+                if (pre2 == "#REF") {
+                    push stack "#REF!"
+                } {
+                    push stack (pre2 + "!" + (this.area(q0 q1 k0 k1 0 0 false)))
+                }
+                continue
+            }
+            if (id == 60) {
+                t = (t + 6)
+                push stack "#REF!"
+                continue
+            }
+            if (id == 61) {
+                t = (t + 10)
+                push stack "#REF!"
+                continue
+            }
+            if (id == 1) {
+                failure = "a nested shared formula"
+                continue
+            }
+            if (id == 2) {
+                failure = "what-if data tables"
+                continue
+            }
+            failure = "an unknown formula token"
+        }
+        if ((strlen failure) > 0) {
+            return ""
+        }
+        if (t > n) {
+            failure = "a truncated formula"
+            return ""
+        }
+        if ((array_length stack) != 1) {
+            failure = "a malformed formula"
+            return ""
+        }
+        return (itemAt stack 0)
+    }
+
+    ; {1,2;3,4} out of the extra data. `at` is a one-element array so the
+    ; position can come back to the caller.
+    fn arrayConstant:string (b:buffer at:[int]) {
+        def p:int (itemAt at 0)
+        def cols:int ((SheetBytes.u8(b p)) + 1)
+        def rows:int ((SheetBytes.u16(b (p + 1))) + 1)
+        p = (p + 3)
+        def rowsOut:[string]
+        def r:int 0
+        while (r < rows) {
+            def cells:[string]
+            def c:int 0
+            while (c < cols) {
+                def kind:int (SheetBytes.u8(b p))
+                p = (p + 1)
+                if (kind == 1) {
+                    push cells (SheetBytes.numText((SheetBytes.f64(b p))))
+                    p = (p + 8)
+                } {
+                    if (kind == 2) {
+                        def cch:int (SheetBytes.u16(b p))
+                        def wide:boolean ((bit_and (SheetBytes.u8(b (p + 2))) 1) != 0)
+                        p = (p + 3)
+                        push cells (XlsFormula.quoteText((SheetBytes.utf16(b p cch wide))))
+                        if wide {
+                            p = (p + (cch * 2))
+                        } {
+                            p = (p + cch)
+                        }
+                    } {
+                        if (kind == 4) {
+                            if ((SheetBytes.u8(b p)) != 0) {
+                                push cells "TRUE"
+                            } {
+                                push cells "FALSE"
+                            }
+                        } {
+                            if (kind == 16) {
+                                push cells (XlsFormula.errorText((SheetBytes.u8(b p))))
+                            } {
+                                push cells ""
+                            }
+                        }
+                        p = (p + 8)
+                    }
+                }
+                c = (c + 1)
+            }
+            push rowsOut (join cells ",")
+            r = (r + 1)
+        }
+        set_at at 0 p
+        return ("{" + (join rowsOut ";") + "}")
+    }
+}

@@ -731,6 +731,36 @@ try {
   await shot(compact, "08_compact_dark");
   await compact.close();
 
+  // --- other formats ----------------------------------------------------------
+  // Open each through the page's own file picker, and download the workbook as
+  // .ods: what a person does with a file that is not .xlsx.
+  console.log("== other formats");
+  const fmt = await open("?blank&theme=light");
+  await fmt.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
+  const FIX = path.join(REPO, "datagrid", "fixtures", "formats");
+  for (const [file, sheet, cell, want] of [
+    ["sales.xls", 0, [0, 0], /\S/],
+    ["sales.ods", 0, [0, 0], /\S/],
+    ["semicolons.csv", 0, [0, 0], /\S/],
+  ]) {
+    const chooser = fmt.waitForEvent("filechooser", { timeout: 10000 });
+    await fmt.evaluate(() => window.sheet.run("file.open", ""));
+    await (await chooser).setFiles(path.join(FIX, file));
+    await fmt.waitForFunction((f) => window.sheet.app.grid.app.book.sourcePath === f, file, { timeout: 20000 }).catch(() => {});
+    const got = await fmt.evaluate(([r, c]) => {
+      const a = window.sheet.app.grid.app;
+      return { src: a.book.sourcePath, v: a.model.getDisplay(r, c), save: a.suggestSaveName(), n: a.book.sheetCount() };
+    }, cell);
+    ok(`opens ${file}`, got.src === file && want.test(got.v) && got.n > sheet, `${got.n} sheets, A1=${got.v}, saves as ${got.save}`);
+  }
+  const dl = fmt.waitForEvent("download", { timeout: 10000 });
+  await fmt.evaluate(() => window.sheet.run("file.exportOds", ""));
+  const d = await dl;
+  const odsPath = await d.path();
+  const head = odsPath ? fs.readFileSync(odsPath).subarray(0, 120).toString("latin1") : "";
+  ok("Download .ods gives an OpenDocument file", /\.ods$/.test(d.suggestedFilename()) && head.startsWith("PK") && head.includes("application/vnd.oasis.opendocument.spreadsheet"), d.suggestedFilename());
+  await fmt.close();
+
   // --- the embeds page --------------------------------------------------------
   console.log("== embeds");
   const embeds = await open("embed.html", 1280, 1800);

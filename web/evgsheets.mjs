@@ -56,6 +56,21 @@ const KEY_NAMES = new Set([
 // web page and Ctrl+F from opening the browser's find bar while it has focus.
 const CTRL_CHORD = /^[abcdefhiklmsuxyzABCDEFHIKLMSUXYZ ]$/;
 
+// What Open offers, and the type of each format a download can be.
+const OPEN_ACCEPT = ".xlsx,.xlsm,.xltx,.xltm,.xls,.xlt,.xlsb,.ods,.csv,.tsv,.txt," +
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel," +
+  "application/vnd.oasis.opendocument.spreadsheet,text/csv,text/tab-separated-values";
+const MIME = {
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  xltx: "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+  xltm: "application/vnd.ms-excel.template.macroEnabled.12",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  csv: "text/csv",
+  tsv: "text/tab-separated-values",
+  txt: "text/plain",
+};
+
 const shared = new Map(); // base → { ready: Promise<{mod, gl, a11y, faces}> }
 
 function asRangerBuffer(ab) {
@@ -331,7 +346,7 @@ export async function mountSheets(container, options = {}) {
   // --- files ------------------------------------------------------------------
   const fileInput = document.createElement("input");
   fileInput.type = "file";
-  fileInput.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  fileInput.accept = OPEN_ACCEPT;
   fileInput.style.display = "none";
   wrap.appendChild(fileInput);
   fileInput.addEventListener("change", async () => {
@@ -340,6 +355,11 @@ export async function mountSheets(container, options = {}) {
     await openBytes(await f.arrayBuffer(), f.name);
     fileInput.value = "";
   });
+
+  function mimeFor(name) {
+    const ext = (/\.([^.]+)$/.exec(name || "") || [, "xlsx"])[1].toLowerCase();
+    return MIME[ext] || MIME.xlsx;
+  }
 
   function saveBlob(blob, name) {
     const url = URL.createObjectURL(blob);
@@ -365,7 +385,7 @@ export async function mountSheets(container, options = {}) {
       const raw = app.grid.saveWorkbookBytes();
       const name = app.grid.suggestSaveName() || "workbook.xlsx";
       if (options.onSave) options.onSave(raw, name, controller);
-      else saveBlob(new Blob([raw], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), name);
+      else saveBlob(new Blob([raw], { type: mimeFor(name) }), name);
       app.grid.markSavedAs(name);
       return;
     }
@@ -419,11 +439,18 @@ export async function mountSheets(container, options = {}) {
       else window.print();
       return;
     }
+    if (want === "exportOds" || want === "exportTsv") {
+      const ext = want === "exportOds" ? "ods" : "tsv";
+      const raw = app.grid.exportBytes(ext);
+      const base = (app.grid.suggestSaveName() || "workbook.xlsx").replace(/\.[^.\/]+$/, "");
+      saveBlob(new Blob([raw], { type: MIME[ext] }), base + "." + ext);
+      return;
+    }
     if (want === "exportCsv" || want === "exportHtml") {
       const csv = want === "exportCsv";
       const g = app.grid.app;
       const text = csv ? g.sheetCsv() : g.sheetHtml();
-      const base = (app.grid.suggestSaveName() || "workbook.xlsx").replace(/\.xlsx$/i, "");
+      const base = (app.grid.suggestSaveName() || "workbook.xlsx").replace(/\.[^.\/]+$/, "");
       saveBlob(new Blob([text], { type: csv ? "text/csv" : "text/html" }), base + (csv ? ".csv" : ".html"));
     }
   }
