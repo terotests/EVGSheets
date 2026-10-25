@@ -50,6 +50,11 @@ class DataGrid {
     def sheetTabH:int 26
     def scrollX:int 0
     def scrollY:int 0
+    ; Scroll bars over the body's right and bottom edges, for a host whose
+    ; only other way sideways is the wheel (a read-only preview). Off: the
+    ; editor's own frame has none.
+    def showScrollbars:boolean false
+    def scrollbarW:int 10
     ; Draw a quiet arrow on EVERY list-validated cell, not only the active
     ; one. Off by default, because a workbook has a handful of validated cells
     ; among thousands; on for a panel whose whole columns are lists, where an
@@ -338,6 +343,87 @@ class DataGrid {
         if (scrollY > maxY) {
             scrollY = maxY
         }
+    }
+
+    ; How far the scrolling part can move, in pixels (0 when it all fits).
+    fn maxScrollX:int (model:SpreadsheetModel) {
+        def m:int (((this.geoTotalW(model)) - (this.geoFrozenW(model))) - (this.scrollAreaW(model)))
+        if (m < 0) {
+            return 0
+        }
+        return m
+    }
+
+    fn maxScrollY:int (model:SpreadsheetModel) {
+        def m:int (((this.geoTotalH(model)) - (this.geoFrozenH(model))) - (this.scrollAreaH(model)))
+        if (m < 0) {
+            return 0
+        }
+        return m
+    }
+
+    ; The scroll bars' groove: along the right edge of the body (vertical) or
+    ; its bottom edge, beside the frozen part rather than over it, and short
+    ; of the corner where the two would meet.
+    fn scrollTrack:GridRect (model:SpreadsheetModel vertical:boolean) {
+        def bw:int scrollbarW
+        def left:int (x + rowHeaderW)
+        def top:int (this.gridOriginY())
+        if vertical {
+            def fh:int (this.geoFrozenH(model))
+            return (GridRect.create(((left + (this.viewportW())) - bw) (top + fh) bw (((this.viewportH()) - fh) - bw)))
+        }
+        def fw:int (this.geoFrozenW(model))
+        return (GridRect.create((left + fw) ((top + (this.viewportH())) - bw) (((this.viewportW()) - fw) - bw) bw))
+    }
+
+    ; The thumb inside that groove: as long as the share of the sheet in view,
+    ; where the scroll is. Zero-sized when there is nothing to scroll.
+    fn scrollThumb:GridRect (model:SpreadsheetModel vertical:boolean) {
+        def tr:GridRect (this.scrollTrack(model vertical))
+        def maxS:int (this.maxScrollX(model))
+        def area:int (this.scrollAreaW(model))
+        def at:int scrollX
+        def len:int tr.w
+        if vertical {
+            maxS = (this.maxScrollY(model))
+            area = (this.scrollAreaH(model))
+            at = scrollY
+            len = tr.h
+        }
+        if ((maxS <= 0) || (len < 8)) {
+            return (GridRect.create(tr.x tr.y 0 0))
+        }
+        def tl:int (to_int (((to_double len) * (to_double area)) / (to_double (area + maxS))))
+        if (tl < 24) {
+            tl = 24
+        }
+        if (tl > len) {
+            tl = len
+        }
+        def off:int (to_int (((to_double (len - tl)) * (to_double at)) / (to_double maxS)))
+        if vertical {
+            return (GridRect.create(tr.x (tr.y + off) tr.w tl))
+        }
+        return (GridRect.create((tr.x + off) tr.y tl tr.h))
+    }
+
+    ; The scroll that puts the thumb's leading edge at `pos` (a screen x or y).
+    fn scrollForThumb:int (model:SpreadsheetModel vertical:boolean pos:int) {
+        def tr:GridRect (this.scrollTrack(model vertical))
+        def th:GridRect (this.scrollThumb(model vertical))
+        def start:int tr.x
+        def free:int (tr.w - th.w)
+        def maxS:int (this.maxScrollX(model))
+        if vertical {
+            start = tr.y
+            free = (tr.h - th.h)
+            maxS = (this.maxScrollY(model))
+        }
+        if (free <= 0) {
+            return 0
+        }
+        return (to_int (((to_double (pos - start)) * (to_double maxS)) / (to_double free)))
     }
 
     ; Recompute visible scrollable span. Indices are VIEW rows/cols when hasView.

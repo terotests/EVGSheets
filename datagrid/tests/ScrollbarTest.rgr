@@ -1,0 +1,139 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; ScrollbarTest — the scroll bars a host can turn on (GridApp.setScrollbars).
+; ==============================================================================
+;
+; A read-only preview of a sheet whose first column is wider than the window
+; could only be moved sideways with a trackpad or Shift+wheel. With the bars
+; on, the thumb is drawn, dragging it scrolls to the far end, a press beside
+; it moves a screen, and a sheet that fits shows no bar.
+;
+;   (in a Ranger tree, with this directory at gallery/datagrid)
+;   bash scripts/rgr-suite.sh ./gallery/datagrid/tests/ScrollbarTest.rgr ./gallery/datagrid/bin ScrollbarTest.js
+; ==============================================================================
+
+Import "../src/GridApp.rgr"
+
+class BarCheck {
+    def passed:int 0
+    def failed:int 0
+
+    fn ok:void (name:string cond:boolean) {
+        if cond {
+            passed = (passed + 1)
+            print ("  PASS " + name)
+        } {
+            failed = (failed + 1)
+            print ("  FAIL " + name)
+        }
+    }
+
+    fn eqInt:void (name:string got:int want:int) {
+        this.ok((name + " (got " + (to_string got) + " want " + (to_string want) + ")") (got == want))
+    }
+}
+
+class ScrollbarTest {
+    sfn build:GridApp (rows:int cols:int wideA:boolean) {
+        def app:GridApp (new GridApp)
+        app.init("gallery/pdf_writer/assets/fonts")
+        app.setChrome(false false true false)
+        app.setReadOnly(true)
+        app.setScrollbars(true)
+        app.model.clearSheet()
+        app.model.resize(rows cols)
+        app.model.setFreeze(1 0)
+        if wideA {
+            app.model.setColWidth(0 ((app.grid.viewportW()) - 40))
+        }
+        def r:int 0
+        while (r < rows) {
+            app.model.setCellRaw(r 0 ("Row " + (to_string r)))
+            r = (r + 1)
+        }
+        app.sheetView.markDirty()
+        app.sheetView.rebuild()
+        app.engine.rebuildAll()
+        app.grid.updateVisible(app.model)
+        app.render()
+        return app
+    }
+
+    sfn press:void (app:GridApp input:UIInput x:int y:int down:boolean) {
+        input.newFrame()
+        input.setPointerPos(x y)
+        input.setPointerDown(down)
+        input.setModifiers(false false)
+        app.update(input)
+    }
+
+    sfn main:void () {
+        def c:BarCheck (new BarCheck)
+        print "== ScrollbarTest =="
+
+        def app:GridApp (ScrollbarTest.build(200 40 true))
+        def grid:DataGrid app.grid
+        def input:UIInput (new UIInput)
+        def maxX:int (grid.maxScrollX(app.model))
+        def maxY:int (grid.maxScrollY(app.model))
+        c.ok("the sheet is wider and taller than the window" ((maxX > 0) && (maxY > 0)))
+
+        print "-- both thumbs are there --"
+        def hth:GridRect (grid.scrollThumb(app.model false))
+        def vth:GridRect (grid.scrollThumb(app.model true))
+        c.ok("horizontal thumb" ((hth.w >= 24) && (hth.h == grid.scrollbarW)))
+        c.ok("vertical thumb" ((vth.h >= 24) && (vth.w == grid.scrollbarW)))
+        def vtr:GridRect (grid.scrollTrack(app.model true))
+        c.eqInt("vertical groove starts below the frozen row" vtr.y ((grid.gridOriginY()) + (grid.geoFrozenH(app.model))))
+
+        print "-- dragging the horizontal thumb to the end --"
+        def htr:GridRect (grid.scrollTrack(app.model false))
+        def gy:int (hth.y + 4)
+        ScrollbarTest.press(app input (hth.x + 5) gy true)
+        ScrollbarTest.press(app input (htr.x + htr.w + 50) gy true)
+        c.eqInt("scrolled all the way right" grid.scrollX maxX)
+        ScrollbarTest.press(app input (htr.x + htr.w + 50) gy false)
+        ScrollbarTest.press(app input (htr.x + 5) gy true)
+        ScrollbarTest.press(app input (htr.x + 5) gy false)
+        def back:int (maxX - (grid.scrollAreaW(app.model)))
+        if (back < 0) {
+            back = 0
+        }
+        c.eqInt("a press left of the thumb pages back" grid.scrollX back)
+        c.ok("the press did not select a cell" (app.sel.active.row == 0))
+
+        print "-- dragging the vertical thumb halfway --"
+        grid.scrollX = 0
+        grid.updateVisible(app.model)
+        def v0:GridRect (grid.scrollThumb(app.model true))
+        def gx:int (v0.x + 4)
+        ScrollbarTest.press(app input gx (v0.y + 3) true)
+        ScrollbarTest.press(app input gx ((v0.y + 3) + (idiv (vtr.h - v0.h) 2)) true)
+        ScrollbarTest.press(app input gx ((v0.y + 3) + (idiv (vtr.h - v0.h) 2)) false)
+        def half:int (idiv maxY 2)
+        c.ok(("about half way down (" + (to_string grid.scrollY) + " of " + (to_string maxY) + ")") ((grid.scrollY > (half - 40)) && (grid.scrollY < (half + 40))))
+
+        print "-- the bar is drawn --"
+        app.render()
+        def raw:buffer (app.raw())
+        def W:int app.W
+        def th2:GridRect (grid.scrollThumb(app.model true))
+        def at:int ((((th2.y + (idiv th2.h 2)) * W) + (th2.x + 5)) * 4)
+        c.ok("thumb pixels are darker than the sheet" ((buffer_get raw at) < 200))
+
+        print "-- a sheet that fits has no bar --"
+        def small:GridApp (ScrollbarTest.build(3 2 false))
+        def sth:GridRect (small.grid.scrollThumb(small.model false))
+        def stv:GridRect (small.grid.scrollThumb(small.model true))
+        c.ok("no thumbs" ((sth.w == 0) && (stv.w == 0)))
+
+        print ""
+        print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
+        if (c.failed == 0) {
+            print "ALL PASS"
+        } {
+            print "FAILURES"
+        }
+    }
+}
