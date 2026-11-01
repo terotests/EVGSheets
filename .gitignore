@@ -5,3 +5,5 @@ bin/
 .stage/
 .deps/
 package-lock.json
+target/
+Cargo.lock

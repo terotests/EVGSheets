@@ -15,7 +15,7 @@
 ; sheet visibility. A formula's text is not rebuilt; the note on open says so.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
+Import "../lib.rs"
 Import "XlsFormula.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../WorkbookModel.rgr"

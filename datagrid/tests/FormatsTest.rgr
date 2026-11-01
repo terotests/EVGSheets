@@ -299,6 +299,54 @@ class FormatsTest {
         def odBytes:buffer (od.saveBytesAs((od.suggestSaveName())))
         c.ok("an .ods saves as .ods" (WorkbookImport.isZip(odBytes) && ((WorkbookImport.kindOf(odBytes "x")) == "ods")))
 
+        print "== SheetBytes (formats/sheet_bytes.rs) =="
+        c.eqStr("extOf" (SheetBytes.extOf("Book.XLSX")) "xlsx")
+        c.eqStr("extOf last dot" (SheetBytes.extOf("a.tar.gz")) "gz")
+        c.eqStr("extOf none" (SheetBytes.extOf("README")) "")
+        c.eqStr("extOf dot in folder" (SheetBytes.extOf("v1.2/data")) "")
+        c.eqStr("extOf windows path" (SheetBytes.extOf("C:\\x.y\\Book.Xls")) "xls")
+        c.eqStr("extOf trailing dot" (SheetBytes.extOf("name.")) "")
+        c.eqStr("extOf non-ASCII" (SheetBytes.extOf("Myyntiä 2026.ÖDS")) "öds")
+        c.eqStr("withExt" (SheetBytes.withExt("old.xls" "xlsx")) "old.xlsx")
+        c.eqStr("withExt last dot" (SheetBytes.withExt("a.b.xls" "xlsx")) "a.b.xlsx")
+        c.eqStr("withExt none" (SheetBytes.withExt("data" "csv")) "data.csv")
+        c.eqStr("withExt dot in folder" (SheetBytes.withExt("v1.2/data" "csv")) "v1.2/data.csv")
+        c.eqStr("withExt trailing dot" (SheetBytes.withExt("name." "csv")) "name..csv")
+        c.eqStr("withExt non-ASCII" (SheetBytes.withExt("Äö.xls" "xlsx")) "Äö.xlsx")
+        def le:buffer (buffer_alloc 8)
+        buffer_set le 0 0
+        buffer_set le 1 0
+        buffer_set le 2 0
+        buffer_set le 3 0
+        buffer_set le 4 0
+        buffer_set le 5 0
+        buffer_set le 6 248
+        buffer_set le 7 191
+        c.ok("f64 -1.5" ((SheetBytes.f64(le 0)) == (0.0 - 1.5)))
+        c.eqInt("i32 negative" (SheetBytes.i32(le 4)) (0 - 1074266112))
+        c.eqInt("u16" (SheetBytes.u16(le 6)) 49144)
+        c.eqInt("u8 past the end" (SheetBytes.u8(le 8)) 0)
+        def rk:buffer (buffer_alloc 4)
+        buffer_set rk 0 ((1234 * 4) % 256)
+        buffer_set rk 1 (floor ((1234 * 4) / 256))
+        buffer_set rk 2 0
+        buffer_set rk 3 0
+        buffer_set rk 0 ((buffer_get rk 0) + 3)
+        c.ok("rk integer / 100" ((SheetBytes.rk(rk 0)) == 12.34))
+        def w:buffer (buffer_alloc 6)
+        buffer_set w 0 65
+        buffer_set w 1 0
+        buffer_set w 2 61
+        buffer_set w 3 216
+        buffer_set w 4 0
+        buffer_set w 5 222
+        c.eqStr("utf16 surrogate pair" (SheetBytes.utf16(w 0 3 true)) "A😀")
+        c.eqStr("utf16 compressed" (SheetBytes.utf16(w 0 1 false)) "A")
+        c.eqStr("numText integer" (SheetBytes.numText(42.0)) "42")
+        c.eqStr("numText fraction" (SheetBytes.numText(0.5)) "0.5")
+        c.eqStr("builtin format 14" (SheetBytes.builtinNumFmt(14)) "m/d/yyyy")
+        c.eqStr("builtin format gap" (SheetBytes.builtinNumFmt(30)) "General")
+
         print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
         if (c.failed == 0) {
             print "ALL PASS"

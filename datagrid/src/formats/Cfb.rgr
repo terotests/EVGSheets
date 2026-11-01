@@ -15,7 +15,7 @@
 ; damaged file ends in `lastError`, not in a loop.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
+Import "../lib.rs"
 
 class CfbEntry {
     def name:string ""

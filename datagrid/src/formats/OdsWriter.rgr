@@ -17,7 +17,7 @@
 ; freeze panes, scripts — an .ods made here is the data and its look.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
+Import "../lib.rs"
 Import "OdsFormula.rgr"
 Import "../xlsx/XlsxWriter.rgr"
 Import "../WorkbookModel.rgr"

@@ -15,7 +15,7 @@
 ; keeps the cell's cached value instead.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
+Import "../lib.rs"
 Import "XlsFunctionTable.rgr"
 
 ; Where 3-D references and external names point: the EXTERNSHEET (XTI) table,

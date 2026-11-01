@@ -21,7 +21,7 @@
 ; writes .xlsx (or .ods, which OdsWriter can write) — see `saveNameFor`.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
+Import "../lib.rs"
 Import "Cfb.rgr"
 Import "XlsLoader.rgr"
 Import "OdsLoader.rgr"
