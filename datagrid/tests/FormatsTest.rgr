@@ -347,6 +347,34 @@ class FormatsTest {
         c.eqStr("builtin format 14" (SheetBytes.builtinNumFmt(14)) "m/d/yyyy")
         c.eqStr("builtin format gap" (SheetBytes.builtinNumFmt(30)) "General")
 
+        print "== Cfb (formats/cfb.rs) =="
+        def xlsBytes:buffer (FormatsTest.fixture("formulas.xls"))
+        def cf:Cfb (new Cfb)
+        c.ok("cfb opens .xls" (cf.open(xlsBytes)))
+        c.ok("cfb has Workbook" (cf.hasStream("workbook")))
+        c.ok("cfb no such stream" ((cf.hasStream("Nope")) == false))
+        def wb:buffer (cf.stream("Workbook"))
+        c.ok("cfb Workbook starts with BOF" (((buffer_length wb) > 4096) && ((SheetBytes.u16(wb 0)) == 2057)))
+        def si:buffer (cf.stream((EVGCodepoint.toStr(5)) + "SummaryInformation"))
+        c.ok("cfb mini stream" (((buffer_length si) > 0) && ((buffer_length si) < 4096) && ((SheetBytes.u16(si 0)) == 65534)))
+        def notCf:Cfb (new Cfb)
+        c.ok("cfb refuses a zip" ((notCf.open((FormatsTest.fixture("formulas.ods")))) == false))
+        c.eqStr("cfb not compound error" notCf.lastError "not a compound file")
+        def cut:Cfb (new Cfb)
+        def head:buffer (buffer_slice xlsBytes 0 2048)
+        c.ok("cfb truncated fails" ((cut.open(head)) == false))
+        c.ok("cfb truncated says damaged" ((indexOf cut.lastError "damaged compound file") == 0))
+        def bad:buffer (buffer_alloc (buffer_length xlsBytes))
+        def bi:int 0
+        while (bi < (buffer_length xlsBytes)) {
+            buffer_set bad bi (buffer_get xlsBytes bi)
+            bi = (bi + 1)
+        }
+        buffer_set bad 30 10
+        def badCf:Cfb (new Cfb)
+        c.ok("cfb bad sector size fails" ((badCf.open(bad)) == false))
+        c.eqStr("cfb bad sector size error" badCf.lastError "damaged compound file: unsupported sector size")
+
         print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
         if (c.failed == 0) {
             print "ALL PASS"

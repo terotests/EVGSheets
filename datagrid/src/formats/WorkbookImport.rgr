@@ -22,7 +22,6 @@
 ; ==============================================================================
 
 Import "../lib.rs"
-Import "Cfb.rgr"
 Import "XlsLoader.rgr"
 Import "OdsLoader.rgr"
 Import "XlsbLoader.rgr"
