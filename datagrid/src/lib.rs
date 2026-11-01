@@ -5,4 +5,5 @@
 #![allow(non_snake_case, unused_imports)]
 
 pub mod formats;
+pub mod xlsx;
 mod rgr;

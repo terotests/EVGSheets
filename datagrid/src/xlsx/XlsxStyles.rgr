@@ -25,7 +25,7 @@
 ; the shared file keeps them as two functions for that reason.
 ; ==============================================================================
 
-Import "XmlLite.rgr"
+Import "../lib.rs"
 Import "../CellStyle.rgr"
 Import "../../../office/drawing/OfficeColor.rgr"
 
@@ -190,11 +190,11 @@ class XlsxStyles {
         if ((strlen xml) == 0) {
             return
         }
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(xml)
         def inScheme:boolean false
         def slot:string ""
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break
@@ -284,9 +284,9 @@ class XlsxStyles {
         }
 
         ; Pass 1: numFmts, fonts, fills
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(xml)
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break
@@ -324,7 +324,7 @@ class XlsxStyles {
                 if t.selfClose {
                     depth = 0
                 }
-                while ((p.pos < p.len) && (depth > 0)) {
+                while ((p.pos < p.srcLen) && (depth > 0)) {
                     def ft:XmlTag (p.nextTag())
                     if (ft.valid == false) {
                         break
@@ -395,7 +395,7 @@ class XlsxStyles {
                 if (t.selfClose == false) {
                     def edge:string ""
                     def depthB:int 1
-                    while ((p.pos < p.len) && (depthB > 0)) {
+                    while ((p.pos < p.srcLen) && (depthB > 0)) {
                         def bt:XmlTag (p.nextTag())
                         if (bt.valid == false) {
                             break
@@ -472,7 +472,7 @@ class XlsxStyles {
                 if t.selfClose {
                     depth2 = 0
                 }
-                while ((p.pos < p.len) && (depth2 > 0)) {
+                while ((p.pos < p.srcLen) && (depth2 > 0)) {
                     def ft2:XmlTag (p.nextTag())
                     if (ft2.valid == false) {
                         break
@@ -502,7 +502,7 @@ class XlsxStyles {
         ; Pass 2: cellXfs / xf only (style index used by cells)
         p.reset(xml)
         def inCellXfs:boolean false
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def t2:XmlTag (p.nextTag())
             if (t2.valid == false) {
                 break
@@ -570,7 +570,7 @@ class XlsxStyles {
                     }
                     if (t2.selfClose == false) {
                         def depth3:int 1
-                        while ((p.pos < p.len) && (depth3 > 0)) {
+                        while ((p.pos < p.srcLen) && (depth3 > 0)) {
                             def at:XmlTag (p.nextTag())
                             if (at.valid == false) {
                                 break

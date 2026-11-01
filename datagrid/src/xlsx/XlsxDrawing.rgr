@@ -20,7 +20,7 @@
 ; than being silently dropped.
 ; ==============================================================================
 
-Import "XmlLite.rgr"
+Import "../lib.rs"
 Import "../SheetImage.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
 
@@ -61,7 +61,7 @@ class XlsxDrawing {
         def inTo:boolean false
         def sawTo:boolean false
         def depth:int 1
-        while ((p.pos < p.len) && (depth > 0)) {
+        while ((p.pos < p.srcLen) && (depth > 0)) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break
@@ -189,7 +189,7 @@ class XlsxDrawing {
     ; What the chart part says, as far as a GridChart can use it: the plot's
     ; kind, the title's text, the category range and each series' values.
     sfn readChart:void (img:SheetImage xml:string) {
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(xml)
         def inTitle:boolean false
         def inCat:boolean false
@@ -197,7 +197,7 @@ class XlsxDrawing {
         def barDir:string "col"
         def grouping:string ""
         def plot:string ""
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break
@@ -274,9 +274,9 @@ class XlsxDrawing {
         if ((strlen xml) == 0) {
             return
         }
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(xml)
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break

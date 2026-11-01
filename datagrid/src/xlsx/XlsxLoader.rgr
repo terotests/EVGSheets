@@ -4,9 +4,7 @@
 ; XlsxLoader - book.xlsx → WorkbookModel (sheets → SpreadsheetModel).
 ; ==============================================================================
 
-Import "XlsxPackage.rgr"
-Import "XlsxWorkbook.rgr"
-Import "XlsxSharedStrings.rgr"
+Import "../lib.rs"
 Import "XlsxWorksheet.rgr"
 Import "XlsxDrawing.rgr"
 Import "XlsxStyles.rgr"
@@ -29,7 +27,7 @@ class XlsxLoader {
 
     fn loadPathPassword:boolean (fullPath:string book:WorkbookModel password:string) {
         lastError = ""
-        def pkg:XlsxPackage (new XlsxPackage)
+        def pkg:XlsxPackage (XlsxPackage.new_())
         if ((pkg.openPathPassword(fullPath password)) == false) {
             lastError = pkg.lastError
             if ((strlen lastError) == 0) {
@@ -50,7 +48,7 @@ class XlsxLoader {
 
     fn loadBytesPassword:boolean (bytes:buffer book:WorkbookModel password:string) {
         lastError = ""
-        def pkg:XlsxPackage (new XlsxPackage)
+        def pkg:XlsxPackage (XlsxPackage.new_())
         if ((pkg.openBytesPassword(bytes password)) == false) {
             lastError = pkg.lastError
             if ((strlen lastError) == 0) {
@@ -98,7 +96,7 @@ class XlsxLoader {
         ; Kept so a later save can preserve the parts nothing here models —
         ; see `WorkbookModel.sourceBytes` and `XlsxWriter.writeOver`.
         book.sourceBytes = pkg.plainBytes
-        def wb:XlsxWorkbook (new XlsxWorkbook)
+        def wb:XlsxWorkbook (XlsxWorkbook.new_())
         wb.load(pkg)
         def ni:int 0
         while (ni < (array_length wb.nameKeys)) {
@@ -116,7 +114,7 @@ class XlsxLoader {
             book.propAuthor = (XlsxLoader.tagText(core "dc:creator"))
             book.propKeywords = (XlsxLoader.tagText(core "cp:keywords"))
         }
-        def sst:XlsxSharedStrings (new XlsxSharedStrings)
+        def sst:XlsxSharedStrings (XlsxSharedStrings.new_())
         if (pkg.hasEntry("xl/sharedStrings.xml")) {
             sst.parse((pkg.entryText("xl/sharedStrings.xml")))
         }
