@@ -26,9 +26,7 @@
 ; MIT/Apache-2.0), itself written from [MS-CFB] and [MS-XLS].
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
-Import "Cfb.rgr"
-Import "XlsFormula.rgr"
+Import "../lib.rs"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"
 Import "../CellStyle.rgr"
@@ -243,7 +241,7 @@ class XlsLoader {
     def nameRgce:[buffer]
     def nameItab:[int]
     def nameBuiltin:[int]
-    def formula:XlsFormula (new XlsFormula)
+    def formula:XlsFormula (XlsFormula.new_())
     ; Per sheet, while it is read.
     def lastFormulaKey:string ""
     def pendingStringRow:int -1
@@ -272,7 +270,7 @@ class XlsLoader {
         if ((Cfb.isCompound(b)) == false) {
             return false
         }
-        def cf:Cfb (new Cfb)
+        def cf:Cfb (Cfb.new_())
         if ((cf.open(b)) == false) {
             return false
         }
@@ -316,7 +314,7 @@ class XlsLoader {
 
     fn loadBytes:boolean (bytes:buffer book:WorkbookModel) {
         lastError = ""
-        def cf:Cfb (new Cfb)
+        def cf:Cfb (Cfb.new_())
         if ((cf.open(bytes)) == false) {
             lastError = ("XLS: " + cf.lastError)
             return false

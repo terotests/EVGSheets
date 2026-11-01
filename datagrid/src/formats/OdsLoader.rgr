@@ -27,7 +27,7 @@
 ; named ranges. Not read: charts, pictures, comments, conditional formats.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
+Import "../lib.rs"
 Import "OdsFormula.rgr"
 Import "../xlsx/XmlLite.rgr"
 Import "../../../ooxml/OpcPackage.rgr"

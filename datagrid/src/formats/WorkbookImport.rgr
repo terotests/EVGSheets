@@ -21,8 +21,7 @@
 ; writes .xlsx (or .ods, which OdsWriter can write) — see `saveNameFor`.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
-Import "Cfb.rgr"
+Import "../lib.rs"
 Import "XlsLoader.rgr"
 Import "OdsLoader.rgr"
 Import "XlsbLoader.rgr"
@@ -86,7 +85,7 @@ class WorkbookImport {
             return "xlsx"
         }
         if (Cfb.isCompound(bytes)) {
-            def cf:Cfb (new Cfb)
+            def cf:Cfb (Cfb.new_())
             if (cf.open(bytes)) {
                 if ((cf.hasStream("EncryptionInfo")) || (cf.hasStream("EncryptedPackage"))) {
                     return "encrypted"

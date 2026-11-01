@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The datagrid's Rust-syntax modules (src/lib.rs) as a crate, for cargo
+# check and for Rust programs that use them. The paths are those of a Ranger
+# checkout with this directory at gallery/datagrid (scripts/build.mjs stages
+# that layout); Ranger itself reads the .rs files with the .rgr ones.
+[package]
+name = "datagrid"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+build = "build.rs"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ranger = { path = "../../runtime/rust/ranger" }
+
+[workspace]

@@ -1,0 +1,6 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+;
+; The .rgr classes the datagrid crate's Rust-syntax modules use, in one
+; import closure: rgr.rs includes it once (import_rgr!).
+
+Import "../../../lib/evg/EVGCodepoint.rgr"

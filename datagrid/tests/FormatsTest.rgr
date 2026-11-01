@@ -299,6 +299,100 @@ class FormatsTest {
         def odBytes:buffer (od.saveBytesAs((od.suggestSaveName())))
         c.ok("an .ods saves as .ods" (WorkbookImport.isZip(odBytes) && ((WorkbookImport.kindOf(odBytes "x")) == "ods")))
 
+        print "== SheetBytes (formats/sheet_bytes.rs) =="
+        c.eqStr("extOf" (SheetBytes.extOf("Book.XLSX")) "xlsx")
+        c.eqStr("extOf last dot" (SheetBytes.extOf("a.tar.gz")) "gz")
+        c.eqStr("extOf none" (SheetBytes.extOf("README")) "")
+        c.eqStr("extOf dot in folder" (SheetBytes.extOf("v1.2/data")) "")
+        c.eqStr("extOf windows path" (SheetBytes.extOf("C:\\x.y\\Book.Xls")) "xls")
+        c.eqStr("extOf trailing dot" (SheetBytes.extOf("name.")) "")
+        c.eqStr("extOf non-ASCII" (SheetBytes.extOf("Myyntiä 2026.ÖDS")) "öds")
+        c.eqStr("withExt" (SheetBytes.withExt("old.xls" "xlsx")) "old.xlsx")
+        c.eqStr("withExt last dot" (SheetBytes.withExt("a.b.xls" "xlsx")) "a.b.xlsx")
+        c.eqStr("withExt none" (SheetBytes.withExt("data" "csv")) "data.csv")
+        c.eqStr("withExt dot in folder" (SheetBytes.withExt("v1.2/data" "csv")) "v1.2/data.csv")
+        c.eqStr("withExt trailing dot" (SheetBytes.withExt("name." "csv")) "name..csv")
+        c.eqStr("withExt non-ASCII" (SheetBytes.withExt("Äö.xls" "xlsx")) "Äö.xlsx")
+        def le:buffer (buffer_alloc 8)
+        buffer_set le 0 0
+        buffer_set le 1 0
+        buffer_set le 2 0
+        buffer_set le 3 0
+        buffer_set le 4 0
+        buffer_set le 5 0
+        buffer_set le 6 248
+        buffer_set le 7 191
+        c.ok("f64 -1.5" ((SheetBytes.f64(le 0)) == (0.0 - 1.5)))
+        c.eqInt("i32 negative" (SheetBytes.i32(le 4)) (0 - 1074266112))
+        c.eqInt("u16" (SheetBytes.u16(le 6)) 49144)
+        c.eqInt("u8 past the end" (SheetBytes.u8(le 8)) 0)
+        def rk:buffer (buffer_alloc 4)
+        buffer_set rk 0 ((1234 * 4) % 256)
+        buffer_set rk 1 (floor ((1234 * 4) / 256))
+        buffer_set rk 2 0
+        buffer_set rk 3 0
+        buffer_set rk 0 ((buffer_get rk 0) + 3)
+        c.ok("rk integer / 100" ((SheetBytes.rk(rk 0)) == 12.34))
+        def w:buffer (buffer_alloc 6)
+        buffer_set w 0 65
+        buffer_set w 1 0
+        buffer_set w 2 61
+        buffer_set w 3 216
+        buffer_set w 4 0
+        buffer_set w 5 222
+        c.eqStr("utf16 surrogate pair" (SheetBytes.utf16(w 0 3 true)) "A😀")
+        c.eqStr("utf16 compressed" (SheetBytes.utf16(w 0 1 false)) "A")
+        c.eqStr("numText integer" (SheetBytes.numText(42.0)) "42")
+        c.eqStr("numText fraction" (SheetBytes.numText(0.5)) "0.5")
+        c.eqStr("builtin format 14" (SheetBytes.builtinNumFmt(14)) "m/d/yyyy")
+        c.eqStr("builtin format gap" (SheetBytes.builtinNumFmt(30)) "General")
+
+        print "== Cfb (formats/cfb.rs) =="
+        def fresh:Cfb (Cfb.new_())
+        c.eqInt("cfb new_ defaults" fresh.miniCutoff 4096)
+        def xlsBytes:buffer (FormatsTest.fixture("formulas.xls"))
+        def cf:Cfb (Cfb.new_())
+        c.ok("cfb opens .xls" (cf.open(xlsBytes)))
+        c.ok("cfb has Workbook" (cf.hasStream("workbook")))
+        c.ok("cfb no such stream" ((cf.hasStream("Nope")) == false))
+        def wb:buffer (cf.stream("Workbook"))
+        c.ok("cfb Workbook starts with BOF" (((buffer_length wb) > 4096) && ((SheetBytes.u16(wb 0)) == 2057)))
+        def si:buffer (cf.stream((EVGCodepoint.toStr(5)) + "SummaryInformation"))
+        c.ok("cfb mini stream" (((buffer_length si) > 0) && ((buffer_length si) < 4096) && ((SheetBytes.u16(si 0)) == 65534)))
+        def notCf:Cfb (Cfb.new_())
+        c.ok("cfb refuses a zip" ((notCf.open((FormatsTest.fixture("formulas.ods")))) == false))
+        c.eqStr("cfb not compound error" notCf.lastError "not a compound file")
+        def cut:Cfb (Cfb.new_())
+        def head:buffer (buffer_slice xlsBytes 0 2048)
+        c.ok("cfb truncated fails" ((cut.open(head)) == false))
+        c.ok("cfb truncated says damaged" ((indexOf cut.lastError "damaged compound file") == 0))
+        def bad:buffer (buffer_alloc (buffer_length xlsBytes))
+        def bi:int 0
+        while (bi < (buffer_length xlsBytes)) {
+            buffer_set bad bi (buffer_get xlsBytes bi)
+            bi = (bi + 1)
+        }
+        buffer_set bad 30 10
+        def badCf:Cfb (Cfb.new_())
+        c.ok("cfb bad sector size fails" ((badCf.open(bad)) == false))
+        c.eqStr("cfb bad sector size error" badCf.lastError "damaged compound file: unsupported sector size")
+
+        print "== XlsFormula (formats/xls_formula.rs) =="
+        def xf:XlsFormula (XlsFormula.new_())
+        c.ok("xls formula function table" ((array_length xf.fnNames) > 300))
+        c.eqStr("xls function name" (XlsFunctionTable.nameOf(1)) "IF")
+        c.eqInt("xls function args" (XlsFunctionTable.argsOf(4)) (0 - 1))
+        c.eqInt("xls unknown function" (XlsFunctionTable.argsOf(202)) (0 - 2))
+        c.eqStr("xls col part" (XlsFormula.colPart("$AB$12")) "$AB")
+        c.eqStr("xls row part" (XlsFormula.rowPart("$AB$12")) "$12")
+        c.eqStr("xls sheet plain" (XlsFormula.sheetRef("Sales_2")) "Sales_2")
+        c.eqStr("xls sheet quoted" (XlsFormula.sheetRef("Bob's 2")) "'Bob''s 2'")
+        c.eqStr("xls sheet digit first" (XlsFormula.sheetRef("2026")) "'2026'")
+        c.eqStr("xls fn prefix" (XlsFormula.fnName("_xlfn.concat")) "CONCAT")
+        c.eqStr("xls quote text" (XlsFormula.quoteText("say \"hi\"")) "\"say \"\"hi\"\"\"")
+        c.eqStr("xls error text" (XlsFormula.errorText(42)) "#N/A")
+        c.eqStr("xls col name" (XlsFormula.colName(702)) "AAA")
+
         print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
         if (c.failed == 0) {
             print "ALL PASS"

@@ -19,7 +19,7 @@
 ; does for typed input, what is a number.
 ; ==============================================================================
 
-Import "SheetBytes.rgr"
+Import "../lib.rs"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"
 Import "../CellStyle.rgr"
