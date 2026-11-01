@@ -16,7 +16,6 @@
 ; ==============================================================================
 
 Import "../lib.rs"
-Import "XlsFormula.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"

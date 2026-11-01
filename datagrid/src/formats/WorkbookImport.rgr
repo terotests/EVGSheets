@@ -85,7 +85,7 @@ class WorkbookImport {
             return "xlsx"
         }
         if (Cfb.isCompound(bytes)) {
-            def cf:Cfb (new Cfb)
+            def cf:Cfb (Cfb.new_())
             if (cf.open(bytes)) {
                 if ((cf.hasStream("EncryptionInfo")) || (cf.hasStream("EncryptedPackage"))) {
                     return "encrypted"
