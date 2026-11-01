@@ -33,7 +33,7 @@
 ; ==============================================================================
 
 Import "SpreadsheetModel.rgr"
-Import "SheetImage.rgr"
+Import "lib.rs"
 Import "DataGrid.rgr"
 Import "pkg:evg/EVGDisplayList.rgr"
 Import "pkg:evg/EVGColor.rgr"

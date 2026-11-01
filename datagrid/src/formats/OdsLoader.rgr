@@ -32,15 +32,13 @@ Import "OdsFormula.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"
-Import "../CellStyle.rgr"
-Import "../DateSerial.rgr"
 
 ; A table-cell style as read, before its parent is folded in.
 class OdsCellStyle {
     def name:string ""
     def parent:string ""
     def dataStyle:string ""
-    def st:CellStyle (new CellStyle)
+    def st:CellStyle (CellStyle.new_())
     ; Which properties this style itself stated, so a parent fills the rest.
     def marks:[string:boolean]
 
@@ -71,7 +69,7 @@ class OdsLoader {
     def styleList:[CellStyle]
 
     Constructor () {
-        push styleList (new CellStyle)
+        push styleList (CellStyle.new_())
     }
 
     fn note:void (msg:string) {
@@ -720,10 +718,10 @@ class OdsLoader {
 
     fn resolve:CellStyle (name:string depth:int) {
         if ((has cellStyles name) == false) {
-            return (new CellStyle)
+            return (CellStyle.new_())
         }
         def cs:OdsCellStyle (unwrap (get cellStyles name))
-        def out:CellStyle (new CellStyle)
+        def out:CellStyle (CellStyle.new_())
         if (((strlen cs.parent) > 0) && (depth < 8)) {
             out = ((this.resolve(cs.parent (depth + 1))).copy())
         }

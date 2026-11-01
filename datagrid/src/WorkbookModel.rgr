@@ -5,8 +5,7 @@
 ; ==============================================================================
 
 Import "SpreadsheetModel.rgr"
-Import "SheetTable.rgr"
-Import "script/GridScript.rgr"
+Import "lib.rs"
 
 class WorkbookModel {
     def sheets:[SpreadsheetModel]
@@ -407,7 +406,7 @@ class WorkbookModel {
             }
             si = (si + 1)
         }
-        return (new SheetTable)
+        return (SheetTable.new_())
     }
 
     fn hasTable:boolean (name:string) {

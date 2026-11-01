@@ -269,7 +269,7 @@ class ChartInferenceTest {
         def dApp:GridApp (ChartInferenceTest.app())
         dApp.model.setCell(0 0 "Day")
         dApp.model.setCell(0 1 "Visits")
-        def dateStyle:CellStyle (new CellStyle)
+        def dateStyle:CellStyle (CellStyle.new_())
         dateStyle.numFmt = "yyyy-mm-dd"
         def dsid:int (dApp.model.styleIdFor(dateStyle))
         def di:int 0
@@ -318,7 +318,7 @@ class ChartInferenceTest {
         yApp.model.growTo(400 3)
         yApp.model.setCell(0 0 "Day")
         yApp.model.setCell(0 1 "Visits")
-        def yStyle:CellStyle (new CellStyle)
+        def yStyle:CellStyle (CellStyle.new_())
         yStyle.numFmt = "yyyy-mm-dd"
         def ysid:int (yApp.model.styleIdFor(yStyle))
         def yi:int 0

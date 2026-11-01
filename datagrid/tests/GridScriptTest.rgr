@@ -14,7 +14,7 @@
 Import "../src/WorkbookModel.rgr"
 Import "../src/SpreadsheetModel.rgr"
 Import "../src/FormulaEngine.rgr"
-Import "../src/script/GridScript.rgr"
+Import "../src/lib.rs"
 Import "../src/script/GridScriptEngine.rgr"
 Import "../src/script/ScriptPreview.rgr"
 Import "../src/xlsx/XlsxWriter.rgr"

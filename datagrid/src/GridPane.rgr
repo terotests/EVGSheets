@@ -45,7 +45,7 @@ Import "GridView.rgr"
 Import "GridSelection.rgr"
 Import "DataGrid.rgr"
 Import "SheetView.rgr"
-Import "DataValidation.rgr"
+Import "lib.rs"
 Import "CellRuleHost.rgr"
 Import "pkg:evg_window/EVGWindow.rgr"
 
@@ -521,7 +521,7 @@ class GridPane {
     }
 
     fn listColumn:DataValidation (col:int firstRow:int lastRow:int choices:[string]) {
-        def v:DataValidation (new DataValidation)
+        def v:DataValidation (DataValidation.new_())
         v.kind = "list"
         v.c0 = col
         v.c1 = col
@@ -541,7 +541,7 @@ class GridPane {
     ; `accepts` every other cell goes through, rather than as a special case
     ; somewhere in the host's key handling.
     fn lockRange:DataValidation (r0:int c0:int r1:int c1:int why:string) {
-        def v:DataValidation (new DataValidation)
+        def v:DataValidation (DataValidation.new_())
         v.kind = "textLength"
         v.op = "lessThan"
         v.f1 = "0"
@@ -576,7 +576,7 @@ class GridPane {
     ; A column judged by a function rather than by a bound. `name` is a
     ; function in whatever script the host installed; see `CellScripts`.
     fn scriptColumn:DataValidation (col:int firstRow:int lastRow:int name:string why:string) {
-        def v:DataValidation (new DataValidation)
+        def v:DataValidation (DataValidation.new_())
         v.kind = "script"
         v.c0 = col
         v.c1 = col
@@ -595,7 +595,7 @@ class GridPane {
     }
 
     fn wholeColumn:DataValidation (col:int firstRow:int lastRow:int low:string high:string) {
-        def v:DataValidation (new DataValidation)
+        def v:DataValidation (DataValidation.new_())
         v.kind = "whole"
         v.op = "between"
         v.c0 = col
@@ -609,7 +609,7 @@ class GridPane {
     }
 
     fn textLengthColumn:DataValidation (col:int firstRow:int lastRow:int low:string high:string) {
-        def v:DataValidation (new DataValidation)
+        def v:DataValidation (DataValidation.new_())
         v.kind = "textLength"
         v.op = "between"
         v.c0 = col

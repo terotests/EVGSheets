@@ -8,12 +8,10 @@
 ; expression evaluator. Builds on FormulaValue + FormulaFunctions + FormulaEngine.
 ; ==============================================================================
 
-Import "../src/FormulaValue.rgr"
+Import "../src/lib.rs"
 Import "../src/FormulaEngine.rgr"
 Import "../src/WorkbookModel.rgr"
 Import "../src/SpreadsheetModel.rgr"
-Import "../src/CellStyle.rgr"
-Import "../src/XlsxNumberFormat.rgr"
 Import "../src/xlsx/XlsxLoader.rgr"
 
 class Checker {

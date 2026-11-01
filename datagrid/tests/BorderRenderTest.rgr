@@ -109,7 +109,7 @@ class BorderRenderTest {
         app.init("gallery/pdf_writer/assets/fonts")
         app.model.clearSheet()
         app.model.resize(12 6)
-        def st:CellStyle (new CellStyle)
+        def st:CellStyle (CellStyle.new_())
         GridFormat.borderFor(st "all" true true true true)
         def sid:int (app.model.styleIdFor(st))
         app.model.setCellStyleId(borderRow borderCol sid)

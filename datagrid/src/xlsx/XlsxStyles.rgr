@@ -26,7 +26,6 @@
 ; ==============================================================================
 
 Import "../lib.rs"
-Import "../CellStyle.rgr"
 Import "../../../office/drawing/OfficeColor.rgr"
 
 class XlsxStyles {
@@ -515,7 +514,7 @@ class XlsxStyles {
             }
             if inCellXfs {
                 if ((t2.name == "xf") && (t2.isEnd == false)) {
-                    def st:CellStyle (new CellStyle)
+                    def st:CellStyle (CellStyle.new_())
                     def fontId:int (XlsxStyles.parseInt0((t2.attr("fontId"))))
                     def fillId:int (XlsxStyles.parseInt0((t2.attr("fillId"))))
                     def numId:int (XlsxStyles.parseInt0((t2.attr("numFmtId"))))

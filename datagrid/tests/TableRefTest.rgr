@@ -187,7 +187,7 @@ class TableRefTest {
         print "-- a column name that is not ASCII --"
         ; Built here rather than added to the fixture, because what is being
         ; checked is the NAME matching and not the file.
-        def acc:SheetTable (new SheetTable)
+        def acc:SheetTable (SheetTable.new_())
         acc.name = "Kirjanpito"
         acc.r0 = 0
         acc.c0 = 0

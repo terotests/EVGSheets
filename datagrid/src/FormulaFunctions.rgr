@@ -12,9 +12,7 @@
 ; Add new Excel-ish functions in this file + FormulaFunctionsTest.rgr.
 ; ==============================================================================
 
-Import "FormulaValue.rgr"
-Import "DateSerial.rgr"
-Import "XlsxNumberFormat.rgr"
+Import "lib.rs"
 
 class FormulaFunctions {
     Constructor () {
@@ -744,10 +742,9 @@ class FormulaFunctions {
         def n:int (array_length flat)
         while (i < n) {
             def v:FormulaValue (itemAt flat i)
-            def nums:[double]
-            def ok:boolean (v.tryNumber(nums))
+            def ok:boolean (v.isNumeric())
             if ok {
-                push vals (itemAt nums 0)
+                push vals (v.numberValue())
             }
             i = (i + 1)
         }
@@ -1933,8 +1930,7 @@ class FormulaFunctions {
     }
 
     sfn dateParts:[int] (v:FormulaValue) {
-        def out:[int]
-        DateSerial.toYMD((v.asNumber()) out)
+        def out:[int] (DateSerial.toYMD((v.asNumber())))
         return out
     }
 
@@ -2075,12 +2071,9 @@ class FormulaFunctions {
         if ve {
             return v
         }
-        def ok:[boolean]
-        def serial:double (DateSerial.parseDate((v.toText()) ok))
-        if ((array_length ok) > 0) {
-            if (itemAt ok 0) {
-                return (FormulaValue.fromNumber(serial))
-            }
+        def text:string (v.toText())
+        if (DateSerial.isDate(text)) {
+            return (FormulaValue.fromNumber((DateSerial.parseDate(text))))
         }
         return (FormulaValue.fromError("#VALUE!"))
     }
@@ -2337,8 +2330,7 @@ class FormulaFunctions {
         if numeric {
             def a:double (v.asNumber())
             def b:double (target.asNumber())
-            def isNum:[double]
-            if ((v.tryNumber(isNum)) == false) {
+            if ((v.isNumeric()) == false) {
                 ; Text never satisfies a numeric comparison other than <>.
                 if (op == "<>") {
                     return true
@@ -2421,10 +2413,9 @@ class FormulaFunctions {
         while (i < (array_length tested)) {
             if (FormulaFunctions.criterionMatches((itemAt tested i) crit)) {
                 if (i < (array_length summed)) {
-                    def nums:[double]
                     def sv:FormulaValue (itemAt summed i)
-                    if (sv.tryNumber(nums)) {
-                        total = (total + (itemAt nums 0))
+                    if (sv.isNumeric()) {
+                        total = (total + (sv.numberValue()))
                         hits = (hits + 1)
                     }
                 }
@@ -2520,10 +2511,9 @@ class FormulaFunctions {
                 if (mode == 0) {
                     hits = (hits + 1)
                 } {
-                    def nums:[double]
                     def sv:FormulaValue (itemAt values i)
-                    if (sv.tryNumber(nums)) {
-                        total = (total + (itemAt nums 0))
+                    if (sv.isNumeric()) {
+                        total = (total + (sv.numberValue()))
                         hits = (hits + 1)
                     }
                 }
@@ -2575,12 +2565,10 @@ class FormulaFunctions {
     ; Lookups. These are why a range had to keep its shape.
     ; ==========================================================================
     sfn valuesEqualLoose:boolean (a:FormulaValue b:FormulaValue) {
-        def an:[double]
-        def bn:[double]
-        def aOk:boolean (a.tryNumber(an))
-        def bOk:boolean (b.tryNumber(bn))
+        def aOk:boolean (a.isNumeric())
+        def bOk:boolean (b.isNumeric())
         if (aOk && bOk) {
-            return ((itemAt an 0) == (itemAt bn 0))
+            return ((a.numberValue()) == (b.numberValue()))
         }
         return ((FormulaFunctions.upper((a.toText()))) == (FormulaFunctions.upper((b.toText()))))
     }
@@ -2710,8 +2698,8 @@ class FormulaFunctions {
         }
         def exact:int -1
         def best:int -1
-        def nn:[double]
-        def needleNum:boolean (needle.tryNumber(nn))
+        def needleNum:boolean (needle.isNumeric())
+        def needleN:double (needle.numberValue())
         def i:int 0
         while (i < (array_length look)) {
             def cell:FormulaValue (itemAt look i)
@@ -2719,9 +2707,8 @@ class FormulaFunctions {
                 exact = i
             }
             if needleNum {
-                def cn:[double]
-                if (cell.tryNumber(cn)) {
-                    if ((itemAt cn 0) <= (itemAt nn 0)) {
+                if (cell.isNumeric()) {
+                    if ((cell.numberValue()) <= needleN) {
                         best = i
                     }
                 }
@@ -2867,13 +2854,11 @@ class FormulaFunctions {
                 def va:FormulaValue (src.at(ra (sortIdx - 1)))
                 def vb:FormulaValue (src.at(rb (sortIdx - 1)))
                 def cmp:int 0
-                def an:[double]
-                def bn:[double]
-                if ((va.tryNumber(an)) && (vb.tryNumber(bn))) {
-                    if ((itemAt an 0) < (itemAt bn 0)) {
+                if ((va.isNumeric()) && (vb.isNumeric())) {
+                    if ((va.numberValue()) < (vb.numberValue())) {
                         cmp = -1
                     }
-                    if ((itemAt an 0) > (itemAt bn 0)) {
+                    if ((va.numberValue()) > (vb.numberValue())) {
                         cmp = 1
                     }
                 } {
@@ -3290,10 +3275,9 @@ class FormulaFunctions {
         if ee {
             return v
         }
-        def nums:[double]
-        def ok:boolean (v.tryNumber(nums))
+        def ok:boolean (v.isNumeric())
         if ok {
-            return (FormulaValue.fromNumber((itemAt nums 0)))
+            return (FormulaValue.fromNumber((v.numberValue())))
         }
         return (FormulaValue.fromError("#VALUE!"))
     }

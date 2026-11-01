@@ -21,7 +21,7 @@
 
 Import "SpreadsheetModel.rgr"
 Import "ConditionalFormat.rgr"
-Import "DateSerial.rgr"
+Import "lib.rs"
 
 class SheetPivot {
     def name:string "PivotTable1"
@@ -190,8 +190,7 @@ class SheetPivot {
         }
         def v:double (ConditionalFormat.cellNumber(src r c))
         if ((groupMode == "year") || (groupMode == "month")) {
-            def ymd:[int]
-            DateSerial.toYMD(v ymd)
+            def ymd:[int] (DateSerial.toYMD(v))
             if ((array_length ymd) < 2) {
                 return txt
             }

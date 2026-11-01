@@ -49,7 +49,7 @@
 ; ==============================================================================
 
 Import "SpreadsheetModel.rgr"
-Import "XlsxNumberFormat.rgr"
+Import "lib.rs"
 Import "GridChart.rgr"
 
 ; What one column of the selection turns out to be.

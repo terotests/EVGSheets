@@ -22,8 +22,6 @@
 Import "../lib.rs"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"
-Import "../CellStyle.rgr"
-Import "../DateSerial.rgr"
 Import "pkg:evg/EVGCodepoint.rgr"
 Import "../../../pdf_writer/src/core/Utf8.rgr"
 
@@ -263,7 +261,7 @@ class TextWorkbook {
         sheet.name = base
         sheet.quietWrites = true
         def styles:[CellStyle]
-        push styles (new CellStyle)
+        push styles (CellStyle.new_())
         def dateStyle:[string:int]
         def maxC:int 0
         def r:int 0
@@ -292,19 +290,16 @@ class TextWorkbook {
             while (ci < (array_length fs)) {
                 def v:string (itemAt fs ci)
                 if ((strlen v) > 0) {
-                    def ok:[boolean]
                     def serial:double 0.0
-                    if (((strlen v) >= 6) && ((strlen v) <= 10)) {
-                        serial = (DateSerial.parseDate(v ok))
-                    }
                     def isDate:boolean false
-                    if ((array_length ok) > 0) {
-                        isDate = (itemAt ok 0)
+                    if (((strlen v) >= 6) && ((strlen v) <= 10)) {
+                        isDate = (DateSerial.isDate(v))
+                        serial = (DateSerial.parseDate(v))
                     }
                     if isDate {
                         def fmt:string (DateSerial.formatForTyped(v))
                         if ((has dateStyle fmt) == false) {
-                            def st:CellStyle (new CellStyle)
+                            def st:CellStyle (CellStyle.new_())
                             st.numFmt = fmt
                             set dateStyle fmt (array_length styles)
                             push styles st

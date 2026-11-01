@@ -29,8 +29,6 @@
 Import "../lib.rs"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"
-Import "../CellStyle.rgr"
-Import "../XlsxNumberFormat.rgr"
 Import "../../../office/drawing/OfficeColor.rgr"
 
 ; A record's data, in the pieces CONTINUE records split it into.
@@ -576,7 +574,7 @@ class XlsLoader {
     ; XF: font, number format, alignment, borders, fill — all a CellStyle has
     ; room for.
     fn readXf:CellStyle (c:XlsCursor) {
-        def st:CellStyle (new CellStyle)
+        def st:CellStyle (CellStyle.new_())
         def ifnt:int (c.u16())
         def ifmt:int (c.u16())
         c.u16()
@@ -676,7 +674,7 @@ class XlsLoader {
         ; Cell formats are the XFs as listed; nothing to do but keep the
         ; list's order, which is what the cells index.
         if ((array_length styles) == 0) {
-            push styles (new CellStyle)
+            push styles (CellStyle.new_())
         }
     }
 

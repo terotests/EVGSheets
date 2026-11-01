@@ -1607,7 +1607,7 @@ class GridEditTest {
         colApp.model.setCellRaw(0 2 "C")
         colApp.model.setCellRaw(0 3 "D")
         colApp.model.setColWidth(1 133)
-        def styled:CellStyle (new CellStyle)
+        def styled:CellStyle (CellStyle.new_())
         styled.hasFill = true
         styled.fillRgb = "#123456"
         colApp.model.setCellStyleResolved(0 2 styled)

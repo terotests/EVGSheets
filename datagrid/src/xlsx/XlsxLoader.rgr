@@ -10,8 +10,6 @@ Import "XlsxDrawing.rgr"
 Import "XlsxStyles.rgr"
 Import "XlsxTable.rgr"
 Import "../WorkbookModel.rgr"
-Import "../script/GridScript.rgr"
-Import "../CellStyle.rgr"
 Import "../FormulaEngine.rgr"
 
 class XlsxLoader {
@@ -252,7 +250,7 @@ class XlsxLoader {
             def path:string (itemAt names i)
             if (GridScript.isScriptPart(path)) {
                 def src:string (pkg.entryText(path))
-                def sc:GridScript (new GridScript)
+                def sc:GridScript (GridScript.new_())
                 sc.name = (GridScript.nameOfPart(path))
                 sc.source = src
                 sc.part = path

@@ -12,13 +12,7 @@
 ; a 100k×26 sheet costs almost nothing until cells are written.
 ; ==============================================================================
 
-Import "CellStyle.rgr"
-Import "DataValidation.rgr"
-Import "RichText.rgr"
-Import "SheetImage.rgr"
-Import "SheetShape.rgr"
-Import "SheetTable.rgr"
-Import "XlsxNumberFormat.rgr"
+Import "lib.rs"
 Import "../../office/editor/OfficeHistory.rgr"
 
 ; Conditional formatting rule (parsed from xlsx cfRule).
@@ -667,14 +661,14 @@ class SpreadsheetModel {
         def im:int 0
         while (im < (array_length images)) {
             def pic:SheetImage (itemAt images im)
-            def pc (new SheetImage)
+            def pc (SheetImage.new_())
             pc.copyFrom(pic)
             push c.images pc
             im = (im + 1)
         }
         def shi:int 0
         while (shi < (array_length shapes)) {
-            def shp (new SheetShape)
+            def shp (SheetShape.new_())
             shp.copyFrom((itemAt shapes shi))
             push c.shapes shp
             shi = (shi + 1)
@@ -1736,10 +1730,10 @@ class SpreadsheetModel {
 
     fn tableAt:SheetTable (i:int) {
         if (i < 0) {
-            return (new SheetTable)
+            return (SheetTable.new_())
         }
         if (i >= (array_length tables)) {
-            return (new SheetTable)
+            return (SheetTable.new_())
         }
         return (itemAt tables i)
     }
@@ -1750,10 +1744,10 @@ class SpreadsheetModel {
 
     fn imageAt:SheetImage (i:int) {
         if (i < 0) {
-            return (new SheetImage)
+            return (SheetImage.new_())
         }
         if (i >= (array_length images)) {
-            return (new SheetImage)
+            return (SheetImage.new_())
         }
         return (itemAt images i)
     }
@@ -1775,7 +1769,7 @@ class SpreadsheetModel {
         if (has richCells k) {
             return (unwrap (get richCells k))
         }
-        return (new RichText)
+        return (RichText.new_())
     }
 
     fn hasRichText:boolean (row:int col:int) {
@@ -1786,7 +1780,7 @@ class SpreadsheetModel {
     fn clearRichText:void (row:int col:int) {
         def k:string (this.cellKey(row col))
         if (has richCells k) {
-            set richCells k (new RichText)
+            set richCells k (RichText.new_())
         }
     }
 
@@ -2050,7 +2044,7 @@ class SpreadsheetModel {
             }
             i = (i - 1)
         }
-        return (new DataValidation)
+        return (DataValidation.new_())
     }
 
     fn hasValidation:boolean (row:int col:int) {

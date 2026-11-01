@@ -28,7 +28,7 @@
 ; ==============================================================================
 
 Import "SpreadsheetModel.rgr"
-Import "DateSerial.rgr"
+Import "lib.rs"
 
 ; The chart types offered, as small integers so they can be radio-button ids.
 ;
@@ -1003,8 +1003,7 @@ class ChartData {
         if (ok == false) {
             return (trim raw)
         }
-        def ymd:[int]
-        DateSerial.toYMD(serial ymd)
+        def ymd:[int] (DateSerial.toYMD(serial))
         if ((array_length ymd) < 3) {
             return (trim raw)
         }

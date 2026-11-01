@@ -5,7 +5,7 @@
 ; ==============================================================================
 
 Import "../src/GridApp.rgr"
-Import "../src/XlsxNumberFormat.rgr"
+Import "../src/lib.rs"
 Import "../src/FormulaEngine.rgr"
 Import "../src/SheetView.rgr"
 Import "../src/ConditionalFormat.rgr"
@@ -410,6 +410,49 @@ class WorkbookTest {
         c.ok("no trailing apostrophe" ((wb.nameIsValid(0 "A'")) == false))
         c.ok("but one in the middle is fine" (wb.nameIsValid(0 "Ada's")))
         c.ok("and a space is fine" (wb.nameIsValid(0 "My Sheet")))
+
+        ; Model classes in Ranger's Rust syntax: DataValidation, SheetTable, GridScript
+        print "== data validation, table names, script parts (.rs) =="
+        def dv:DataValidation (DataValidation.new_())
+        dv.kind = "whole"
+        dv.op = "between"
+        dv.f1 = "1"
+        dv.f2 = "10"
+        c.ok("whole between: 5" (dv.accepts("5")))
+        c.ok("whole between: 11 refused" ((dv.accepts("11")) == false))
+        c.ok("whole between: 2.5 refused" ((dv.accepts("2.5")) == false))
+        c.ok("whole between: text refused" ((dv.accepts("abc")) == false))
+        dv.f2 = ""
+        c.ok("between without an upper bound: 11" (dv.accepts("11")))
+        dv.op = "notBetween"
+        dv.f2 = "10"
+        c.ok("not between: 11" (dv.accepts("11")))
+        c.ok("not between: 5 refused" ((dv.accepts("5")) == false))
+        dv.kind = "decimal"
+        dv.op = "greaterThanOrEqual"
+        dv.f1 = "2.5"
+        c.ok("decimal >= 2.5: 2.5" (dv.accepts("2.5")))
+        c.ok("decimal >= 2.5: 2.4 refused" ((dv.accepts("2.4")) == false))
+        dv.f1 = "x"
+        c.ok("a rule without a number accepts" (dv.accepts("1")))
+        dv.kind = "textLength"
+        dv.op = "lessThanOrEqual"
+        dv.f1 = "3"
+        c.ok("text length <= 3: abc" (dv.accepts("abc")))
+        c.ok("text length <= 3: abcd refused" ((dv.accepts("abcd")) == false))
+        c.ok("blank allowed by default" (dv.accepts("")))
+        def dl:DataValidation (DataValidation.new_())
+        dl.kind = "list"
+        dl.f1 = "\"north,south\""
+        c.eqInt("list values" (array_length (dl.listValues())) 2)
+        c.ok("list: south" (dl.accepts("south")))
+        c.ok("list: west refused" ((dl.accepts("west")) == false))
+        c.eqStr("table name fold" (SheetTable.fold("  Sales Q1\t")) "sales q1")
+        c.ok("script part" (GridScript.isScriptPart("ranger/summary.tsx")))
+        c.ok("js script part" (GridScript.isScriptPart("ranger/a.js")))
+        c.ok("not a script part" ((GridScript.isScriptPart("xl/workbook.xml")) == false))
+        c.eqStr("script name of a part" (GridScript.nameOfPart("ranger/summary.tsx")) "summary")
+        c.eqStr("script extension" (GridScript.extensionOfPart("ranger/a.js")) ".js")
 
         print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
         if (c.failed == 0) {

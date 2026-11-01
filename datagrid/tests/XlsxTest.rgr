@@ -5,10 +5,9 @@
 ; ==============================================================================
 
 Import "../src/GridApp.rgr"
-Import "../src/XlsxNumberFormat.rgr"
+Import "../src/lib.rs"
 Import "../src/xlsx/XlsxLoader.rgr"
 Import "../src/xlsx/XlsxWorksheet.rgr"
-Import "../src/CellStyle.rgr"
 Import "../../office/drawing/OfficeColor.rgr"
 Import "../../pdf_writer/src/core/Utf8.rgr"
 Import "pkg:image/PNGEncoder.rgr"
@@ -382,7 +381,7 @@ class XlsxTest {
                 c.ok("a run with no rPr stated nothing" ((quietRun.boldSet == false) && (quietRun.italicSet == false)))
                 ; The bug itself: over a BOLD cell, one draws bold and the
                 ; other does not.
-                def boldCell:CellStyle (new CellStyle)
+                def boldCell:CellStyle (CellStyle.new_())
                 boldCell.bold = true
                 boldCell.italic = true
                 def overOff:CellStyle (offRun.styleOver(boldCell))

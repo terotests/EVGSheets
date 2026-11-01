@@ -25,7 +25,7 @@ Import "../../../pdf_writer/src/jsx/EvalValue.rgr"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"
 Import "../FormulaEngine.rgr"
-Import "../XlsxNumberFormat.rgr"
+Import "../lib.rs"
 
 ; A database, seen from a script. The default one has none: `available` is
 ; false and every query comes back empty with a reason. Subclass it to bind a

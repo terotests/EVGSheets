@@ -675,7 +675,7 @@ class XlsxWorksheet {
                 }
             }
             if ((t.name == "dataValidation") && (t.isEnd == false)) {
-                def dv:DataValidation (new DataValidation)
+                def dv:DataValidation (DataValidation.new_())
                 dv.kind = (t.attr("type"))
                 def dop:string (t.attr("operator"))
                 if ((strlen dop) > 0) {

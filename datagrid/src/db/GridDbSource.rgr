@@ -30,7 +30,7 @@
 ; ==============================================================================
 
 Import "../SpreadsheetModel.rgr"
-Import "../CellStyle.rgr"
+Import "../lib.rs"
 Import "../../../rangerdb/src/DBBackend.rgr"
 Import "../../../rangerdb/src/SqlFront.rgr"
 
@@ -242,7 +242,7 @@ class GridDbSource {
             wantRows = 8
         }
         model.rowCount = wantRows
-        def header:CellStyle (new CellStyle)
+        def header:CellStyle (CellStyle.new_())
         header.bold = true
         def h:int 0
         while (h < cn) {
@@ -261,7 +261,7 @@ class GridDbSource {
                 model.setCellRaw((r + 1) c (v.asString()))
                 def numeric:boolean (DBType.isNumeric(v.kind))
                 if numeric {
-                    def st:CellStyle (new CellStyle)
+                    def st:CellStyle (CellStyle.new_())
                     st.align = "right"
                     model.setCellStyleResolved((r + 1) c st)
                 }

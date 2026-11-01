@@ -16,7 +16,7 @@
 
 Import "SpreadsheetModel.rgr"
 Import "WorkbookModel.rgr"
-Import "FormulaValue.rgr"
+Import "lib.rs"
 Import "FormulaFunctions.rgr"
 
 ; --- AST nodes (flattened: kind + fields) ------------------------------------

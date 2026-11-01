@@ -21,7 +21,7 @@ Import "xlsx/XlsxLoader.rgr"
 Import "xlsx/XlsxWriter.rgr"
 Import "formats/WorkbookImport.rgr"
 Import "formats/OdsWriter.rgr"
-Import "DateSerial.rgr"
+Import "lib.rs"
 Import "pkg:evg/EVGCommands.rgr"
 Import "GridCursor.rgr"
 Import "../../game_engine/ui/UIInput.rgr"
@@ -397,7 +397,7 @@ class GridApp {
     def chartEditId:int 0
     def dialogsReady:boolean false
     ; Format painter: armed by Ctrl+Shift+C, applied to the next selection.
-    def formatBrush:CellStyle (new CellStyle)
+    def formatBrush:CellStyle (CellStyle.new_())
     def formatBrushArmed:boolean false
     def clipCut:boolean false
     def loadError:string ""
@@ -1859,7 +1859,7 @@ class GridApp {
             ; selection outright; nothing opens the window.
             if ((strlen arg) > 0) {
                 def parts:[string] (strsplit arg ":")
-                def dv:DataValidation (new DataValidation)
+                def dv:DataValidation (DataValidation.new_())
                 dv.kind = (itemAt parts 0)
                 if ((array_length parts) > 1) {
                     dv.f1 = (itemAt parts 1)
@@ -2097,7 +2097,7 @@ class GridApp {
     fn currentScript:GridScript () {
         def n:int (book.scriptCount())
         if (n == 0) {
-            def none:GridScript (new GridScript)
+            def none:GridScript (GridScript.new_())
             return none
         }
         def at:int scriptIndex
@@ -5178,7 +5178,7 @@ class GridApp {
     fn addValidationFromDialog:void () {
         this.syncValidationDialog()
         def g:GridRange (sel.liveRange())
-        def v:DataValidation (new DataValidation)
+        def v:DataValidation (DataValidation.new_())
         v.kind = (GridApp.dvKindName(dvKind))
         v.op = (GridApp.dvOpName(dvOp))
         v.r0 = g.r0
@@ -6603,7 +6603,7 @@ class GridApp {
             }
             r = (r + 1)
         }
-        def t:SheetTable (new SheetTable)
+        def t:SheetTable (SheetTable.new_())
         t.name = (this.uniqueTableName())
         t.r0 = a.row
         t.c0 = a.col
@@ -7352,7 +7352,7 @@ class GridApp {
 
     ; A new object at the active cell, selected, on top.
     fn addShape:SheetShape (kind:string) {
-        def sh:SheetShape (new SheetShape)
+        def sh:SheetShape (SheetShape.new_())
         sh.kind = kind
         sh.fromRow = sel.active.row
         sh.fromCol = sel.active.col
@@ -7561,7 +7561,7 @@ class GridApp {
             return false
         }
         def png:boolean ((buffer_get bytes 1) == 80)
-        def img:SheetImage (new SheetImage)
+        def img:SheetImage (SheetImage.new_())
         img.fromRow = sel.active.row
         img.fromCol = sel.active.col
         img.widthPx = 240
@@ -7678,8 +7678,7 @@ class GridApp {
             return ""
         }
         def serial:double (unwrap p)
-        def ymd:[int]
-        DateSerial.toYMD(serial ymd)
+        def ymd:[int] (DateSerial.toYMD(serial))
         if ((array_length ymd) < 2) {
             return ""
         }
@@ -8293,7 +8292,7 @@ class GridApp {
             if ((hit.row < 0) || (hit.col < 0)) {
                 return false
             }
-            def sh:SheetShape (new SheetShape)
+            def sh:SheetShape (SheetShape.new_())
             sh.kind = "ink"
             sh.outline = penColor
             def cr:GridRect (grid.cellRect(model hit.row hit.col))
@@ -15243,12 +15242,8 @@ class GridApp {
                 ; A typed date becomes what a spreadsheet stores for one: the
                 ; day count, wearing a format that draws it back the way it was
                 ; typed. Nothing else in the app has to know about dates.
-                def dateOk:[boolean]
-                def serial:double (DateSerial.parseDate(editBuf dateOk))
-                def isDate:boolean false
-                if ((array_length dateOk) > 0) {
-                    isDate = (itemAt dateOk 0)
-                }
+                def serial:double (DateSerial.parseDate(editBuf))
+                def isDate:boolean (DateSerial.isDate(editBuf))
                 if isDate {
                     def st:CellStyle ((model.getCellStyle(r c)).copy())
                     st.numFmt = (DateSerial.formatForTyped(editBuf))

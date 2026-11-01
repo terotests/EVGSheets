@@ -16,8 +16,6 @@ mod rgr {
     #[cfg(any())]
     ranger::import_rgr!("DgNative");
     #[cfg(any())]
-    ranger::import_rgr!("RichText");
-    #[cfg(any())]
     ranger::import_rgr!("xlsx/XlsxOfficeCrypto");
 }
-pub use rgr::{CellRun, DgNative, EVGCodepoint, OoxmlText, OpcPackage, OpcRelationship, RichText, XlsxOfficeCrypto};
+pub use rgr::{DgNative, EVGCodepoint, OoxmlText, OpcPackage, OpcRelationship, XlsxOfficeCrypto};

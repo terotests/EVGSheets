@@ -34,14 +34,13 @@
 
 Import "../lib.rs"
 Import "../../../ooxml/OpcPackage.rgr"
-Import "../SheetTable.rgr"
 Import "../SpreadsheetModel.rgr"
 
 class XlsxTable {
     ; Parse one table part. Returns a table whose name is empty when the part
     ; is not one — a caller can test that rather than a separate flag.
     sfn parse:SheetTable (xml:string) {
-        def t:SheetTable (new SheetTable)
+        def t:SheetTable (SheetTable.new_())
         if ((strlen xml) == 0) {
             return t
         }

@@ -19,8 +19,6 @@ Import "../lib.rs"
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../WorkbookModel.rgr"
 Import "../SpreadsheetModel.rgr"
-Import "../CellStyle.rgr"
-Import "../XlsxNumberFormat.rgr"
 
 class XlsbLoader {
     def lastError:string ""
@@ -141,7 +139,7 @@ class XlsbLoader {
             this.readStyles((pkg.readBinary(stylePart)))
         }
         if ((array_length styles) == 0) {
-            push styles (new CellStyle)
+            push styles (CellStyle.new_())
         }
         book.clear()
         def i:int 0
@@ -212,7 +210,7 @@ class XlsbLoader {
             }
             if ((recId == 47) && inXfs) {
                 ; BrtXF: parent, number format, font, …
-                def st:CellStyle (new CellStyle)
+                def st:CellStyle (CellStyle.new_())
                 def fid:int (SheetBytes.u16(data (recStart + 2)))
                 if (has formats fid) {
                     st.numFmt = (unwrap (get formats fid))

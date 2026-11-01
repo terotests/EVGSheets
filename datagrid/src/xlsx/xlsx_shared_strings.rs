@@ -4,7 +4,8 @@ use ranger::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::rgr::{CellRun, DgNative, RichText};
+use crate::rgr::DgNative;
+use crate::rich_text::{CellRun, RichText};
 use crate::xlsx::xml_lite::{XmlLite, XmlTag};
 
 /// XlsxSharedStrings - xl/sharedStrings.xml → string table.
@@ -13,7 +14,7 @@ pub struct XlsxSharedStrings {
     /// The same entries, in pieces. A shared string is either one plain run or
     /// several styled ones, and the styled case is the whole point of rich text —
     /// keeping only the concatenation throws away what the file said.
-    rich: Vec<Rc<RefCell<RichText>>>,
+    pub rich: Vec<Rc<RefCell<RichText>>>,
     /// True when any shared entry has more than one styled run. Load paths that
     /// only need the plain string skip `richAt` when this is false.
     pub anyRich: bool,
@@ -61,23 +62,23 @@ impl XlsxSharedStrings {
                 // `val` says which way. `<b/>` and `<b val="1"/>` state bold,
                 // `<b val="0"/>` states not-bold, and no `<b>` states nothing.
                 if t.borrow().name == "b" && !t.borrow().isEnd {
-                    CellRun::set_bold(&cur, XlsxSharedStrings::onOff(&t));
+                    cur.borrow_mut().setBold(XlsxSharedStrings::onOff(&t));
                 }
                 if t.borrow().name == "i" && !t.borrow().isEnd {
-                    CellRun::set_italic(&cur, XlsxSharedStrings::onOff(&t));
+                    cur.borrow_mut().setItalic(XlsxSharedStrings::onOff(&t));
                 }
                 if t.borrow().name == "u" && !t.borrow().isEnd {
-                    CellRun::set_underline(&cur, XlsxSharedStrings::onOff(&t));
+                    cur.borrow_mut().setUnderline(XlsxSharedStrings::onOff(&t));
                 }
                 if t.borrow().name == "strike" && !t.borrow().isEnd {
-                    CellRun::set_strike(&cur, XlsxSharedStrings::onOff(&t));
+                    cur.borrow_mut().setStrike(XlsxSharedStrings::onOff(&t));
                 }
                 if t.borrow().name == "sz" && !t.borrow().isEnd {
                     let sv: String = t.borrow().attr("val");
                     if !sv.is_empty() {
                         let d: Option<f64> = sv.parse::<f64>().ok();
                         if d.is_some() {
-                            cur.borrow_mut().size_pt = d.unwrap();
+                            cur.borrow_mut().sizePt = d.unwrap();
                         }
                     }
                 }
@@ -92,7 +93,7 @@ impl XlsxSharedStrings {
                     if !t.borrow().selfClose {
                         let body: String = p.borrow_mut().readTextUntilEnd("t");
                         cur.borrow_mut().text = format!("{}{}", cur.borrow().text, body);
-                        RichText::add(&out, cur.clone());
+                        out.borrow_mut().add(cur.clone());
                         let next: Rc<RefCell<CellRun>> = Rc::new(RefCell::new(CellRun::new()));
                         if in_run {
                             // A run's properties belong to its own <t> only.
@@ -128,7 +129,7 @@ impl XlsxSharedStrings {
         }
         self.strings[i as usize].clone()
     }
-    fn richAt(&self, i: i64) -> Rc<RefCell<RichText>> {
+    pub fn richAt(&self, i: i64) -> Rc<RefCell<RichText>> {
         if i < 0 {
             return Rc::new(RefCell::new(RichText::new()));
         }
@@ -154,8 +155,8 @@ impl XlsxSharedStrings {
             if (t.borrow().name == "si" && !t.borrow().isEnd) && !t.borrow().selfClose {
                 let rt: Rc<RefCell<RichText>> = XlsxSharedStrings::parseRuns(&p, "si");
                 self.rich.push(rt.clone());
-                self.strings.push(RichText::text(&rt));
-                if RichText::is_rich(&rt) {
+                self.strings.push(rt.borrow().text());
+                if rt.borrow().isRich() {
                     self.anyRich = true;
                 }
             }

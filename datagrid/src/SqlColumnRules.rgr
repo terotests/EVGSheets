@@ -268,7 +268,7 @@ class SqlColumnRules {
             listRule.allowBlank = nullable
             return listRule
         }
-        def v:DataValidation (new DataValidation)
+        def v:DataValidation (DataValidation.new_())
         v.c0 = col
         v.c1 = col
         v.r0 = firstRow
