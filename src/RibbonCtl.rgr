@@ -29,7 +29,8 @@ class RibbonItem {
     def name:string ""
     def icon:string ""
     ; A word drawn instead of an icon, for the few commands no icon says
-    ; better than a word does ("%", ".0").
+    ; better than a word does ("%", ".0"). With an icon too, it is the
+    ; label beside the glyph, as on Excel's small ribbon buttons.
     def text:string ""
     def shortcut:string ""
     def toggle:boolean false
@@ -58,6 +59,9 @@ class RibbonCtl extends UiCtl {
     ; The labelled ribbon group this toolbar sits in, so a reader hears
     ; "Font, group" around its buttons. "" when it stands alone.
     def groupTid:string ""
+    ; A narrow window: the labelled buttons show their glyphs alone, as
+    ; Excel's groups shrink before they fold.
+    def iconsOnly:boolean false
 
     Constructor () {
         rootEl = (EVGElement.createDiv())
@@ -239,8 +243,15 @@ class RibbonCtl extends UiCtl {
                 el.id = (this.itemTid(it.value))
                 el.className = "sx-tool"
                 el.cursor = "pointer"
-                if ((strlen it.text) > 0) {
+                def word:string it.text
+                if (iconsOnly && ((strlen it.icon) > 0)) {
+                    word = ""
+                }
+                if ((strlen word) > 0) {
                     UiTree.addClass(el "sx-tool-text")
+                    if ((strlen it.icon) > 0) {
+                        UiTree.addClass(el "sx-tool-label")
+                    }
                 }
                 if ((strlen toolClass) > 0) {
                     UiTree.addClass(el toolClass)
@@ -253,13 +264,20 @@ class RibbonCtl extends UiCtl {
                 } {
                     UiTree.setState(el "sx-tool" "off")
                 }
-                if ((strlen it.text) > 0) {
-                    def word:EVGElement (EVGElement.createSpan())
-                    word.className = "sx-tool-word"
-                    word.textContent = it.text
-                    word.elementType = 1
-                    word.a11yHidden = true
-                    el.addChild(word)
+                ; A labelled button: the glyph, then the word beside it.
+                if (((strlen word) > 0) && ((strlen it.icon) > 0)) {
+                    el.addChild((RibbonCtl.glyph(it.icon "sx-glyph")))
+                }
+                if ((strlen word) > 0) {
+                    def wordEl:EVGElement (EVGElement.createSpan())
+                    wordEl.className = "sx-tool-word"
+                    if ((strlen it.icon) > 0) {
+                        wordEl.className = "sx-tool-caption"
+                    }
+                    wordEl.textContent = word
+                    wordEl.elementType = 1
+                    wordEl.a11yHidden = true
+                    el.addChild(wordEl)
                 } {
                     el.addChild((RibbonCtl.glyph(it.icon "sx-glyph")))
                 }

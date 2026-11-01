@@ -15,14 +15,14 @@ embeds: <https://terotests.github.io/EVGSheets/embed.html>
 
 | Part | Built from |
 |---|---|
-| Ribbon as Excel lays it out: tabs (File, Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Automate), and on Home the labelled groups Undo, Clipboard, Font, Alignment, Number, Styles, Cells, Editing and Add-ins, with Excel's drop-downs (Paste, Merge, Insert, Delete, Format, Fill, Clear, Sort & Filter, Find & Select). A narrow window folds Editing, Styles, Alignment and Number into one drop-down each. | `RibbonCtl` and `RibbonGroupCtl` (in this repository) and `MenuCtl` dropdowns |
-| Classic menu bar (off by default, `menubar=true`): File, Edit, View, Insert, Format, Data, Page Layout, Formulas, Review | `MenubarCtl` / `MenuCtl` |
+| Ribbon as Excel lays it out: tabs (File, Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Automate), and on Home the labelled groups Undo, Clipboard, Font, Alignment, Number, Styles, Cells, Editing and Add-ins, with Excel's drop-downs (Paste, Merge, Insert, Delete, Format, Fill, Clear, Sort & Filter, Find & Select). A narrow window folds Editing, Styles, Alignment and Number into one drop-down each. The other tabs use the same labelled groups of icon buttons and drop-downs; as the window narrows their groups drop their captions, then fold into one drop-down each. | `RibbonCtl` and `RibbonGroupCtl` (in this repository) and `MenuCtl` dropdowns |
+| Classic menu bar (off by default; View › Menu Bar or `menubar=true`): File, Edit, View, Insert, Format, Data, Page Layout, Formulas, Review | `MenubarCtl` / `MenuCtl` |
 | Context menu on cells, and on column and row headers (insert, delete, clear, move, fit, sort, conditional formatting, validation) | `MenuCtl` in context mode |
 | Sheet tabs: add, drag to reorder, and a right-click menu (rename, duplicate, insert, move left/right, delete with confirmation) | `TabsCtl`, `RibbonCtl`, `MenuCtl` in context mode |
 | Status line: Ready / editing / what happened, and Sum, Average and Count of the selection | the app |
 | Dialogs: find and replace, paste special, rename sheet, link, text and fill colour, borders, conditional formatting (with the sheet's rules listed to edit or delete), data validation and its list, chart picker, SQL query, database connection | `WindowCtl` (modal) with `InputCtl`, `CheckboxCtl`, `RadioGroupCtl` and `ButtonCtl` (`src/SxDialog.rgr`); the work is the core's |
 | Formula bar, grid | the datagrid core (`GridApp`) |
-| Light and dark | `@vars` palettes in `src/sheets.css`; the core's `modern` and `dark` grid themes |
+| Light and dark, switched from the title bar or View › Dark Mode | `@vars` palettes in `src/sheets.css`; the core's `modern` and `dark` grid themes |
 
 The two halves meet at the display list. The page is laid out by EVG, and
 the element `sx-grid` is a placeholder whose rectangle becomes `GridApp`'s

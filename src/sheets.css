@@ -361,6 +361,14 @@
   stroke-linejoin: round;
 }
 .sx-tool-word { color: var(--text); font-size: 12px; font-weight: bold; line-height: 16px; }
+/* A labelled button (Excel's small ribbon button): glyph, then its name. */
+.sx-tool-label {
+  flex-direction: row;
+  justify-content: flex-start;
+  column-gap: 6px;
+  padding: 0 8px 0 6px;
+}
+.sx-tool-caption { color: var(--text); font-size: 12px; line-height: 16px; white-space: nowrap; }
 
 /* The colour a text-colour or fill button would apply, under its glyph. */
 .sx-swatch { width: 16px; height: 3px; border-radius: 1px; margin-top: 1px; }
