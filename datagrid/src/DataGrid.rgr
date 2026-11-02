@@ -12,7 +12,7 @@
 ;   visible rows/cols  → GridView batched display list
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
+Import "lib.rs"
 Import "GridSelection.rgr"
 Import "SheetView.rgr"
 

@@ -91,7 +91,7 @@ class FreezeClipTest {
         app.model.setCellRaw(1 1 "Second")
         app.model.setCellRaw(5 0 "Side")
         if full {
-            def dark:CellStyle (new CellStyle)
+            def dark:CellStyle (CellStyle.new_())
             dark.hasFill = true
             dark.fillRgb = "#202020"
             dark.textRgb = "#ffffff"

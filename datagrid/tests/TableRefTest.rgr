@@ -26,8 +26,7 @@
 ;   npm run datagrid:tables:test
 ; ==============================================================================
 
-Import "../src/xlsx/XlsxLoader.rgr"
-Import "../src/FormulaEngine.rgr"
+Import "../src/lib.rs"
 Import "../src/xlsx/XlsxWriter.rgr"
 
 class TableCheck {
@@ -57,7 +56,7 @@ class TableRefTest {
     ; Parse a formula and write it back, which is what a copy, a fill and a
     ; save all do to it.
     sfn roundTrip:string (expr:string) {
-        def p:FormulaParser (new FormulaParser)
+        def p:FormulaParser (FormulaParser.new_())
         def ast:FormulaNode (p.parse(expr))
         return (FormulaParser.serializeNode(ast))
     }
@@ -66,7 +65,7 @@ class TableRefTest {
     sfn valueAt:string (book:WorkbookModel expr:string row:int col:int) {
         def sheet:SpreadsheetModel (book.sheetAt(0))
         sheet.setFormula(row col expr)
-        def engine:FormulaEngine (new FormulaEngine)
+        def engine:FormulaEngine (FormulaEngine.new_())
         engine.attach(book)
         engine.rebuildAll()
         return (sheet.getCell(row col))
@@ -76,8 +75,8 @@ class TableRefTest {
         def c:TableCheck (new TableCheck)
         print "== TableRefTest =="
 
-        def book:WorkbookModel (new WorkbookModel)
-        def loader:XlsxLoader (new XlsxLoader)
+        def book:WorkbookModel (WorkbookModel.new_())
+        def loader:XlsxLoader (XlsxLoader.new_())
         def ok:boolean (loader.loadPath("gallery/datagrid/fixtures/tables.xlsx" book))
         c.ok("the workbook opened" ok)
         if (ok == false) {
@@ -169,7 +168,7 @@ class TableRefTest {
         print "-- it depends on what it reads --"
         ; The one that a first-run-only implementation passes and a working one
         ; has to keep passing: change an amount, and the sum has to follow.
-        def engine:FormulaEngine (new FormulaEngine)
+        def engine:FormulaEngine (FormulaEngine.new_())
         engine.attach(book)
         sales.setFormula(1 19 "SUM(Table1[Amount])")
         engine.rebuildAll()
@@ -187,7 +186,7 @@ class TableRefTest {
         print "-- a column name that is not ASCII --"
         ; Built here rather than added to the fixture, because what is being
         ; checked is the NAME matching and not the file.
-        def acc:SheetTable (new SheetTable)
+        def acc:SheetTable (SheetTable.new_())
         acc.name = "Kirjanpito"
         acc.r0 = 0
         acc.c0 = 0
@@ -216,15 +215,15 @@ class TableRefTest {
         ; Without this the feature is half of one: open a file with a table,
         ; save it, and the table is gone — along with every formula that named
         ; it, which then reads #NAME? in a file that was only ever opened.
-        def fresh:WorkbookModel (new WorkbookModel)
-        def l2:XlsxLoader (new XlsxLoader)
+        def fresh:WorkbookModel (WorkbookModel.new_())
+        def l2:XlsxLoader (XlsxLoader.new_())
         def reload0:boolean (l2.loadPath("gallery/datagrid/fixtures/tables.xlsx" fresh))
         c.ok("the fixture opened again" reload0)
         def w:XlsxWriter (new XlsxWriter)
         def wrote:boolean (w.write(fresh "gallery/datagrid/harness/out/export" "tables-roundtrip.xlsx"))
         c.ok("and wrote" wrote)
-        def back:WorkbookModel (new WorkbookModel)
-        def l3:XlsxLoader (new XlsxLoader)
+        def back:WorkbookModel (WorkbookModel.new_())
+        def l3:XlsxLoader (XlsxLoader.new_())
         def reread:boolean (l3.loadPath("gallery/datagrid/harness/out/export/tables-roundtrip.xlsx" back))
         c.ok("and read back" reread)
         if reread {
@@ -241,7 +240,7 @@ class TableRefTest {
             ; The point of all of it: a formula naming the table still works.
             def bsheet:SpreadsheetModel (back.sheetAt(0))
             bsheet.setFormula(1 20 "SUM(Table1[Amount])")
-            def e2:FormulaEngine (new FormulaEngine)
+            def e2:FormulaEngine (FormulaEngine.new_())
             e2.attach(back)
             e2.rebuildAll()
             c.eqStr("and a formula naming it still calculates" (bsheet.getCell(1 20)) "835")

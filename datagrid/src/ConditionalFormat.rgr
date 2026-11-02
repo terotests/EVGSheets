@@ -8,7 +8,7 @@
 ; (greaterThan / lessThan / equal / between).
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
+Import "lib.rs"
 
 class ConditionalFormat {
 

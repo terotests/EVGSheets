@@ -35,12 +35,7 @@
 ; freeze panes, hyperlinks and data validations all survive.
 ; ==============================================================================
 
-Import "../SpreadsheetModel.rgr"
-Import "../WorkbookModel.rgr"
-Import "../script/GridScript.rgr"
-Import "../CellStyle.rgr"
-Import "../DataValidation.rgr"
-Import "../RichText.rgr"
+Import "../lib.rs"
 Import "../../zip/ZipWriter.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../../../pdf_writer/src/core/Utf8.rgr"

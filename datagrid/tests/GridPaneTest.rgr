@@ -58,7 +58,7 @@ class GridPaneTest {
     sfn filled:GridPane () {
         def pane:GridPane (new GridPane)
         pane.start(600 400)
-        def m:SpreadsheetModel (new SpreadsheetModel)
+        def m:SpreadsheetModel (SpreadsheetModel.new_())
         m.growTo(12 4)
         m.setCell(0 0 "sku")
         m.setCell(0 1 "qty")

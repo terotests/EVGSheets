@@ -18,13 +18,7 @@
 ; ==============================================================================
 
 Import "../lib.rs"
-Import "OdsFormula.rgr"
 Import "../xlsx/XlsxWriter.rgr"
-Import "../WorkbookModel.rgr"
-Import "../SpreadsheetModel.rgr"
-Import "../CellStyle.rgr"
-Import "../DateSerial.rgr"
-Import "../XlsxNumberFormat.rgr"
 Import "../../zip/ZipWriter.rgr"
 
 class OdsWriter {
@@ -585,8 +579,7 @@ class OdsWriter {
 
     ; office:date-value / office:time-value for a serial.
     sfn isoDate:string (serial:double withTime:boolean) {
-        def ymd:[int]
-        DateSerial.toYMD(serial ymd)
+        def ymd:[int] (DateSerial.toYMD(serial))
         def out:string ((to_string (itemAt ymd 0)) + "-" + (OdsWriter.two((itemAt ymd 1))) + "-" + (OdsWriter.two((itemAt ymd 2))))
         if withTime {
             def frac:double (serial - (to_double (floor serial)))

@@ -22,6 +22,10 @@ class DgNative {
     sfn substr:string (s:string a:int b:int) {
         return (substring s a b)
     }
+    ; the one-character string of a code point
+    sfn from_code:string (c:int) {
+        return (strfromcode c)
+    }
     sfn index_of:int (text:string key:string) {
         return (indexOf text key)
     }

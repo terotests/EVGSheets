@@ -25,9 +25,8 @@
 ;     bolded and un-bolded is indistinguishable from one that never was.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "GridSelection.rgr"
-Import "CellStyle.rgr"
+Import "lib.rs"
 
 class GridFormat {
     ; --- the operations, by name ---------------------------------------------
@@ -342,10 +341,10 @@ class GridFormat {
             st.numFmt = "General"
             st.hasFill = false
             st.hasBorder = false
-            st.borderTop = (new CellBorder)
-            st.borderRight = (new CellBorder)
-            st.borderBottom = (new CellBorder)
-            st.borderLeft = (new CellBorder)
+            st.borderTop = (CellBorder.new_())
+            st.borderRight = (CellBorder.new_())
+            st.borderBottom = (CellBorder.new_())
+            st.borderLeft = (CellBorder.new_())
             return
         }
     }
@@ -462,10 +461,10 @@ class GridFormat {
         } {
             wantR = (GridFormat.specHasEdge(arg 86))
         }
-        st.borderTop = (new CellBorder)
-        st.borderRight = (new CellBorder)
-        st.borderBottom = (new CellBorder)
-        st.borderLeft = (new CellBorder)
+        st.borderTop = (CellBorder.new_())
+        st.borderRight = (CellBorder.new_())
+        st.borderBottom = (CellBorder.new_())
+        st.borderLeft = (CellBorder.new_())
         if wantT {
             st.borderTop.style = line
             st.borderTop.rgb = ink
@@ -491,10 +490,10 @@ class GridFormat {
     sfn borderFor:void (st:CellStyle arg:string top:boolean right:boolean bottom:boolean left:boolean) {
         if (arg == "none") {
             st.hasBorder = false
-            st.borderTop = (new CellBorder)
-            st.borderRight = (new CellBorder)
-            st.borderBottom = (new CellBorder)
-            st.borderLeft = (new CellBorder)
+            st.borderTop = (CellBorder.new_())
+            st.borderRight = (CellBorder.new_())
+            st.borderBottom = (CellBorder.new_())
+            st.borderLeft = (CellBorder.new_())
             return
         }
         def line:string "thin"

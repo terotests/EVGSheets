@@ -200,7 +200,7 @@ class ValidationDialog extends SxDialog {
         }
         def g:GridRange (app.sel.liveRange())
         if (target == addBtn.tid) {
-            def v:DataValidation (new DataValidation)
+            def v:DataValidation (DataValidation.new_())
             v.kind = (GridApp.dvKindName(app.dvKind))
             v.op = (GridApp.dvOpName(app.dvOp))
             v.r0 = g.r0

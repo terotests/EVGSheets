@@ -22,7 +22,7 @@
 ; ==============================================================================
 
 Import "ScriptEditor.rgr"
-Import "GridScript.rgr"
+Import "../lib.rs"
 Import "lang/EditorLanguage.rgr"
 Import "lang/JsLanguage.rgr"
 Import "lang/RangerLanguage.rgr"

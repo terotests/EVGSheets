@@ -12,10 +12,9 @@
 ;        └─ sceneJson          →  lib/evg/gl/evg-webgl.js
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "GridSelection.rgr"
 Import "DataGrid.rgr"
-Import "CellStyle.rgr"
+Import "lib.rs"
 Import "GridTheme.rgr"
 Import "../../office/text/OfficeFont.rgr"
 Import "../../office/text/OfficeText.rgr"
@@ -24,7 +23,6 @@ Import "TableLook.rgr"
 Import "pkg:evg_window/EVGWindow.rgr"
 Import "GridChartView.rgr"
 Import "GridImages.rgr"
-Import "SheetShape.rgr"
 Import "pkg:evg/EVGCommands.rgr"
 Import "GridToolbar.rgr"
 Import "pkg:evg_window/EVGToolbarView.rgr"
@@ -35,7 +33,6 @@ Import "../../game_engine/ui/UIContext.rgr"
 Import "pkg:evg/EVGColor.rgr"
 Import "pkg:evg/EVGDisplayList.rgr"
 Import "pkg:evg/EVGA11yTree.rgr"
-Import "WorkbookModel.rgr"
 
 class GridView {
     def canvas:SoftCanvas (new SoftCanvas)
@@ -2930,7 +2927,7 @@ class GridView {
         while (rr < 2) {
             def cc:int 0
             while (cc < 2) {
-                def st:CellStyle (new CellStyle)
+                def st:CellStyle (CellStyle.new_())
                 GridFormat.borderSpecFor(st borderPreviewSpec (rr == 0) (cc == 1) (rr == 1) (cc == 0))
                 def rect:GridRect (GridRect.create((x0 + (cc * cw)) (y0 + (rr * ch)) cw ch))
                 this.paintCellBorders(dl st rect)

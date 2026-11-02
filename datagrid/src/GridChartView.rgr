@@ -24,7 +24,7 @@
 ; ==============================================================================
 
 Import "GridChart.rgr"
-Import "SpreadsheetModel.rgr"
+Import "lib.rs"
 Import "../../vela/src/VlJson.rgr"
 Import "../../vela/src/VlCompile.rgr"
 Import "../../vela/src/VlRuntime.rgr"

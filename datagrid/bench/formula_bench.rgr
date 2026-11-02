@@ -8,9 +8,7 @@
 ;        npm run datagrid:formula:bench -- 5000
 ; ==============================================================================
 
-Import "../src/WorkbookModel.rgr"
-Import "../src/SpreadsheetModel.rgr"
-Import "../src/FormulaEngine.rgr"
+Import "../src/lib.rs"
 
 class FormulaBench {
     sfn report:void (name:string ms:double) {
@@ -34,8 +32,8 @@ class FormulaBench {
         print ("== formula_bench n=" + (to_string n) + " ==")
 
         ; --- chain A1=1, A2=A1+1, ... ---
-        def book:WorkbookModel (new WorkbookModel)
-        def s:SpreadsheetModel (new SpreadsheetModel)
+        def book:WorkbookModel (WorkbookModel.new_())
+        def s:SpreadsheetModel (SpreadsheetModel.new_())
         s.name = "Chain"
         s.resize((n + 2) 4)
         s.setCellRaw(0 0 "1")
@@ -46,7 +44,7 @@ class FormulaBench {
             i = (i + 1)
         }
         book.addSheet(s)
-        def eng:FormulaEngine (new FormulaEngine)
+        def eng:FormulaEngine (FormulaEngine.new_())
         eng.attach(book)
         def t0:double (wall_clock_ms)
         eng.rebuildAll()
@@ -63,8 +61,8 @@ class FormulaBench {
         print ("  dirtyMarked=" + (to_string eng.dirtyMarked) + " recalculated=" + (to_string eng.recalculated) + " last=" + (s.getCell(n 0)))
 
         ; --- fan-out B_i = A1 * i ---
-        def book2:WorkbookModel (new WorkbookModel)
-        def s2:SpreadsheetModel (new SpreadsheetModel)
+        def book2:WorkbookModel (WorkbookModel.new_())
+        def s2:SpreadsheetModel (SpreadsheetModel.new_())
         s2.name = "Fan"
         s2.resize((n + 2) 4)
         s2.setCellRaw(0 0 "10")
@@ -74,7 +72,7 @@ class FormulaBench {
             i = (i + 1)
         }
         book2.addSheet(s2)
-        def eng2:FormulaEngine (new FormulaEngine)
+        def eng2:FormulaEngine (FormulaEngine.new_())
         eng2.attach(book2)
         def t4:double (wall_clock_ms)
         eng2.rebuildAll()
@@ -89,20 +87,20 @@ class FormulaBench {
         print ("  dirtyMarked=" + (to_string eng2.dirtyMarked) + " recalculated=" + (to_string eng2.recalculated))
 
         ; --- cross-sheet ---
-        def book3:WorkbookModel (new WorkbookModel)
-        def sales:SpreadsheetModel (new SpreadsheetModel)
+        def book3:WorkbookModel (WorkbookModel.new_())
+        def sales:SpreadsheetModel (SpreadsheetModel.new_())
         sales.name = "Sales"
         sales.resize(20 5)
         sales.setCellRaw(1 1 "100")
         sales.setCellRaw(2 1 "200")
-        def summary:SpreadsheetModel (new SpreadsheetModel)
+        def summary:SpreadsheetModel (SpreadsheetModel.new_())
         summary.name = "Summary"
         summary.resize(20 5)
         summary.setFormula(1 1 "SUM(Sales!B2:B3)")
         summary.setFormula(2 1 "B2*1.24")
         book3.addSheet(sales)
         book3.addSheet(summary)
-        def eng3:FormulaEngine (new FormulaEngine)
+        def eng3:FormulaEngine (FormulaEngine.new_())
         eng3.attach(book3)
         eng3.rebuildAll()
         eng3.resetStats()

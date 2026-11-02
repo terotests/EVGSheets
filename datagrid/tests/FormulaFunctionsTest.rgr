@@ -7,8 +7,7 @@
 ; No workbook / xlsx / AST — only FormulaValue args → FormulaFunctions.invoke.
 ; ==============================================================================
 
-Import "../src/FormulaValue.rgr"
-Import "../src/FormulaFunctions.rgr"
+Import "../src/lib.rs"
 
 class Checker {
     def passed:int 0
@@ -283,6 +282,56 @@ class FormulaFunctionsTest {
         FormulaFunctionsTest.args1((FormulaValue.fromNumber(1.0)) args)
         r = (FormulaFunctionsTest.invokeN("NOPE" args))
         c.eqStr("NOPE #NAME?" r.err "#NAME?")
+
+        ; FormulaValue in Ranger's Rust syntax (src/formula_value.rs)
+        print "== FormulaValue =="
+        def fvNum:FormulaValue (FormulaValue.fromNumber(2.5))
+        def fvText:FormulaValue (FormulaValue.fromString("3.5"))
+        def fvWord:FormulaValue (FormulaValue.fromString("abc"))
+        def fvEmpty:FormulaValue (FormulaValue.fromString(""))
+        def fvTrue:FormulaValue (FormulaValue.fromBool(true))
+        def fvBlank:FormulaValue (FormulaValue.blank())
+        def fvErr:FormulaValue (FormulaValue.fromError("#DIV/0!"))
+        c.ok("a number is numeric" (fvNum.isNumeric()))
+        c.eqNum("its value" (fvNum.numberValue()) 2.5)
+        c.ok("numeric text is numeric" (fvText.isNumeric()))
+        c.eqNum("numeric text's value" (fvText.numberValue()) 3.5)
+        c.ok("other text is not" ((fvWord.isNumeric()) == false))
+        c.ok("empty text is not" ((fvEmpty.isNumeric()) == false))
+        c.ok("a bool is not numeric" ((fvTrue.isNumeric()) == false))
+        c.eqNum("but counts as 1 in asNumber" (fvTrue.asNumber()) 1.0)
+        def co1:FormulaValue (fvBlank.coerceNumber())
+        c.eqNum("blank coerces to 0" co1.num 0.0)
+        def co2:FormulaValue (fvTrue.coerceNumber())
+        c.eqNum("TRUE coerces to 1" co2.num 1.0)
+        def co3:FormulaValue (fvWord.coerceNumber())
+        c.eqStr("text coerces to #VALUE!" co3.err "#VALUE!")
+        def co4:FormulaValue (fvErr.coerceNumber())
+        c.eqStr("an error stays itself" co4.err "#DIV/0!")
+        def one:FormulaValue (FormulaValue.fromNumber(1.0))
+        def oneText:FormulaValue (FormulaValue.fromString("1"))
+        c.ok("1 equals text 1" (FormulaValue.valuesEqual(one oneText)))
+        c.ok("TRUE equals 1" (FormulaValue.valuesEqual(fvTrue one)))
+        c.ok("text compares as text" ((FormulaValue.valuesEqual(fvWord oneText)) == false))
+        def arrItems:[FormulaValue]
+        push arrItems (FormulaValue.fromString("7"))
+        push arrItems (FormulaValue.fromError("#N/A"))
+        def arr:FormulaValue (FormulaValue.fromArray(1 2 arrItems))
+        c.ok("an array is numeric by its top-left" (arr.isNumeric()))
+        c.eqNum("its top-left's value" (arr.numberValue()) 7.0)
+        def a01:FormulaValue (arr.at(0 1))
+        c.eqStr("at(0 1)" a01.err "#N/A")
+        def a10:FormulaValue (arr.at(1 0))
+        c.ok("at out of range is blank" (a10.kind == 0))
+        def four:FormulaValue (FormulaValue.fromNumber(4.0))
+        def s00:FormulaValue (four.at(0 0))
+        c.eqNum("a single value at(0 0) is itself" s00.num 4.0)
+        def s01:FormulaValue (four.at(0 1))
+        c.ok("at(0 1) of a single value is blank" (s01.kind == 0))
+        def inside:FormulaValue (arr.errorInside())
+        c.eqStr("the error inside" inside.err "#N/A")
+        def sg:FormulaValue (four.single())
+        c.eqNum("single of a number is the number" sg.num 4.0)
 
         print ("FormulaFunctionsTest: " + (to_string c.passed) + " passed, " + (to_string c.failed) + " failed")
         if (c.failed == 0) {

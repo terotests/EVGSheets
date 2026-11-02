@@ -21,8 +21,7 @@
 ; A cell's own formatting wins: an explicit fill or font colour stays.
 ; ==============================================================================
 
-Import "CellStyle.rgr"
-Import "SheetTable.rgr"
+Import "lib.rs"
 
 class TableLook {
     sfn accentFor:string (i:int) {

@@ -126,7 +126,7 @@ class OverflowRenderTest {
             d = "Centred and far too wide for column A"
         }
         app.model.setCellRaw(10 0 d)
-        def centre:CellStyle (new CellStyle)
+        def centre:CellStyle (CellStyle.new_())
         centre.align = "center"
         def csid:int (app.model.styleIdFor(centre))
         app.model.setCellStyleId(10 0 csid)
@@ -137,7 +137,7 @@ class OverflowRenderTest {
             e = "9,999,999,999.99"
         }
         app.model.setCellRaw(12 1 e)
-        def rightAl:CellStyle (new CellStyle)
+        def rightAl:CellStyle (CellStyle.new_())
         rightAl.align = "right"
         def rsid:int (app.model.styleIdFor(rightAl))
         app.model.setCellStyleId(12 1 rsid)

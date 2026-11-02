@@ -66,7 +66,7 @@ class XlsxWriteTest {
         app.model.setFormula(3 3 "SUM(D2:D3)")
 
         ; A style with everything the writer has to carry.
-        def head:CellStyle (new CellStyle)
+        def head:CellStyle (CellStyle.new_())
         head.bold = true
         head.italic = false
         head.fontSizePt = 12.0
@@ -84,12 +84,12 @@ class XlsxWriteTest {
         app.model.setCellStyleResolved(0 1 head)
         app.model.setCellStyleResolved(0 2 head)
 
-        def money:CellStyle (new CellStyle)
+        def money:CellStyle (CellStyle.new_())
         money.numFmt = "$#,##0.00"
         app.model.setCellStyleResolved(1 2 money)
         app.model.setCellStyleResolved(2 2 money)
 
-        def turned:CellStyle (new CellStyle)
+        def turned:CellStyle (CellStyle.new_())
         turned.textRotation = 45
         app.model.setCellStyleResolved(4 0 turned)
         app.model.setCellRaw(4 0 "sideways")
@@ -103,7 +103,7 @@ class XlsxWriteTest {
         app.model.setHyperlink(1 0 "https://example.com/north")
         app.model.setHyperlink(2 0 "#Notes!A1")
 
-        def dv:DataValidation (new DataValidation)
+        def dv:DataValidation (DataValidation.new_())
         dv.kind = "list"
         dv.f1 = "\"north,south,east,west\""
         dv.r0 = 8
@@ -112,7 +112,7 @@ class XlsxWriteTest {
         dv.c1 = 0
         app.model.addValidation(dv)
 
-        def dv2:DataValidation (new DataValidation)
+        def dv2:DataValidation (DataValidation.new_())
         dv2.kind = "whole"
         dv2.op = "between"
         dv2.f1 = "1"
@@ -124,7 +124,7 @@ class XlsxWriteTest {
         dv2.c1 = 1
         app.model.addValidation(dv2)
 
-        def second:SpreadsheetModel (new SpreadsheetModel)
+        def second:SpreadsheetModel (SpreadsheetModel.new_())
         second.name = "Notes"
         second.resize(4 3)
         second.setCellRaw(0 0 "second sheet")
