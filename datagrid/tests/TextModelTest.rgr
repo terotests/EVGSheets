@@ -23,7 +23,7 @@
 
 Import "../src/xlsx/XlsxLoader.rgr"
 Import "../src/xlsx/XlsxWriter.rgr"
-Import "../src/xlsx/XmlLite.rgr"
+Import "../src/lib.rs"
 Import "../src/FormulaFunctions.rgr"
 Import "../src/XlsxNumberFormat.rgr"
 Import "pkg:evg/EVGCodepoint.rgr"

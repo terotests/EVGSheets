@@ -1,0 +1,38 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+; ==============================================================================
+; DgNative - text in the target's own units, for the Rust-syntax modules.
+; ==============================================================================
+;
+; The .rgr scanners count offsets the way each target's strings do: UTF-16
+; units in JavaScript, bytes in Go, C++ and Rust. strlen, charAt and
+; substring give exactly that; these are the same operators for the .rs
+; modules. Rust's own `s.as_bytes()[i]` copies the whole string on every
+; call on JavaScript and Go, which makes an XML scan over a sheet quadratic.
+;
+; Kept in .rgr because Ranger's Rust frontend has no spelling for these
+; operators, nor for reading a file.
+
+class DgNative {
+    sfn str_len:int (s:string) {
+        return (strlen s)
+    }
+    sfn char_at:int (s:string i:int) {
+        return (charAt s i)
+    }
+    sfn substr:string (s:string a:int b:int) {
+        return (substring s a b)
+    }
+    sfn index_of:int (text:string key:string) {
+        return (indexOf text key)
+    }
+    sfn index_of_from:int (text:string key:string from:int) {
+        return (indexOfFrom text key from)
+    }
+    sfn last_index_of:int (text:string key:string) {
+        return (lastIndexOf text key)
+    }
+    ; a file's bytes (Ranger's Rust frontend has no std::fs)
+    sfn read_bytes:buffer (dir:string file:string) {
+        return (buffer_read_file dir file)
+    }
+}

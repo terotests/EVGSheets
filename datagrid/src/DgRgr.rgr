@@ -4,3 +4,8 @@
 ; import closure: rgr.rs includes it once (import_rgr!).
 
 Import "../../../lib/evg/EVGCodepoint.rgr"
+Import "../../ooxml/OoxmlText.rgr"
+Import "../../ooxml/OpcPackage.rgr"
+Import "DgNative.rgr"
+Import "RichText.rgr"
+Import "xlsx/XlsxOfficeCrypto.rgr"

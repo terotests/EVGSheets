@@ -9,8 +9,7 @@
 ; ==============================================================================
 
 Import "../../../ooxml/OpcPackage.rgr"
-Import "XmlLite.rgr"
-Import "XlsxSharedStrings.rgr"
+Import "../lib.rs"
 Import "../SpreadsheetModel.rgr"
 Import "../FormulaEngine.rgr"
 
@@ -118,9 +117,9 @@ class XlsxWorksheet {
         if ((strlen xml) == 0) {
             return
         }
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(xml)
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break
@@ -421,7 +420,7 @@ class XlsxWorksheet {
         }
         def want:string t.name
         def depth:int 1
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def n:XmlTag (p.nextTag())
             if (n.valid == false) {
                 return ""
@@ -461,13 +460,13 @@ class XlsxWorksheet {
         if ((strlen xml) == 0) {
             return
         }
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(xml)
         ; Depth-of-sheetData, so an `<extLst>` inside a cell is never mistaken
         ; for the worksheet's own. Everything captured below is a DIRECT child
         ; of `<worksheet>`; nothing inside `<sheetData>` is.
         def inSheetData:boolean false
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break
@@ -655,7 +654,7 @@ class XlsxWorksheet {
                 }
                 ; walk children until </row>
                 def depth:int 1
-                while ((p.pos < p.len) && (depth > 0)) {
+                while ((p.pos < p.srcLen) && (depth > 0)) {
                     def ct:XmlTag (p.nextTag())
                     if (ct.valid == false) {
                         break
@@ -705,7 +704,7 @@ class XlsxWorksheet {
                 if (t.selfClose == false) {
                     ; formula1 / formula2 are elements rather than attributes.
                     def depthV:int 1
-                    while ((p.pos < p.len) && (depthV > 0)) {
+                    while ((p.pos < p.srcLen) && (depthV > 0)) {
                         def vt:XmlTag (p.nextTag())
                         if (vt.valid == false) {
                             break
@@ -786,7 +785,7 @@ class XlsxWorksheet {
         if ((indexOf src "sparklineGroup") < 0) {
             return
         }
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(src)
         def kind:string "line"
         def color:string "#1F4E79"
@@ -867,7 +866,7 @@ class XlsxWorksheet {
     }
 
     sfn readConditionalFormatting:void (src:string model:SpreadsheetModel) {
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(src)
         def t:XmlTag (p.nextTag())
         if (t.valid == false) {
@@ -905,7 +904,7 @@ class XlsxWorksheet {
             def colorIdx:int 0
             ; scan children for cfRule until </conditionalFormatting>
             def depth:int 1
-            while ((p.pos < p.len) && (depth > 0)) {
+            while ((p.pos < p.srcLen) && (depth > 0)) {
                 def ct:XmlTag (p.nextTag())
                 if (ct.valid == false) {
                     break
@@ -1236,7 +1235,7 @@ class XlsxWorksheet {
             return
         }
         def depth:int 1
-        while ((p.pos < p.len) && (depth > 0)) {
+        while ((p.pos < p.srcLen) && (depth > 0)) {
             def t:XmlTag (p.nextTag())
             if (t.valid == false) {
                 break

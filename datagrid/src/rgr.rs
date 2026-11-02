@@ -9,5 +9,15 @@ mod rgr {
     ranger::import_rgr!("./DgRgr");
     #[cfg(any())]
     ranger::import_rgr!("../../../lib/evg/EVGCodepoint");
+    #[cfg(any())]
+    ranger::import_rgr!("../../ooxml/OoxmlText");
+    #[cfg(any())]
+    ranger::import_rgr!("../../ooxml/OpcPackage");
+    #[cfg(any())]
+    ranger::import_rgr!("DgNative");
+    #[cfg(any())]
+    ranger::import_rgr!("RichText");
+    #[cfg(any())]
+    ranger::import_rgr!("xlsx/XlsxOfficeCrypto");
 }
-pub use rgr::EVGCodepoint;
+pub use rgr::{CellRun, DgNative, EVGCodepoint, OoxmlText, OpcPackage, OpcRelationship, RichText, XlsxOfficeCrypto};

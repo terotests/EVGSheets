@@ -32,7 +32,7 @@
 ; data.
 ; ==============================================================================
 
-Import "XmlLite.rgr"
+Import "../lib.rs"
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../SheetTable.rgr"
 Import "../SpreadsheetModel.rgr"
@@ -45,7 +45,7 @@ class XlsxTable {
         if ((strlen xml) == 0) {
             return t
         }
-        def p:XmlLite (new XmlLite)
+        def p:XmlLite (XmlLite.new_())
         p.reset(xml)
         def inColumns:boolean false
         ; A table part with no autoFilter element has no filter buttons, and one
@@ -53,7 +53,7 @@ class XlsxTable {
         t.showFilter = false
         t.styleName = ""
         t.showRowStripes = false
-        while (p.pos < p.len) {
+        while (p.pos < p.srcLen) {
             def tag:XmlTag (p.nextTag())
             if (tag.valid == false) {
                 break
