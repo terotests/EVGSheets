@@ -34,7 +34,6 @@
 
 Import "../lib.rs"
 Import "../../../ooxml/OpcPackage.rgr"
-Import "../SpreadsheetModel.rgr"
 
 class XlsxTable {
     ; Parse one table part. Returns a table whose name is empty when the part

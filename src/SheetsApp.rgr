@@ -3606,8 +3606,8 @@ class SheetsApp {
             t.addItem("t-unhide" "Unhide…" (anyHidden == false))
             return
         }
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         grid.app.sel.normalized(a b)
         ctxMenu.items = fresh
         def m:MenuCtl ctxMenu

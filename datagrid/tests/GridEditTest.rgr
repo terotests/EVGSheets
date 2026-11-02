@@ -2779,7 +2779,7 @@ class GridEditTest {
         c.eqInt("Excel's default column width" (XlsxWorksheet.colWidthToPx(8.43)) 64)
         c.eqInt("ten characters" (XlsxWorksheet.colWidthToPx(10.0)) 75)
         c.eqInt("a row of fifteen points" (XlsxWorksheet.rowHeightToPx(15.0)) 20)
-        def metrics:SpreadsheetModel (new SpreadsheetModel)
+        def metrics:SpreadsheetModel (SpreadsheetModel.new_())
         c.eqInt("a sheet with no widths of its own" metrics.defaultColW 64)
         c.eqInt("…and no heights" metrics.defaultRowH 20)
 
@@ -3074,7 +3074,7 @@ class GridEditTest {
         ; `state="split"` or says nothing. Read without looking, a sheet split
         ; a third of the way down reports two thousand frozen rows.
         def paneXml:string "<worksheet><sheetViews><sheetView><pane xSplit=\"1440\" ySplit=\"2160\" topLeftCell=\"B5\"/></sheetView></sheetViews><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>x</t></is></c></row></sheetData></worksheet>"
-        def paneModel:SpreadsheetModel (new SpreadsheetModel)
+        def paneModel:SpreadsheetModel (SpreadsheetModel.new_())
         def paneParser:XlsxWorksheet (new XlsxWorksheet)
         def paneSst:[string]
         paneParser.parse(paneXml paneModel paneSst)
@@ -3082,7 +3082,7 @@ class GridEditTest {
         c.eqInt("and no columns" paneModel.freezeCols 0)
 
         def frozenXml:string "<worksheet><sheetViews><sheetView><pane xSplit=\"2\" ySplit=\"1\" topLeftCell=\"C2\" state=\"frozen\"/></sheetView></sheetViews><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>x</t></is></c></row></sheetData></worksheet>"
-        def frozenModel:SpreadsheetModel (new SpreadsheetModel)
+        def frozenModel:SpreadsheetModel (SpreadsheetModel.new_())
         def frozenParser:XlsxWorksheet (new XlsxWorksheet)
         def frozenSst:[string]
         frozenParser.parse(frozenXml frozenModel frozenSst)

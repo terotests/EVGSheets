@@ -17,8 +17,6 @@
 
 Import "../lib.rs"
 Import "../../../ooxml/OpcPackage.rgr"
-Import "../WorkbookModel.rgr"
-Import "../SpreadsheetModel.rgr"
 
 class XlsbLoader {
     def lastError:string ""
@@ -147,7 +145,7 @@ class XlsbLoader {
             def part:string (pkg.resolveRelationship(wbPart (itemAt rels i)))
             if ((strlen part) > 0) {
                 if (pkg.hasPart(part)) {
-                    def sheet:SpreadsheetModel (new SpreadsheetModel)
+                    def sheet:SpreadsheetModel (SpreadsheetModel.new_())
                     sheet.name = (itemAt names i)
                     sheet.sheetHidden = (itemAt hidden i)
                     sheet.quietWrites = true

@@ -544,7 +544,7 @@ class CfDialog extends SxDialog {
             return true
         }
         def before:[CfRule] (app.model.cfSnapshot())
-        def where:CfRule (new CfRule)
+        def where:CfRule (CfRule.new_())
         if (((this.rangeInto(where)) == false) && (target != deleteBtn.tid)) {
             statusEl.textContent = "Applies to: give a range such as B2:B9"
             return false

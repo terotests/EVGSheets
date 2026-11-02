@@ -10,8 +10,6 @@
 
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../lib.rs"
-Import "../SpreadsheetModel.rgr"
-Import "../FormulaEngine.rgr"
 
 class XlsxWorksheet {
     ; The sheet's own relationship part, and the comments part it points at.
@@ -486,7 +484,7 @@ class XlsxWorksheet {
                     if (XlsxWorksheet.isPreserved(t.name)) {
                         def src:string (XlsxWorksheet.spanOf(p xml t))
                         if ((strlen src) > 0) {
-                            def keep (new SheetOpaque)
+                            def keep (SheetOpaque.new_())
                             keep.name = t.name
                             keep.source = src
                             push model.opaque keep
@@ -838,7 +836,7 @@ class XlsxWorksheet {
                 def ac:[int]
                 XlsxWorksheet.parseCellRef(at ar ac)
                 if (((array_length rr1) > 0) && ((array_length ar) > 0)) {
-                    def sp (new Sparkline)
+                    def sp (Sparkline.new_())
                     sp.row = (itemAt ar 0)
                     sp.col = (itemAt ac 0)
                     sp.r1 = (itemAt rr1 0)
@@ -920,7 +918,7 @@ class XlsxWorksheet {
                 } {
                     if ((ct.name == "cfRule") && (ct.isEnd == false)) {
                         def typ:string (ct.attr("type"))
-                        def rule:CfRule (new CfRule)
+                        def rule:CfRule (CfRule.new_())
                         rule.r0 = (itemAt rr1 0)
                         rule.c0 = (itemAt cc1 0)
                         rule.r1 = (itemAt rr2 0)

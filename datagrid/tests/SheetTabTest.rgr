@@ -62,13 +62,13 @@ class SheetTabTest {
         app.model.clearSheet()
         app.model.resize(20 8)
         app.model.name = "Sales"
-        def costs:SpreadsheetModel (new SpreadsheetModel)
+        def costs:SpreadsheetModel (SpreadsheetModel.new_())
         costs.clearSheet()
         costs.resize(20 8)
         costs.name = "Costs"
         costs.setCellRaw(3 1 "40")
         app.book.insertSheet(1 costs)
-        def notes:SpreadsheetModel (new SpreadsheetModel)
+        def notes:SpreadsheetModel (SpreadsheetModel.new_())
         notes.clearSheet()
         notes.resize(20 8)
         notes.name = "Notes"

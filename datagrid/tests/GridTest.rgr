@@ -40,7 +40,7 @@ class GridTest {
         c.eqStr("B2" (SpreadsheetModel.cellLabel(1 1)) "B2")
 
         print "== sparse model + geometry =="
-        def model:SpreadsheetModel (new SpreadsheetModel)
+        def model:SpreadsheetModel (SpreadsheetModel.new_())
         model.resize(100 10)
         c.eqInt("rows" model.rowCount 100)
         c.eqStr("empty cell" (model.getCell(5 3)) "")

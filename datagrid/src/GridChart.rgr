@@ -27,7 +27,6 @@
 ; picker can offer what will work and grey out what will not.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "lib.rs"
 
 ; The chart types offered, as small integers so they can be radio-button ids.

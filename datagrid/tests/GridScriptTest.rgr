@@ -11,9 +11,6 @@
 ; reload of the .xlsx it lives in.
 ; ==============================================================================
 
-Import "../src/WorkbookModel.rgr"
-Import "../src/SpreadsheetModel.rgr"
-Import "../src/FormulaEngine.rgr"
 Import "../src/lib.rs"
 Import "../src/script/GridScriptEngine.rgr"
 Import "../src/script/ScriptPreview.rgr"
@@ -122,8 +119,8 @@ function render() {
     }
 
     sfn buildBook:WorkbookModel () {
-        def book:WorkbookModel (new WorkbookModel)
-        def sales:SpreadsheetModel (new SpreadsheetModel)
+        def book:WorkbookModel (WorkbookModel.new_())
+        def sales:SpreadsheetModel (SpreadsheetModel.new_())
         sales.name = "Sales"
         sales.resize(40 8)
         sales.setCellRaw(0 0 "Region")
@@ -136,14 +133,14 @@ function render() {
         sales.setCellRaw(3 1 "410.25")
         sales.setFormula(4 1 "SUM(B2:B4)")
         book.addSheet(sales)
-        def notes:SpreadsheetModel (new SpreadsheetModel)
+        def notes:SpreadsheetModel (SpreadsheetModel.new_())
         notes.name = "Notes"
         notes.resize(10 4)
         notes.setCellRaw(0 0 "quarter")
         notes.setCellRaw(0 1 "Q3")
         book.addSheet(notes)
         book.setActive(0)
-        def engine:FormulaEngine (new FormulaEngine)
+        def engine:FormulaEngine (FormulaEngine.new_())
         engine.attach(book)
         engine.rebuildAll()
         return book
@@ -221,7 +218,7 @@ function render() {
         def writer:XlsxWriter (new XlsxWriter)
         def wrote:boolean (writer.write(book "./gallery/datagrid/harness/out/script" "scripted.xlsx"))
         c.ok(("wrote the workbook (" + writer.lastError + ")") wrote)
-        def reloaded:WorkbookModel (new WorkbookModel)
+        def reloaded:WorkbookModel (WorkbookModel.new_())
         def loader:XlsxLoader (new XlsxLoader)
         def read:boolean (loader.loadPath("./gallery/datagrid/harness/out/script/scripted.xlsx" reloaded))
         c.ok(("read it back (" + loader.lastError + ")") read)
@@ -234,7 +231,7 @@ function render() {
         c.eqStr("sheet came back too" firstSheet.name "Sales")
 
         print "== and runs again from the reloaded book =="
-        def engine2:FormulaEngine (new FormulaEngine)
+        def engine2:FormulaEngine (FormulaEngine.new_())
         engine2.attach(reloaded)
         engine2.rebuildAll()
         def eng2:GridScriptEngine (new GridScriptEngine)

@@ -35,8 +35,6 @@
 ; freeze panes, hyperlinks and data validations all survive.
 ; ==============================================================================
 
-Import "../SpreadsheetModel.rgr"
-Import "../WorkbookModel.rgr"
 Import "../lib.rs"
 Import "../../zip/ZipWriter.rgr"
 Import "../../../ooxml/OpcPackage.rgr"

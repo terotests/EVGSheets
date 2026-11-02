@@ -39,8 +39,6 @@
 ; built once, over there.
 ; ============================================================================
 
-Import "SpreadsheetModel.rgr"
-Import "WorkbookModel.rgr"
 Import "GridView.rgr"
 Import "GridSelection.rgr"
 Import "DataGrid.rgr"
@@ -50,8 +48,8 @@ Import "CellRuleHost.rgr"
 Import "pkg:evg_window/EVGWindow.rgr"
 
 class GridPane {
-    def book:WorkbookModel (new WorkbookModel)
-    def model:SpreadsheetModel (new SpreadsheetModel)
+    def book:WorkbookModel (WorkbookModel.new_())
+    def model:SpreadsheetModel (SpreadsheetModel.new_())
     def sel:GridSelection (new GridSelection)
     def grid:DataGrid (new DataGrid)
     def view:GridView (new GridView)
@@ -207,7 +205,7 @@ class GridPane {
     ; point is not over a cell at all.
     fn cellAt:CellPos (x:int y:int) {
         if ((this.containsPoint(x y)) == false) {
-            def none:CellPos (new CellPos)
+            def none:CellPos (CellPos.new_())
             none.row = -1
             none.col = -1
             return none

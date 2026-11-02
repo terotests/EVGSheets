@@ -29,7 +29,6 @@
 ;      loaded page would sort one screen of a million rows and call it sorted.
 ; ==============================================================================
 
-Import "../SpreadsheetModel.rgr"
 Import "../lib.rs"
 Import "../../../rangerdb/src/DBBackend.rgr"
 Import "../../../rangerdb/src/SqlFront.rgr"

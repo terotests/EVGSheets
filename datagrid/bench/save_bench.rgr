@@ -8,8 +8,7 @@
 ;        npm run datagrid:save:bench -- 100000
 ; ==============================================================================
 
-Import "../src/WorkbookModel.rgr"
-Import "../src/SpreadsheetModel.rgr"
+Import "../src/lib.rs"
 Import "../src/xlsx/XlsxWriter.rgr"
 Import "../../zip/ZipWriter.rgr"
 
@@ -31,8 +30,8 @@ class SaveBench {
         print ("== save_bench rows=" + (to_string n) + " ==")
 
         def t0:double (wall_clock_ms)
-        def book:WorkbookModel (new WorkbookModel)
-        def s:SpreadsheetModel (new SpreadsheetModel)
+        def book:WorkbookModel (WorkbookModel.new_())
+        def s:SpreadsheetModel (SpreadsheetModel.new_())
         s.name = "Data"
         s.resize(n 8)
         def r:int 0

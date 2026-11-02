@@ -48,7 +48,7 @@ class FormulaOracleDump {
 
     sfn main:void () {
         def path:string "gallery/datagrid/fixtures/formulas.xlsx"
-        def book:WorkbookModel (new WorkbookModel)
+        def book:WorkbookModel (WorkbookModel.new_())
         def loader:XlsxLoader (new XlsxLoader)
         def ok:boolean (loader.loadPath(path book))
         if (ok == false) {

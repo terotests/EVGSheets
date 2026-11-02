@@ -9,12 +9,10 @@ Import "XlsxWorksheet.rgr"
 Import "XlsxDrawing.rgr"
 Import "XlsxStyles.rgr"
 Import "XlsxTable.rgr"
-Import "../WorkbookModel.rgr"
-Import "../FormulaEngine.rgr"
 
 class XlsxLoader {
     def lastError:string ""
-    def engine:FormulaEngine (new FormulaEngine)
+    def engine:FormulaEngine (FormulaEngine.new_())
 
     Constructor () {
     }
@@ -135,7 +133,7 @@ class XlsxLoader {
         def n:int (wb.sheetCount())
         while (i < n) {
             def info:XlsxSheetInfo (wb.sheetAt(i))
-            def sheet:SpreadsheetModel (new SpreadsheetModel)
+            def sheet:SpreadsheetModel (SpreadsheetModel.new_())
             sheet.name = info.name
             sheet.sheetHidden = info.hidden
             ; Where it came from, so a save-over can put it back there.

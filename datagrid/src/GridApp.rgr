@@ -9,14 +9,11 @@
 ; agnostic.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
-Import "WorkbookModel.rgr"
 Import "GridSelection.rgr"
 Import "DataGrid.rgr"
 Import "GridView.rgr"
 Import "GridPane.rgr"
 Import "SheetView.rgr"
-Import "FormulaEngine.rgr"
 Import "xlsx/XlsxLoader.rgr"
 Import "xlsx/XlsxWriter.rgr"
 Import "formats/WorkbookImport.rgr"
@@ -36,10 +33,10 @@ Import "script/GridScriptEngine.rgr"
 Import "db/GridDbSource.rgr"
 
 class GridApp {
-    def book:WorkbookModel (new WorkbookModel)
-    def model:SpreadsheetModel (new SpreadsheetModel)
+    def book:WorkbookModel (WorkbookModel.new_())
+    def model:SpreadsheetModel (SpreadsheetModel.new_())
     def sheetView:SheetView (new SheetView)
-    def engine:FormulaEngine (new FormulaEngine)
+    def engine:FormulaEngine (FormulaEngine.new_())
     def sel:GridSelection (new GridSelection)
     def grid:DataGrid (new DataGrid)
     ; Whether the interface is mirrored. Not the workbook's reading order —
@@ -481,7 +478,7 @@ class GridApp {
 
     fn loadDemo:void () {
         book.clear()
-        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def sheet:SpreadsheetModel (SpreadsheetModel.new_())
         sheet.seedDemo()
         book.addSheet(sheet)
         book.sourcePath = ""
@@ -500,7 +497,7 @@ class GridApp {
         }
         view.chartLayer.removeAll(windows)
         book.clear()
-        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def sheet:SpreadsheetModel (SpreadsheetModel.new_())
         sheet.seedBlank()
         book.addSheet(sheet)
         book.sourcePath = ""
@@ -725,7 +722,7 @@ class GridApp {
         if editing {
             this.commitEdit()
         }
-        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def sheet:SpreadsheetModel (SpreadsheetModel.new_())
         sheet.name = sheetName
         if ((strlen sheet.name) == 0) {
             sheet.name = querySpec.table
@@ -765,7 +762,7 @@ class GridApp {
             view.status = db.status
             return false
         }
-        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def sheet:SpreadsheetModel (SpreadsheetModel.new_())
         def base:string sheetName
         def autoName:boolean ((strlen base) == 0)
         if autoName {
@@ -2648,7 +2645,7 @@ class GridApp {
         if editing {
             this.commitEdit()
         }
-        def fresh:SpreadsheetModel (new SpreadsheetModel)
+        def fresh:SpreadsheetModel (SpreadsheetModel.new_())
         fresh.clearSheet()
         fresh.resize(200 26)
         fresh.name = (book.nextSheetName())
@@ -2837,9 +2834,8 @@ class GridApp {
         def sn:int (book.sheetCount())
         while (si < sn) {
             def sheet:SpreadsheetModel (book.sheetAt(si))
-            def keys:[string]
-            def texts:[string]
-            sheet.snapshotFormulas(keys texts)
+            def keys:[string] (sheet.formulaSnapshotKeys())
+            def texts:[string] (sheet.formulaSnapshotTexts())
             def i:int 0
             while (i < (array_length keys)) {
                 def key:string (itemAt keys i)
@@ -2971,8 +2967,8 @@ class GridApp {
     ; Set a width on `col`, and on every other selected column when the one
     ; being sized is part of the selection — the way Excel resizes a block.
     fn setColumnWidths:void (col:int width:int) {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def lo:int col
         def hi:int col
@@ -3183,9 +3179,8 @@ class GridApp {
         while (si < (book.sheetCount())) {
             def sheet:SpreadsheetModel (book.sheetAt(si))
             def sameSheet:boolean (si == book.activeIndex)
-            def keys:[string]
-            def texts:[string]
-            sheet.snapshotFormulas(keys texts)
+            def keys:[string] (sheet.formulaSnapshotKeys())
+            def texts:[string] (sheet.formulaSnapshotTexts())
             def i:int 0
             while (i < (array_length keys)) {
                 def expr:string (itemAt texts i)
@@ -3208,9 +3203,8 @@ class GridApp {
         while (si < sn) {
             def sheet:SpreadsheetModel (book.sheetAt(si))
             def sameSheet:boolean (si == book.activeIndex)
-            def keys:[string]
-            def texts:[string]
-            sheet.snapshotFormulas(keys texts)
+            def keys:[string] (sheet.formulaSnapshotKeys())
+            def texts:[string] (sheet.formulaSnapshotTexts())
             def i:int 0
             while (i < (array_length keys)) {
                 def key:string (itemAt keys i)
@@ -3251,9 +3245,8 @@ class GridApp {
         while (si < sn) {
             if (si != book.activeIndex) {
                 def sheet:SpreadsheetModel (book.sheetAt(si))
-                def keys:[string]
-                def texts:[string]
-                sheet.snapshotFormulas(keys texts)
+                def keys:[string] (sheet.formulaSnapshotKeys())
+                def texts:[string] (sheet.formulaSnapshotTexts())
                 def i:int 0
                 while (i < (array_length keys)) {
                     push op.otherSheetIdx si
@@ -3397,22 +3390,22 @@ class GridApp {
     }
 
     fn insertColumnLeftOfSelection:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         this.insertColumn(a.col)
     }
 
     fn insertColumnRightOfSelection:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         this.insertColumn((b.col + 1))
     }
 
     fn deleteSelectedColumns:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def count:int ((b.col - a.col) + 1)
         def i:int 0
@@ -3429,8 +3422,8 @@ class GridApp {
     }
 
     fn moveSelectedColumn:void (delta:int) {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def from:int a.col
         def to:int (from + delta)
@@ -3484,9 +3477,8 @@ class GridApp {
 
     ; Same sheet only: a total on another sheet is not "the row below".
     fn extendTotalsOverRow:void (at:int) {
-        def keys:[string]
-        def texts:[string]
-        model.snapshotFormulas(keys texts)
+        def keys:[string] (model.formulaSnapshotKeys())
+        def texts:[string] (model.formulaSnapshotTexts())
         def i:int 0
         while (i < (array_length keys)) {
             def key:string (itemAt keys i)
@@ -3580,22 +3572,22 @@ class GridApp {
     }
 
     fn insertRowAboveSelection:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         this.insertRow(a.row)
     }
 
     fn insertRowBelowSelection:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         this.insertRow((b.row + 1))
     }
 
     fn deleteSelectedRows:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def count:int ((b.row - a.row) + 1)
         def i:int 0
@@ -3612,8 +3604,8 @@ class GridApp {
     }
 
     fn moveSelectedRow:void (delta:int) {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def from:int a.row
         def to:int (from + delta)
@@ -3770,9 +3762,8 @@ class GridApp {
             ; and follows it. On another sheet a bare `B3` is that sheet's own
             ; row and must not; only `Costs!B3` moves.
             def sameSheet:boolean (si == book.activeIndex)
-            def keys:[string]
-            def texts:[string]
-            sheet.snapshotFormulas(keys texts)
+            def keys:[string] (sheet.formulaSnapshotKeys())
+            def texts:[string] (sheet.formulaSnapshotTexts())
             def fi:int 0
             while (fi < (array_length keys)) {
                 def key:string (itemAt keys fi)
@@ -4615,8 +4606,8 @@ class GridApp {
         borderLine = (this.borderLineOfActive())
         borderInk = (this.borderInkOfActive())
         def multi:boolean false
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         if (a.row != b.row) {
             multi = true
@@ -4929,7 +4920,7 @@ class GridApp {
     fn addCfRuleFromDialog:void () {
         this.syncCfDialog()
         def g:GridRange (sel.liveRange())
-        def rule:CfRule (new CfRule)
+        def rule:CfRule (CfRule.new_())
         rule.r0 = g.r0
         rule.c0 = g.c0
         rule.r1 = g.r1
@@ -4975,7 +4966,7 @@ class GridApp {
     fn addCfPosNegFromDialog:void () {
         this.syncCfDialog()
         def g:GridRange (sel.liveRange())
-        def pos:CfRule (new CfRule)
+        def pos:CfRule (CfRule.new_())
         pos.r0 = g.r0
         pos.c0 = g.c0
         pos.r1 = g.r1
@@ -4985,7 +4976,7 @@ class GridApp {
         pos.v1 = 0.0
         pos.fillRgb = "#C6EFCE"
         model.addCfRule(pos)
-        def neg:CfRule (new CfRule)
+        def neg:CfRule (CfRule.new_())
         neg.r0 = g.r0
         neg.c0 = g.c0
         neg.r1 = g.r1
@@ -5275,8 +5266,8 @@ class GridApp {
 
     fn selectionChart:void (out:GridChart) {
         clear out.sourceCols
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def r0:int a.row
         def c0:int a.col
@@ -6123,15 +6114,15 @@ class GridApp {
     }
 
     fn selFirst:CellPos () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         return a
     }
 
     fn selLast:CellPos () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         return b
     }
@@ -7933,7 +7924,7 @@ class GridApp {
             def srcRows:int (((itemAt rg 2) - (itemAt rg 0)) + 1)
             def rr:int a2.row
             while (rr <= b2.row) {
-                def sp:Sparkline (new Sparkline)
+                def sp:Sparkline (Sparkline.new_())
                 sp.row = rr
                 sp.col = a2.col
                 sp.kind = kind2
@@ -13373,7 +13364,7 @@ class GridApp {
             if ((strlen arg) == 0) {
                 return (this.runCommand("format.conditional" ""))
             }
-            def rule:CfRule (new CfRule)
+            def rule:CfRule (CfRule.new_())
             rule.r0 = a.row
             rule.c0 = a.col
             rule.r1 = b.row
@@ -14457,8 +14448,8 @@ class GridApp {
             model.version = (model.version + 1)
             return true
         }
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         if ((a.row == b.row) && (a.col == b.col)) {
             return false
@@ -15444,7 +15435,7 @@ class GridApp {
             return
         }
         def balanced:string (GridApp.balanceFormulaParens(src))
-        def p:FormulaParser (new FormulaParser)
+        def p:FormulaParser (FormulaParser.new_())
         def ast:FormulaNode (p.parse(balanced))
         if (p.ok == false) {
             return
@@ -17218,8 +17209,8 @@ class GridApp {
     ;   * clipValues/Formulas + clipR0/clipC0 — structured block, so paste can
     ;     translate relative refs the way Excel copy/paste does.
     fn copySelection:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         clipR0 = a.row
         clipC0 = a.col
@@ -17313,8 +17304,8 @@ class GridApp {
     ; Structured paste: a copied formula is re-based by the paste offset, so
     ; =A1+B1 copied one row down becomes =A2+B2 (absolute refs stay put).
     fn pasteBlock:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def startR:int a.row
         def startC:int a.col
@@ -17525,8 +17516,8 @@ class GridApp {
 
     ; FortuneSheet fill handle: tile source rect; translate relative formula refs.
     fn fillFromSource:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         sel.normalized(a b)
         def srcH:int ((fillR1 - fillR0) + 1)
         def srcW:int ((fillC1 - fillC0) + 1)
@@ -17789,8 +17780,8 @@ class GridApp {
         if onFill {
             ; FortuneSheet fill-handle drag starts from current selection
             view.focused = true
-            def a0:CellPos (new CellPos)
-            def b0:CellPos (new CellPos)
+            def a0:CellPos (CellPos.new_())
+            def b0:CellPos (CellPos.new_())
             sel.normalized(a0 b0)
             fillR0 = a0.row
             fillC0 = a0.col
@@ -18272,8 +18263,8 @@ class GridApp {
                     sel.active.row = hitF.row
                     sel.active.col = hitF.col
                     ; keep source corner as the other end of the range
-                    def a1:CellPos (new CellPos)
-                    def b1:CellPos (new CellPos)
+                    def a1:CellPos (CellPos.new_())
+                    def b1:CellPos (CellPos.new_())
                     sel.normalized(a1 b1)
                     if (a1.row > fillR0) {
                         a1.row = fillR0

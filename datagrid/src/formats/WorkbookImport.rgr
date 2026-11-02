@@ -27,13 +27,11 @@ Import "OdsLoader.rgr"
 Import "XlsbLoader.rgr"
 Import "TextWorkbook.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
-Import "../WorkbookModel.rgr"
-Import "../FormulaEngine.rgr"
 
 class WorkbookImport {
     def lastError:string ""
     def notes:[string]
-    def engine:FormulaEngine (new FormulaEngine)
+    def engine:FormulaEngine (FormulaEngine.new_())
 
     Constructor () {
     }

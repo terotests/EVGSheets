@@ -20,8 +20,6 @@
 ; ==============================================================================
 
 Import "../lib.rs"
-Import "../WorkbookModel.rgr"
-Import "../SpreadsheetModel.rgr"
 Import "pkg:evg/EVGCodepoint.rgr"
 Import "../../../pdf_writer/src/core/Utf8.rgr"
 
@@ -241,7 +239,7 @@ class TextWorkbook {
         }
         def rows:[[string]] (TextWorkbook.records(text separator))
         book.clear()
-        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def sheet:SpreadsheetModel (SpreadsheetModel.new_())
         def base:string (SheetBytes.withExt(name ""))
         def slash:int -1
         def k:int 0

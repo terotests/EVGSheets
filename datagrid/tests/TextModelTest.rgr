@@ -24,7 +24,6 @@
 Import "../src/xlsx/XlsxLoader.rgr"
 Import "../src/xlsx/XlsxWriter.rgr"
 Import "../src/lib.rs"
-Import "../src/FormulaFunctions.rgr"
 Import "pkg:evg/EVGCodepoint.rgr"
 
 class TextCheck {
@@ -173,8 +172,8 @@ class TextModelTest {
         }
 
         print "== a workbook out and back in =="
-        def book:WorkbookModel (new WorkbookModel)
-        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def book:WorkbookModel (WorkbookModel.new_())
+        def sheet:SpreadsheetModel (SpreadsheetModel.new_())
         sheet.name = "Text"
         sheet.resize(4 3)
         sheet.setCell(0 0 name)
@@ -186,7 +185,7 @@ class TextModelTest {
         c.ok("the workbook was written" wrote)
         if wrote {
             def loader:XlsxLoader (new XlsxLoader)
-            def back:WorkbookModel (new WorkbookModel)
+            def back:WorkbookModel (WorkbookModel.new_())
             def read:boolean (loader.loadPath("tmp/text-model-roundtrip.xlsx" back))
             c.ok("and read back" read)
             if read {

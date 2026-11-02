@@ -11,7 +11,7 @@
 ; re-normalized while the pointer moves, because only the live rectangle moves.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
+Import "lib.rs"
 
 ; A normalized rectangle of cells. Always r0 <= r1 and c0 <= c1, so anything
 ; reading one does not have to sort it first.
@@ -52,8 +52,8 @@ class GridRange {
 }
 
 class GridSelection {
-    def anchor:CellPos (new CellPos)
-    def active:CellPos (new CellPos)
+    def anchor:CellPos (CellPos.new_())
+    def active:CellPos (CellPos.new_())
     ; Rectangles kept from earlier Ctrl+clicks. The live one is not in here.
     def extra:[GridRange]
 
@@ -83,8 +83,8 @@ class GridSelection {
     ; Keep the live rectangle and start a new one. This is what Ctrl+click does,
     ; and it is the only way a rectangle joins the list.
     fn keepCurrent:void () {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         this.normalized(a b)
         push extra (GridRange.create(a.row a.col b.row b.col))
     }
@@ -109,8 +109,8 @@ class GridSelection {
         if (i < (array_length extra)) {
             return (itemAt extra i)
         }
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         this.normalized(a b)
         return (GridRange.create(a.row a.col b.row b.col))
     }
@@ -179,8 +179,8 @@ class GridSelection {
     }
 
     fn contains:boolean (row:int col:int) {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         this.normalized(a b)
         if (row < a.row) {
             return false

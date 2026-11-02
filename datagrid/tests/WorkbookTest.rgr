@@ -6,7 +6,6 @@
 
 Import "../src/GridApp.rgr"
 Import "../src/lib.rs"
-Import "../src/FormulaEngine.rgr"
 Import "../src/SheetView.rgr"
 Import "../src/ConditionalFormat.rgr"
 Import "../src/xlsx/XlsxLoader.rgr"
@@ -50,8 +49,8 @@ class WorkbookTest {
         c.eqStr("text" (XlsxNumberFormat.format("hi" "@")) "hi")
 
         print "== formula engine =="
-        def book:WorkbookModel (new WorkbookModel)
-        def s:SpreadsheetModel (new SpreadsheetModel)
+        def book:WorkbookModel (WorkbookModel.new_())
+        def s:SpreadsheetModel (SpreadsheetModel.new_())
         s.name = "Calc"
         s.resize(20 10)
         s.setCellRaw(0 0 "10")
@@ -61,7 +60,7 @@ class WorkbookTest {
         s.setFormula(0 3 "SUM(A1:A2)")
         s.setFormula(0 4 "IF(A1>5,1,0)")
         book.addSheet(s)
-        def eng:FormulaEngine (new FormulaEngine)
+        def eng:FormulaEngine (FormulaEngine.new_())
         eng.attach(book)
         eng.rebuildAll()
         c.eqStr("B1" (s.getCell(0 1)) "30")
@@ -74,20 +73,20 @@ class WorkbookTest {
         c.eqStr("recalc C1" (s.getCell(0 2)) "62")
 
         print "== cycle detection =="
-        def s2:SpreadsheetModel (new SpreadsheetModel)
+        def s2:SpreadsheetModel (SpreadsheetModel.new_())
         s2.name = "Cyc"
         s2.resize(5 5)
         s2.setFormula(0 0 "B1")
         s2.setFormula(0 1 "A1")
-        def book2:WorkbookModel (new WorkbookModel)
+        def book2:WorkbookModel (WorkbookModel.new_())
         book2.addSheet(s2)
-        def eng2:FormulaEngine (new FormulaEngine)
+        def eng2:FormulaEngine (FormulaEngine.new_())
         eng2.attach(book2)
         eng2.rebuildAll()
         c.ok("cycle error" (((s2.getCell(0 0)) == "#CYCLE!") || ((s2.getCell(0 1)) == "#CYCLE!")))
 
         print "== hidden rows/cols =="
-        def m:SpreadsheetModel (new SpreadsheetModel)
+        def m:SpreadsheetModel (SpreadsheetModel.new_())
         m.resize(10 5)
         def h0:int (m.totalHeight())
         m.setRowHidden(3 true)
@@ -114,7 +113,7 @@ class WorkbookTest {
 
         print "== sheet view sort =="
         def sv:SheetView (new SheetView)
-        def ms:SpreadsheetModel (new SpreadsheetModel)
+        def ms:SpreadsheetModel (SpreadsheetModel.new_())
         ms.resize(4 2)
         ms.setCellRaw(0 0 "h")
         ms.setCellRaw(1 0 "3")
@@ -128,12 +127,12 @@ class WorkbookTest {
 
         print "== formats.xlsx =="
         def loader:XlsxLoader (new XlsxLoader)
-        def bookF:WorkbookModel (new WorkbookModel)
+        def bookF:WorkbookModel (WorkbookModel.new_())
         def okF:boolean (loader.loadPath("gallery/datagrid/fixtures/formats.xlsx" bookF))
         c.ok("formats load" okF)
 
         print "== formulas.xlsx =="
-        def bookFm:WorkbookModel (new WorkbookModel)
+        def bookFm:WorkbookModel (WorkbookModel.new_())
         def okFm:boolean (loader.loadPath("gallery/datagrid/fixtures/formulas.xlsx" bookFm))
         c.ok("formulas load" okFm)
         if okFm {
@@ -144,7 +143,7 @@ class WorkbookTest {
         }
 
         print "== business-workbook.xlsx =="
-        def bookB:WorkbookModel (new WorkbookModel)
+        def bookB:WorkbookModel (WorkbookModel.new_())
         def okB:boolean (loader.loadPath("gallery/datagrid/fixtures/business-workbook.xlsx" bookB))
         c.ok("business load" okB)
         if okB {
@@ -158,7 +157,7 @@ class WorkbookTest {
         }
 
         print "== merged.xlsx =="
-        def bookM:WorkbookModel (new WorkbookModel)
+        def bookM:WorkbookModel (WorkbookModel.new_())
         def okM:boolean (loader.loadPath("gallery/datagrid/fixtures/merged.xlsx" bookM))
         c.ok("merged load" okM)
         if okM {
@@ -192,13 +191,13 @@ class WorkbookTest {
         def xb:GridApp (new GridApp)
         xb.init("gallery/pdf_writer/assets/fonts")
         xb.book.clear()
-        def s1:SpreadsheetModel (new SpreadsheetModel)
+        def s1:SpreadsheetModel (SpreadsheetModel.new_())
         s1.name = "Sheet1"
         s1.resize(5 5)
         s1.setCellRaw(0 0 "10")
         s1.setCellRaw(0 1 "20")
         s1.setFormula(0 2 "B1")
-        def s2:SpreadsheetModel (new SpreadsheetModel)
+        def s2:SpreadsheetModel (SpreadsheetModel.new_())
         s2.name = "Sheet2"
         s2.resize(5 5)
         s2.setFormula(0 0 "Sheet1!B1")
@@ -325,10 +324,10 @@ class WorkbookTest {
         ; The operations a tab strip needs, tested before there is a tab strip:
         ; they are facts about the workbook, and two of them have consequences
         ; a caller must not be left to remember.
-        def wb:WorkbookModel (new WorkbookModel)
+        def wb:WorkbookModel (WorkbookModel.new_())
         def mk:int 0
         while (mk < 3) {
-            def sh:SpreadsheetModel (new SpreadsheetModel)
+            def sh:SpreadsheetModel (SpreadsheetModel.new_())
             sh.name = ("S" + (to_string (mk + 1)))
             wb.addSheet(sh)
             mk = (mk + 1)
@@ -343,7 +342,7 @@ class WorkbookTest {
 
         print "-- inserting --"
         wb.setActive(1)
-        def added:SpreadsheetModel (new SpreadsheetModel)
+        def added:SpreadsheetModel (SpreadsheetModel.new_())
         added.name = "New"
         wb.insertSheet(1 added)
         c.eqInt("four sheets" (wb.sheetCount()) 4)
@@ -354,7 +353,7 @@ class WorkbookTest {
         ; A sheet inserted at or before the active one must not change which
         ; sheet you are looking at.
         c.eqInt("the sheet you were on is still the one you are on" wb.activeIndex 2)
-        def tail:SpreadsheetModel (new SpreadsheetModel)
+        def tail:SpreadsheetModel (SpreadsheetModel.new_())
         tail.name = "Last"
         wb.insertSheet(99 tail)
         def atLast:SpreadsheetModel (wb.sheetAt(4))
@@ -453,6 +452,45 @@ class WorkbookTest {
         c.ok("not a script part" ((GridScript.isScriptPart("xl/workbook.xml")) == false))
         c.eqStr("script name of a part" (GridScript.nameOfPart("ranger/summary.tsx")) "summary")
         c.eqStr("script extension" (GridScript.extensionOfPart("ranger/a.js")) ".js")
+
+        ; SheetHistory: undo takes back a whole transaction, redo puts it back
+        def hm:SpreadsheetModel (SpreadsheetModel.new_())
+        hm.setCell(0 0 "a")
+        hm.beginTx()
+        hm.setCell(1 0 "b")
+        hm.setCell(2 0 "c")
+        hm.endTx()
+        c.eqInt("history depth" (hm.history.depth()) 3)
+        c.eqInt("history undo span is the transaction" (hm.history.undoSpan()) 2)
+        hm.undo()
+        c.eqStr("undo took back b" (hm.getCell(1 0)) "")
+        c.eqStr("undo took back c" (hm.getCell(2 0)) "")
+        c.eqStr("undo left a" (hm.getCell(0 0)) "a")
+        c.ok("can redo" (hm.history.canRedo()))
+        c.eqInt("redo span" (hm.history.redoSpan()) 2)
+        hm.redo()
+        c.eqStr("redo put c back" (hm.getCell(2 0)) "c")
+        c.ok("nothing left to redo" ((hm.history.canRedo()) == false))
+        hm.setCell(3 0 "d")
+        hm.undo()
+        hm.setCell(4 0 "e")
+        c.ok("a new edit clears redo" ((hm.history.canRedo()) == false))
+        def hh:SheetHistory (SheetHistory.new_())
+        hh.limit = 3
+        hh.begin()
+        hh.record((SpreadsheetUndoOp.new_()))
+        hh.record((SpreadsheetUndoOp.new_()))
+        hh.end()
+        hh.record((SpreadsheetUndoOp.new_()))
+        hh.record((SpreadsheetUndoOp.new_()))
+        c.eqInt("trim drops the whole oldest transaction" (hh.depth()) 2)
+        hh.reset()
+        c.ok("reset empties the history" ((hh.canUndo()) == false))
+        def pos:[int] (FormulaParser.a1Position("$B$3"))
+        c.eqInt("a1Position row" (itemAt pos 0) 2)
+        c.eqInt("a1Position col" (itemAt pos 1) 1)
+        def pos2:[int] (FormulaParser.a1Position("AA10"))
+        c.eqInt("a1Position two-letter column" (itemAt pos2 1) 26)
 
         print ("passed=" + (to_string c.passed) + " failed=" + (to_string c.failed))
         if (c.failed == 0) {

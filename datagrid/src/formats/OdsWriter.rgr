@@ -20,8 +20,6 @@
 Import "../lib.rs"
 Import "OdsFormula.rgr"
 Import "../xlsx/XlsxWriter.rgr"
-Import "../WorkbookModel.rgr"
-Import "../SpreadsheetModel.rgr"
 Import "../../zip/ZipWriter.rgr"
 
 class OdsWriter {

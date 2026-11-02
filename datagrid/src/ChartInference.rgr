@@ -48,7 +48,6 @@
 ; COLUMNS, not the numbers it found in them.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "lib.rs"
 Import "GridChart.rgr"
 

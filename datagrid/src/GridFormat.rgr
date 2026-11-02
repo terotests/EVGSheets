@@ -25,7 +25,6 @@
 ;     bolded and un-bolded is indistinguishable from one that never was.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "GridSelection.rgr"
 Import "lib.rs"
 

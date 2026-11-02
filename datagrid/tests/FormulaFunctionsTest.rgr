@@ -8,7 +8,6 @@
 ; ==============================================================================
 
 Import "../src/lib.rs"
-Import "../src/FormulaFunctions.rgr"
 
 class Checker {
     def passed:int 0

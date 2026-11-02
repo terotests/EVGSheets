@@ -80,7 +80,7 @@ class XlsxTest {
         c.eqInt("AA17 col" (itemAt col 0) 26)
 
         print "== load sales.xlsx =="
-        def book:WorkbookModel (new WorkbookModel)
+        def book:WorkbookModel (WorkbookModel.new_())
         def loader:XlsxLoader (new XlsxLoader)
         def ok:boolean (loader.loadPath("gallery/datagrid/fixtures/sales.xlsx" book))
         c.ok("load ok" ok)
@@ -126,7 +126,7 @@ class XlsxTest {
         c.eqStr("bool TRUE" (summary.getCell(2 0)) "TRUE")
 
         print "== sparse500.xlsx =="
-        def book2:WorkbookModel (new WorkbookModel)
+        def book2:WorkbookModel (WorkbookModel.new_())
         def ok2:boolean (loader.loadPath("gallery/datagrid/fixtures/sparse500.xlsx" book2))
         c.ok("sparse load" ok2)
         def sp:SpreadsheetModel (book2.activeSheet())
@@ -488,7 +488,7 @@ class XlsxTest {
 
         print "== what other programs leave out: shared formulas, an empty font, the sheet's own defaults =="
         def shLoader:XlsxLoader (new XlsxLoader)
-        def shBook:WorkbookModel (new WorkbookModel)
+        def shBook:WorkbookModel (WorkbookModel.new_())
         def shOk:boolean (shLoader.loadPath("gallery/datagrid/fixtures/shared-formulas.xlsx" shBook))
         c.ok("shared-formulas.xlsx loaded" shOk)
         if shOk {
@@ -542,7 +542,7 @@ class XlsxTest {
         ; Not a ZIP until decrypted. Without a password the loader must say so
         ; rather than "Could not find End of Central Directory record".
         def cryptoLoader:XlsxLoader (new XlsxLoader)
-        def cryptoBook:WorkbookModel (new WorkbookModel)
+        def cryptoBook:WorkbookModel (WorkbookModel.new_())
         def cryptoNoPw:boolean (cryptoLoader.loadPath("gallery/datagrid/fixtures/crypto2016.xlsx" cryptoBook))
         c.ok("encrypted file refuses without a password" (cryptoNoPw == false))
         c.ok("and names the reason" (XlsxTest.hasSub(cryptoLoader.lastError "password-protected")))

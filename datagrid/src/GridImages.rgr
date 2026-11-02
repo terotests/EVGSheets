@@ -32,7 +32,6 @@
 ; when they are off screen and it must not be drawn at all.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "lib.rs"
 Import "DataGrid.rgr"
 Import "pkg:evg/EVGDisplayList.rgr"

@@ -9,7 +9,7 @@
 ; over this view's geometry (prefix sums on visible rows only).
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
+Import "lib.rs"
 
 class SheetView {
     def model@(late):SpreadsheetModel

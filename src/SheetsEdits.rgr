@@ -131,8 +131,8 @@ class SheetsEdits {
     ; Paste the clipboard (h rows, w columns) once from the selection's
     ; top-left, or once per copy when the selection holds it whole.
     sfn pasteBlocks:void (app:GridApp h:int w:int) {
-        def a:CellPos (new CellPos)
-        def b:CellPos (new CellPos)
+        def a:CellPos (CellPos.new_())
+        def b:CellPos (CellPos.new_())
         app.sel.normalized(a b)
         def selH:int ((b.row - a.row) + 1)
         def selW:int ((b.col - a.col) + 1)

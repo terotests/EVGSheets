@@ -27,8 +27,6 @@
 ; ==============================================================================
 
 Import "../lib.rs"
-Import "../WorkbookModel.rgr"
-Import "../SpreadsheetModel.rgr"
 Import "../../../office/drawing/OfficeColor.rgr"
 
 ; A record's data, in the pieces CONTINUE records split it into.
@@ -350,7 +348,7 @@ class XlsLoader {
                 }
                 push modelIndex -1
             } {
-                def sheet:SpreadsheetModel (new SpreadsheetModel)
+                def sheet:SpreadsheetModel (SpreadsheetModel.new_())
                 sheet.name = (itemAt sheetNames i)
                 sheet.sheetHidden = ((itemAt sheetState i) != 0)
                 sheet.quietWrites = true

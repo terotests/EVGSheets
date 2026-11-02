@@ -9,9 +9,6 @@
 ; ==============================================================================
 
 Import "../src/lib.rs"
-Import "../src/FormulaEngine.rgr"
-Import "../src/WorkbookModel.rgr"
-Import "../src/SpreadsheetModel.rgr"
 Import "../src/xlsx/XlsxLoader.rgr"
 
 class Checker {
@@ -40,13 +37,13 @@ class Checker {
 class FormulaWorkbookTest {
 
     sfn evalExpr:string (expr:string) {
-        def book:WorkbookModel (new WorkbookModel)
-        def s:SpreadsheetModel (new SpreadsheetModel)
+        def book:WorkbookModel (WorkbookModel.new_())
+        def s:SpreadsheetModel (SpreadsheetModel.new_())
         s.name = "S"
         s.resize(5 5)
         s.setFormula(0 0 expr)
         book.addSheet(s)
-        def eng:FormulaEngine (new FormulaEngine)
+        def eng:FormulaEngine (FormulaEngine.new_())
         eng.attach(book)
         eng.rebuildAll()
         return (s.getCell(0 0))
@@ -85,21 +82,21 @@ class FormulaWorkbookTest {
         c.eqStr("\"abc\"+1" (FormulaWorkbookTest.evalExpr("\"abc\"+1")) "#VALUE!")
 
         print "== error propagation =="
-        def bookE:WorkbookModel (new WorkbookModel)
-        def se:SpreadsheetModel (new SpreadsheetModel)
+        def bookE:WorkbookModel (WorkbookModel.new_())
+        def se:SpreadsheetModel (SpreadsheetModel.new_())
         se.name = "E"
         se.resize(5 5)
         se.setFormula(0 0 "1/0")
         se.setFormula(0 1 "A1+10")
         bookE.addSheet(se)
-        def engE:FormulaEngine (new FormulaEngine)
+        def engE:FormulaEngine (FormulaEngine.new_())
         engE.attach(bookE)
         engE.rebuildAll()
         c.eqStr("A1 DIV" (se.getCell(0 0)) "#DIV/0!")
         c.eqStr("B1 prop" (se.getCell(0 1)) "#DIV/0!")
 
         print "== absolute / relative parse + translate =="
-        def p:FormulaParser (new FormulaParser)
+        def p:FormulaParser (FormulaParser.new_())
         def ast:FormulaNode (p.parse("=$A$2+B2"))
         c.ok("parse ok" p.ok)
         def L:FormulaNode (itemAt ast.kids 0)
@@ -124,37 +121,37 @@ class FormulaWorkbookTest {
         c.eqStr("power" (FormulaParser.translateFormula("A1^2*3" 0 0)) "A1^2*3")
 
         print "== quoted sheet ref =="
-        def bookQ:WorkbookModel (new WorkbookModel)
-        def q1:SpreadsheetModel (new SpreadsheetModel)
+        def bookQ:WorkbookModel (WorkbookModel.new_())
+        def q1:SpreadsheetModel (SpreadsheetModel.new_())
         q1.name = "My Sheet"
         q1.resize(5 5)
         q1.setCellRaw(0 0 "7")
-        def q2:SpreadsheetModel (new SpreadsheetModel)
+        def q2:SpreadsheetModel (SpreadsheetModel.new_())
         q2.name = "Calc"
         q2.resize(5 5)
         q2.setFormula(0 0 "'My Sheet'!A1*3")
         bookQ.addSheet(q1)
         bookQ.addSheet(q2)
-        def engQ:FormulaEngine (new FormulaEngine)
+        def engQ:FormulaEngine (FormulaEngine.new_())
         engQ.attach(bookQ)
         engQ.rebuildAll()
         c.eqStr("quoted sheet" (q2.getCell(0 0)) "21")
 
         print "== cross-sheet incremental recalc + stats =="
-        def bookX:WorkbookModel (new WorkbookModel)
-        def sales:SpreadsheetModel (new SpreadsheetModel)
+        def bookX:WorkbookModel (WorkbookModel.new_())
+        def sales:SpreadsheetModel (SpreadsheetModel.new_())
         sales.name = "Sales"
         sales.resize(10 5)
         sales.setCellRaw(1 1 "100")
         sales.setCellRaw(2 1 "200")
-        def summary:SpreadsheetModel (new SpreadsheetModel)
+        def summary:SpreadsheetModel (SpreadsheetModel.new_())
         summary.name = "Summary"
         summary.resize(10 5)
         summary.setFormula(1 1 "SUM(Sales!B2:B3)")
         summary.setFormula(2 1 "B2*1.24")
         bookX.addSheet(sales)
         bookX.addSheet(summary)
-        def engX:FormulaEngine (new FormulaEngine)
+        def engX:FormulaEngine (FormulaEngine.new_())
         engX.attach(bookX)
         engX.rebuildAll()
         c.eqStr("SUM cross" (summary.getCell(1 1)) "300")
@@ -169,8 +166,8 @@ class FormulaWorkbookTest {
         c.ok("recalc small" (engX.recalculated <= 4))
 
         print "== formula fill translate =="
-        def bookF:WorkbookModel (new WorkbookModel)
-        def sf:SpreadsheetModel (new SpreadsheetModel)
+        def bookF:WorkbookModel (WorkbookModel.new_())
+        def sf:SpreadsheetModel (SpreadsheetModel.new_())
         sf.name = "F"
         sf.resize(10 10)
         sf.setCellRaw(1 0 "10")
@@ -179,7 +176,7 @@ class FormulaWorkbookTest {
         sf.setCellRaw(2 1 "21")
         sf.setFormula(1 2 "A2+B2")
         bookF.addSheet(sf)
-        def engF:FormulaEngine (new FormulaEngine)
+        def engF:FormulaEngine (FormulaEngine.new_())
         engF.attach(bookF)
         engF.rebuildAll()
         c.eqStr("C2" (sf.getCell(1 2)) "30")
@@ -198,8 +195,8 @@ class FormulaWorkbookTest {
         c.eqStr("abs fill expr" filledAbs "$A$2+B3")
 
         print "== numFmt on formula result =="
-        def bookN:WorkbookModel (new WorkbookModel)
-        def sn:SpreadsheetModel (new SpreadsheetModel)
+        def bookN:WorkbookModel (WorkbookModel.new_())
+        def sn:SpreadsheetModel (SpreadsheetModel.new_())
         sn.name = "N"
         sn.resize(5 5)
         sn.setFormula(0 0 "11/40")
@@ -208,7 +205,7 @@ class FormulaWorkbookTest {
         push sn.styles st
         sn.setCellStyleId(0 0 0)
         bookN.addSheet(sn)
-        def engN:FormulaEngine (new FormulaEngine)
+        def engN:FormulaEngine (FormulaEngine.new_())
         engN.attach(bookN)
         engN.rebuildAll()
         c.eqStr("raw calc" (sn.getCell(0 0)) "0.275")
@@ -221,8 +218,8 @@ class FormulaWorkbookTest {
         ; fixed number of passes stops partway down and marks the rest as a
         ; cycle. Which is what "the sums stop being delegated after a while"
         ; looks like from the outside.
-        def bookD:WorkbookModel (new WorkbookModel)
-        def sd:SpreadsheetModel (new SpreadsheetModel)
+        def bookD:WorkbookModel (WorkbookModel.new_())
+        def sd:SpreadsheetModel (SpreadsheetModel.new_())
         sd.name = "Deep"
         sd.resize(400 4)
         def depth:int 300
@@ -240,7 +237,7 @@ class FormulaWorkbookTest {
             r2 = (r2 + 1)
         }
         bookD.addSheet(sd)
-        def engD:FormulaEngine (new FormulaEngine)
+        def engD:FormulaEngine (FormulaEngine.new_())
         engD.attach(bookD)
         engD.rebuildAll()
         c.eqStr("the far end of a 300-long chain" (sd.getCell(0 0)) "301")
@@ -255,14 +252,14 @@ class FormulaWorkbookTest {
         c.eqStr("an edit reaches the far end" (sd.getCell(0 0)) "302")
 
         ; A real cycle is still a cycle.
-        def bookC:WorkbookModel (new WorkbookModel)
-        def sc:SpreadsheetModel (new SpreadsheetModel)
+        def bookC:WorkbookModel (WorkbookModel.new_())
+        def sc:SpreadsheetModel (SpreadsheetModel.new_())
         sc.name = "Cyc"
         sc.resize(6 3)
         sc.setFormula(0 0 "=A2+1")
         sc.setFormula(1 0 "=A1+1")
         bookC.addSheet(sc)
-        def engC:FormulaEngine (new FormulaEngine)
+        def engC:FormulaEngine (FormulaEngine.new_())
         engC.attach(bookC)
         engC.rebuildAll()
         c.ok("a cycle is reported" ((engC.errorCount()) > 0))
@@ -275,7 +272,7 @@ class FormulaWorkbookTest {
         ; hop. `tools/check_calc.py` compares every one of the 950; these are
         ; the corners.
         def loaderC:XlsxLoader (new XlsxLoader)
-        def bookCC:WorkbookModel (new WorkbookModel)
+        def bookCC:WorkbookModel (WorkbookModel.new_())
         def okC:boolean (loaderC.loadPath("gallery/datagrid/fixtures/calc-chain.xlsx" bookCC))
         c.ok("load calc-chain.xlsx" okC)
         if okC {
@@ -291,7 +288,7 @@ class FormulaWorkbookTest {
 
         print "== formulas.xlsx integration =="
         def loader:XlsxLoader (new XlsxLoader)
-        def bookL:WorkbookModel (new WorkbookModel)
+        def bookL:WorkbookModel (WorkbookModel.new_())
         def okL:boolean (loader.loadPath("gallery/datagrid/fixtures/formulas.xlsx" bookL))
         c.ok("load formulas.xlsx" okL)
         if okL {
@@ -302,8 +299,8 @@ class FormulaWorkbookTest {
         }
 
         print "== cross-sheet VLOOKUP =="
-        def bookV:WorkbookModel (new WorkbookModel)
-        def india:SpreadsheetModel (new SpreadsheetModel)
+        def bookV:WorkbookModel (WorkbookModel.new_())
+        def india:SpreadsheetModel (SpreadsheetModel.new_())
         india.name = "India"
         india.resize(10 5)
         india.setCellRaw(1 0 "Punjab")
@@ -315,7 +312,7 @@ class FormulaWorkbookTest {
         india.setCellRaw(3 0 "Puducherry")
         india.setCellRaw(3 1 "1247953")
         india.setCellRaw(3 2 "2598")
-        def pop:SpreadsheetModel (new SpreadsheetModel)
+        def pop:SpreadsheetModel (SpreadsheetModel.new_())
         pop.name = "Population of India"
         pop.resize(10 5)
         pop.setCellRaw(1 0 "Punjab")
@@ -328,7 +325,7 @@ class FormulaWorkbookTest {
         pop.setFormula(4 2 "VLOOKUP(A5,India!$A$2:$C$4,3,0)")
         bookV.addSheet(india)
         bookV.addSheet(pop)
-        def engV:FormulaEngine (new FormulaEngine)
+        def engV:FormulaEngine (FormulaEngine.new_())
         engV.attach(bookV)
         engV.rebuildAll()
         c.eqStr("VLOOKUP cross-sheet area" (pop.getCell(1 2)) "50362")

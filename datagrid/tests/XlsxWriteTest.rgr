@@ -124,7 +124,7 @@ class XlsxWriteTest {
         dv2.c1 = 1
         app.model.addValidation(dv2)
 
-        def second:SpreadsheetModel (new SpreadsheetModel)
+        def second:SpreadsheetModel (SpreadsheetModel.new_())
         second.name = "Notes"
         second.resize(4 3)
         second.setCellRaw(0 0 "second sheet")

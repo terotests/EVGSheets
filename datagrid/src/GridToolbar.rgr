@@ -16,7 +16,7 @@
 ; how a button gets its behaviour.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
+Import "lib.rs"
 Import "GridSelection.rgr"
 Import "GridFormat.rgr"
 Import "pkg:evg/EVGToolbar.rgr"

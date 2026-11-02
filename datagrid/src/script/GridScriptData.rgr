@@ -22,9 +22,6 @@
 
 Import "../../../pdf_writer/src/jsx/ComponentEngine.rgr"
 Import "../../../pdf_writer/src/jsx/EvalValue.rgr"
-Import "../WorkbookModel.rgr"
-Import "../SpreadsheetModel.rgr"
-Import "../FormulaEngine.rgr"
 Import "../lib.rs"
 
 ; A database, seen from a script. The default one has none: `available` is
@@ -51,7 +48,7 @@ class GridScriptQuery {
 class GridScriptBridge {
     Extends(EvalNativeBridge)
 
-    def book:WorkbookModel (new WorkbookModel)
+    def book:WorkbookModel (WorkbookModel.new_())
     def query:GridScriptQuery (new GridScriptQuery)
     ; The sheet a bare "A1" means: whichever one the user was looking at.
     def defaultSheet:string ""
@@ -253,7 +250,7 @@ class GridScriptBridge {
     fn sheetNamed:SpreadsheetModel (name:string) {
         def idx:int (this.sheetIndexOf(name))
         if (idx < 0) {
-            def empty:SpreadsheetModel (new SpreadsheetModel)
+            def empty:SpreadsheetModel (SpreadsheetModel.new_())
             return empty
         }
         return (book.sheetAt(idx))
@@ -435,15 +432,11 @@ class GridScriptBridge {
     }
 
     fn cellOfRef:void (ref:string rowOut:[int] colOut:[int]) {
-        def rows:[int]
-        def cols:[int]
-        def absR:[boolean]
-        def absC:[boolean]
-        FormulaParser.parseA1(ref rows cols absR absC)
+        def pos:[int] (FormulaParser.a1Position(ref))
         clear rowOut
         clear colOut
-        push rowOut (itemAt rows 0)
-        push colOut (itemAt cols 0)
+        push rowOut (itemAt pos 0)
+        push colOut (itemAt pos 1)
     }
 
     fn callCell:EvalValue (args:[EvalValue] asText:boolean) {

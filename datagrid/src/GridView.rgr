@@ -12,7 +12,6 @@
 ;        └─ sceneJson          →  lib/evg/gl/evg-webgl.js
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "GridSelection.rgr"
 Import "DataGrid.rgr"
 Import "lib.rs"
@@ -34,7 +33,6 @@ Import "../../game_engine/ui/UIContext.rgr"
 Import "pkg:evg/EVGColor.rgr"
 Import "pkg:evg/EVGDisplayList.rgr"
 Import "pkg:evg/EVGA11yTree.rgr"
-Import "WorkbookModel.rgr"
 
 class GridView {
     def canvas:SoftCanvas (new SoftCanvas)

@@ -19,7 +19,6 @@
 ; formulas over the value columns of the same output row.
 ; ==============================================================================
 
-Import "SpreadsheetModel.rgr"
 Import "ConditionalFormat.rgr"
 Import "lib.rs"
 

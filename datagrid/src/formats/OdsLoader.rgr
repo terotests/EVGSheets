@@ -30,8 +30,6 @@
 Import "../lib.rs"
 Import "OdsFormula.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
-Import "../WorkbookModel.rgr"
-Import "../SpreadsheetModel.rgr"
 
 ; A table-cell style as read, before its parent is folded in.
 class OdsCellStyle {
@@ -871,7 +869,7 @@ class OdsLoader {
     fn readBody:void (xml:string book:WorkbookModel) {
         def p:XmlLite (XmlLite.new_())
         p.reset(xml)
-        def sheet:SpreadsheetModel (new SpreadsheetModel)
+        def sheet:SpreadsheetModel (SpreadsheetModel.new_())
         def inSheet:boolean false
         def row:int 0
         def col:int 0
@@ -886,7 +884,7 @@ class OdsLoader {
             }
             def nm:string t.name
             if ((nm == "table") && (t.isEnd == false)) {
-                def sh:SpreadsheetModel (new SpreadsheetModel)
+                def sh:SpreadsheetModel (SpreadsheetModel.new_())
                 sh.name = (t.attr("table:name"))
                 sh.quietWrites = true
                 def ts:string (t.attr("table:style-name"))

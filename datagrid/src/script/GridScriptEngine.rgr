@@ -29,7 +29,6 @@
 
 Import "../lib.rs"
 Import "GridScriptData.rgr"
-Import "../WorkbookModel.rgr"
 Import "../../../pdf_writer/src/jsx/ComponentEngine.rgr"
 Import "../../../pdf_writer/src/core/EVGPDFRenderer.rgr"
 Import "../../../pdf_writer/src/fonts/EVGFontSetup.rgr"

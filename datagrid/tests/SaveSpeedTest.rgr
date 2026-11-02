@@ -26,8 +26,7 @@
 ;   npm run datagrid:save:test
 ; ==============================================================================
 
-Import "../src/WorkbookModel.rgr"
-Import "../src/SpreadsheetModel.rgr"
+Import "../src/lib.rs"
 Import "../src/xlsx/XlsxWriter.rgr"
 
 class SpeedCheck {
@@ -62,7 +61,7 @@ class SaveSpeedTest {
     }
 
     sfn build:SpreadsheetModel (n:int) {
-        def s:SpreadsheetModel (new SpreadsheetModel)
+        def s:SpreadsheetModel (SpreadsheetModel.new_())
         s.name = "Data"
         s.resize(n 8)
         def a:string (strfromcode 228)

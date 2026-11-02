@@ -17,5 +17,7 @@ mod rgr {
     ranger::import_rgr!("DgNative");
     #[cfg(any())]
     ranger::import_rgr!("xlsx/XlsxOfficeCrypto");
+    #[cfg(any())]
+    ranger::import_rgr!("../../office/editor/OfficeHistory");
 }
-pub use rgr::{DgNative, EVGCodepoint, OoxmlText, OpcPackage, OpcRelationship, XlsxOfficeCrypto};
+pub use rgr::{DgNative, EVGCodepoint, OoxmlText, OpcPackage, OfficeHistoryRules, OpcRelationship, XlsxOfficeCrypto};

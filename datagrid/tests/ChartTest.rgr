@@ -68,7 +68,7 @@ class ChartTest {
 
     ; A small sales sheet: a header row, a label column, two series.
     sfn salesModel:SpreadsheetModel () {
-        def m (new SpreadsheetModel)
+        def m (SpreadsheetModel.new_())
         m.setCell(0 0 "Month")
         m.setCell(0 1 "North")
         m.setCell(0 2 "South")
@@ -98,7 +98,7 @@ class ChartTest {
     ; offers, including the ones that want a third column for a bubble's size
     ; or a box plot's spread.
     sfn wideModel:SpreadsheetModel () {
-        def m (new SpreadsheetModel)
+        def m (SpreadsheetModel.new_())
         m.setCell(0 0 "Month")
         m.setCell(0 1 "North")
         m.setCell(0 2 "South")
@@ -311,7 +311,7 @@ class ChartTest {
         this.checkFalse("stacked needs two series" (dataOne.suits((ChartKind.stacked()))))
 
         print "== numeric categories =="
-        def nm (new SpreadsheetModel)
+        def nm (SpreadsheetModel.new_())
         nm.setCell(0 0 "x")
         nm.setCell(0 1 "y")
         nm.setCell(1 0 "1")
@@ -452,7 +452,7 @@ class ChartTest {
         this.checkTrue("pie draws" ((array_length pdl.cmds) > 5))
 
         print "== an empty range says so =="
-        def blank (new SpreadsheetModel)
+        def blank (SpreadsheetModel.new_())
         blank.setCell(0 0 "a")
         blank.setCell(1 0 "b")
         def bc:GridChart (ChartTest.chartOver(0 0 1 0))
