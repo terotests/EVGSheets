@@ -6,8 +6,6 @@
 
 Import "../src/GridApp.rgr"
 Import "../src/lib.rs"
-Import "../src/xlsx/XlsxLoader.rgr"
-Import "../src/xlsx/XlsxWorksheet.rgr"
 Import "../../office/drawing/OfficeColor.rgr"
 Import "../../pdf_writer/src/core/Utf8.rgr"
 Import "pkg:image/PNGEncoder.rgr"
@@ -67,21 +65,27 @@ class XlsxTest {
         def c:Checker (new Checker)
 
         print "== cell ref parse =="
-        def r:[int]
-        def col:[int]
-        XlsxWorksheet.parseCellRef("A1" r col)
-        c.eqInt("A1 row" (itemAt r 0) 0)
-        c.eqInt("A1 col" (itemAt col 0) 0)
-        XlsxWorksheet.parseCellRef("D6" r col)
-        c.eqInt("D6 row" (itemAt r 0) 5)
-        c.eqInt("D6 col" (itemAt col 0) 3)
-        XlsxWorksheet.parseCellRef("AA17" r col)
-        c.eqInt("AA17 row" (itemAt r 0) 16)
-        c.eqInt("AA17 col" (itemAt col 0) 26)
+        def a1:[int] (XlsxWorksheet.cellRef("A1"))
+        c.eqInt("A1 row" (itemAt a1 0) 0)
+        c.eqInt("A1 col" (itemAt a1 1) 0)
+        def d6:[int] (XlsxWorksheet.cellRef("D6"))
+        c.eqInt("D6 row" (itemAt d6 0) 5)
+        c.eqInt("D6 col" (itemAt d6 1) 3)
+        def aa17:[int] (XlsxWorksheet.cellRef("AA17"))
+        c.eqInt("AA17 row" (itemAt aa17 0) 16)
+        c.eqInt("AA17 col" (itemAt aa17 1) 26)
+        def mr:[int] (XlsxWorksheet.mergeRange("B2:D5"))
+        c.eqInt("merge r1" (itemAt mr 0) 1)
+        c.eqInt("merge c1" (itemAt mr 1) 1)
+        c.eqInt("merge r2" (itemAt mr 2) 4)
+        c.eqInt("merge c2" (itemAt mr 3) 3)
+        def one:[int] (XlsxWorksheet.mergeRange("C7"))
+        c.eqInt("single-cell merge r2" (itemAt one 2) 6)
+        c.eqInt("single-cell merge c2" (itemAt one 3) 2)
 
         print "== load sales.xlsx =="
         def book:WorkbookModel (WorkbookModel.new_())
-        def loader:XlsxLoader (new XlsxLoader)
+        def loader:XlsxLoader (XlsxLoader.new_())
         def ok:boolean (loader.loadPath("gallery/datagrid/fixtures/sales.xlsx" book))
         c.ok("load ok" ok)
         c.eqInt("sheet count" (book.sheetCount()) 2)
@@ -487,7 +491,7 @@ class XlsxTest {
         }
 
         print "== what other programs leave out: shared formulas, an empty font, the sheet's own defaults =="
-        def shLoader:XlsxLoader (new XlsxLoader)
+        def shLoader:XlsxLoader (XlsxLoader.new_())
         def shBook:WorkbookModel (WorkbookModel.new_())
         def shOk:boolean (shLoader.loadPath("gallery/datagrid/fixtures/shared-formulas.xlsx" shBook))
         c.ok("shared-formulas.xlsx loaded" shOk)
@@ -541,7 +545,7 @@ class XlsxTest {
         print "== password-protected OLE workbook (crypto2016.xlsx) =="
         ; Not a ZIP until decrypted. Without a password the loader must say so
         ; rather than "Could not find End of Central Directory record".
-        def cryptoLoader:XlsxLoader (new XlsxLoader)
+        def cryptoLoader:XlsxLoader (XlsxLoader.new_())
         def cryptoBook:WorkbookModel (WorkbookModel.new_())
         def cryptoNoPw:boolean (cryptoLoader.loadPath("gallery/datagrid/fixtures/crypto2016.xlsx" cryptoBook))
         c.ok("encrypted file refuses without a password" (cryptoNoPw == false))

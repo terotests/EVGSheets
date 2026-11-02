@@ -486,7 +486,15 @@ class CfDialog extends SxDialog {
         def c1:[int]
         def r2:[int]
         def c2:[int]
-        XlsxWorksheet.parseMergeRef(text r1 c1 r2 c2)
+        def rangeAt489:[int] (XlsxWorksheet.mergeRange(text))
+        clear r1
+        push r1 (itemAt rangeAt489 0)
+        clear c1
+        push c1 (itemAt rangeAt489 1)
+        clear r2
+        push r2 (itemAt rangeAt489 2)
+        clear c2
+        push c2 (itemAt rangeAt489 3)
         if (((array_length r1) == 0) || ((array_length r2) == 0)) {
             return false
         }

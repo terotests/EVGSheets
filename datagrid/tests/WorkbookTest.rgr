@@ -8,7 +8,6 @@ Import "../src/GridApp.rgr"
 Import "../src/lib.rs"
 Import "../src/SheetView.rgr"
 Import "../src/ConditionalFormat.rgr"
-Import "../src/xlsx/XlsxLoader.rgr"
 
 class Checker {
     def passed:int 0
@@ -126,7 +125,7 @@ class WorkbookTest {
         c.eqInt("header stays" (sv.modelRow(0)) 0)
 
         print "== formats.xlsx =="
-        def loader:XlsxLoader (new XlsxLoader)
+        def loader:XlsxLoader (XlsxLoader.new_())
         def bookF:WorkbookModel (WorkbookModel.new_())
         def okF:boolean (loader.loadPath("gallery/datagrid/fixtures/formats.xlsx" bookF))
         c.ok("formats load" okF)

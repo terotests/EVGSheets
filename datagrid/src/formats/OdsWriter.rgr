@@ -18,7 +18,6 @@
 ; ==============================================================================
 
 Import "../lib.rs"
-Import "OdsFormula.rgr"
 Import "../xlsx/XlsxWriter.rgr"
 Import "../../zip/ZipWriter.rgr"
 

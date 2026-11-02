@@ -26,7 +26,6 @@
 ;   npm run datagrid:tables:test
 ; ==============================================================================
 
-Import "../src/xlsx/XlsxLoader.rgr"
 Import "../src/lib.rs"
 Import "../src/xlsx/XlsxWriter.rgr"
 
@@ -77,7 +76,7 @@ class TableRefTest {
         print "== TableRefTest =="
 
         def book:WorkbookModel (WorkbookModel.new_())
-        def loader:XlsxLoader (new XlsxLoader)
+        def loader:XlsxLoader (XlsxLoader.new_())
         def ok:boolean (loader.loadPath("gallery/datagrid/fixtures/tables.xlsx" book))
         c.ok("the workbook opened" ok)
         if (ok == false) {
@@ -217,14 +216,14 @@ class TableRefTest {
         ; save it, and the table is gone — along with every formula that named
         ; it, which then reads #NAME? in a file that was only ever opened.
         def fresh:WorkbookModel (WorkbookModel.new_())
-        def l2:XlsxLoader (new XlsxLoader)
+        def l2:XlsxLoader (XlsxLoader.new_())
         def reload0:boolean (l2.loadPath("gallery/datagrid/fixtures/tables.xlsx" fresh))
         c.ok("the fixture opened again" reload0)
         def w:XlsxWriter (new XlsxWriter)
         def wrote:boolean (w.write(fresh "gallery/datagrid/harness/out/export" "tables-roundtrip.xlsx"))
         c.ok("and wrote" wrote)
         def back:WorkbookModel (WorkbookModel.new_())
-        def l3:XlsxLoader (new XlsxLoader)
+        def l3:XlsxLoader (XlsxLoader.new_())
         def reread:boolean (l3.loadPath("gallery/datagrid/harness/out/export/tables-roundtrip.xlsx" back))
         c.ok("and read back" reread)
         if reread {

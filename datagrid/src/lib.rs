@@ -22,3 +22,6 @@ pub mod spreadsheet_model;
 pub mod workbook_model;
 pub mod xlsx;
 pub mod xlsx_number_format;
+
+/// Text in the target's own units, for crates that use this one.
+pub use crate::rgr::DgNative;

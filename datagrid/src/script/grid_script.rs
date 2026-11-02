@@ -51,11 +51,15 @@ impl GridScript {
     pub fn partFor(name: &str) -> String {
         format!("ranger/{}.tsx", name)
     }
+    /// Not `starts_with`/`ends_with`: Ranger's Rust writer passes a `&str`
+    /// argument to them as `.as_str()`, which rustc does not have on `&str`.
     pub fn hasPrefix(s: &str, prefix: &str) -> bool {
-        s.starts_with(prefix)
+        DgNative::index_of(s, prefix) == 0
     }
     pub fn hasSuffix(s: &str, suffix: &str) -> bool {
-        s.ends_with(suffix)
+        let n: i64 = DgNative::str_len(s);
+        let m: i64 = DgNative::str_len(suffix);
+        n >= m && DgNative::substr(s, n - m, n) == suffix
     }
     /// Which package entries are scripts. Two extensions, because a report is
     /// TSX and a plain transform is not obliged to be.

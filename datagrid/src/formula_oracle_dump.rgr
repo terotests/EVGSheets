@@ -5,7 +5,7 @@
 ; ==============================================================================
 
 Import "GridApp.rgr"
-Import "xlsx/XlsxLoader.rgr"
+Import "lib.rs"
 
 class FormulaOracleDump {
     ; Formulas and values can contain quotes (IF(A1>5,"large","small")) — emit
@@ -49,7 +49,7 @@ class FormulaOracleDump {
     sfn main:void () {
         def path:string "gallery/datagrid/fixtures/formulas.xlsx"
         def book:WorkbookModel (WorkbookModel.new_())
-        def loader:XlsxLoader (new XlsxLoader)
+        def loader:XlsxLoader (XlsxLoader.new_())
         def ok:boolean (loader.loadPath(path book))
         if (ok == false) {
             print ("FAIL " + loader.lastError)

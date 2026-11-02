@@ -11,7 +11,7 @@
 ; ==============================================================================
 
 Import "../src/GridApp.rgr"
-Import "../src/formats/WorkbookImport.rgr"
+Import "../src/lib.rs"
 Import "../src/formats/OdsWriter.rgr"
 
 class FormatChecker {

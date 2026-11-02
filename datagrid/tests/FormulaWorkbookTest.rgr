@@ -9,7 +9,6 @@
 ; ==============================================================================
 
 Import "../src/lib.rs"
-Import "../src/xlsx/XlsxLoader.rgr"
 
 class Checker {
     def passed:int 0
@@ -271,7 +270,7 @@ class FormulaWorkbookTest {
         ; directions, ladders of SUMs, subtotals of subtotals and a cross-sheet
         ; hop. `tools/check_calc.py` compares every one of the 950; these are
         ; the corners.
-        def loaderC:XlsxLoader (new XlsxLoader)
+        def loaderC:XlsxLoader (XlsxLoader.new_())
         def bookCC:WorkbookModel (WorkbookModel.new_())
         def okC:boolean (loaderC.loadPath("gallery/datagrid/fixtures/calc-chain.xlsx" bookCC))
         c.ok("load calc-chain.xlsx" okC)
@@ -287,7 +286,7 @@ class FormulaWorkbookTest {
         }
 
         print "== formulas.xlsx integration =="
-        def loader:XlsxLoader (new XlsxLoader)
+        def loader:XlsxLoader (XlsxLoader.new_())
         def bookL:WorkbookModel (WorkbookModel.new_())
         def okL:boolean (loader.loadPath("gallery/datagrid/fixtures/formulas.xlsx" bookL))
         c.ok("load formulas.xlsx" okL)

@@ -15,7 +15,6 @@ Import "../src/lib.rs"
 Import "../src/script/GridScriptEngine.rgr"
 Import "../src/script/ScriptPreview.rgr"
 Import "../src/xlsx/XlsxWriter.rgr"
-Import "../src/xlsx/XlsxLoader.rgr"
 
 class Checker {
     def passed:int 0
@@ -219,7 +218,7 @@ function render() {
         def wrote:boolean (writer.write(book "./gallery/datagrid/harness/out/script" "scripted.xlsx"))
         c.ok(("wrote the workbook (" + writer.lastError + ")") wrote)
         def reloaded:WorkbookModel (WorkbookModel.new_())
-        def loader:XlsxLoader (new XlsxLoader)
+        def loader:XlsxLoader (XlsxLoader.new_())
         def read:boolean (loader.loadPath("./gallery/datagrid/harness/out/script/scripted.xlsx" reloaded))
         c.ok(("read it back (" + loader.lastError + ")") read)
         c.eqInt("script survived the round trip" (reloaded.scriptCount()) 1)

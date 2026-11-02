@@ -21,7 +21,6 @@
 ; skipped, out loud, where there is no compiler.
 ; ==============================================================================
 
-Import "../src/xlsx/XlsxLoader.rgr"
 Import "../src/xlsx/XlsxWriter.rgr"
 Import "../src/lib.rs"
 Import "pkg:evg/EVGCodepoint.rgr"
@@ -184,7 +183,7 @@ class TextModelTest {
         def wrote:boolean (w.write(book "tmp" "text-model-roundtrip.xlsx"))
         c.ok("the workbook was written" wrote)
         if wrote {
-            def loader:XlsxLoader (new XlsxLoader)
+            def loader:XlsxLoader (XlsxLoader.new_())
             def back:WorkbookModel (WorkbookModel.new_())
             def read:boolean (loader.loadPath("tmp/text-model-roundtrip.xlsx" back))
             c.ok("and read back" read)

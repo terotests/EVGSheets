@@ -10,14 +10,18 @@ mod rgr {
     #[cfg(any())]
     ranger::import_rgr!("../../../lib/evg/EVGCodepoint");
     #[cfg(any())]
+    ranger::import_rgr!("../../office/drawing/OfficeColor");
+    #[cfg(any())]
+    ranger::import_rgr!("../../office/editor/OfficeHistory");
+    #[cfg(any())]
     ranger::import_rgr!("../../ooxml/OoxmlText");
     #[cfg(any())]
     ranger::import_rgr!("../../ooxml/OpcPackage");
     #[cfg(any())]
+    ranger::import_rgr!("../../pdf_writer/src/core/Utf8");
+    #[cfg(any())]
     ranger::import_rgr!("DgNative");
     #[cfg(any())]
     ranger::import_rgr!("xlsx/XlsxOfficeCrypto");
-    #[cfg(any())]
-    ranger::import_rgr!("../../office/editor/OfficeHistory");
 }
-pub use rgr::{DgNative, EVGCodepoint, OoxmlText, OpcPackage, OfficeHistoryRules, OpcRelationship, XlsxOfficeCrypto};
+pub use rgr::{DgNative, EVGCodepoint, OfficeColorMath, OfficeHistoryRules, OfficeTheme, OoxmlText, OpcPackage, OpcRelationship, Utf8, XlsxOfficeCrypto};

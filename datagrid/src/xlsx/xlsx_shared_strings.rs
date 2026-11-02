@@ -31,7 +31,7 @@ impl XlsxSharedStrings {
     /// The runs of one <si> or <is>, up to its closing tag. A bare <t> is one
     /// unstyled run; an <r> carries an optional <rPr> saying how its piece
     /// differs from the cell.
-    fn parseRuns(p: &Rc<RefCell<XmlLite>>, end_name: &str) -> Rc<RefCell<RichText>> {
+    pub fn parseRuns(p: &Rc<RefCell<XmlLite>>, end_name: &str) -> Rc<RefCell<RichText>> {
         let out: Rc<RefCell<RichText>> = Rc::new(RefCell::new(RichText::new()));
         let mut depth: i64 = 1;
         let mut cur: Rc<RefCell<CellRun>> = Rc::new(RefCell::new(CellRun::new()));
