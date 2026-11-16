@@ -164,6 +164,13 @@ class SheetsApp {
     def statsEl:EVGElement (EVGElement.createSpan())
     def badgeEl:EVGElement (EVGElement.createSpan())
     def ctxHolder:EVGElement (EVGElement.createDiv())
+    ; Key tips (Alt or F10, then letters): 0 off, 1 on the ribbon's tabs, 2 on
+    ; the shown tab's commands. The letters typed so far narrow the badges.
+    def keyTips:int 0
+    def tipTyped:string ""
+    def tipCodes:[string]
+    def tipTids:[string]
+    def tipHolder:EVGElement (EVGElement.createDiv())
     ; The task pane at the right of the grid (Insert Function, Name Manager,
     ; Watch Window, Comments, Selection, PivotTable Fields, Format Chart):
     ; what it lists is the core's (`paneRows`), and a row pressed is
@@ -518,7 +525,8 @@ class SheetsApp {
         this.item(f "new" "New workbook" "file.new" "" "")
         this.item(f "open" "Open…" "file.open" "" "Ctrl+O")
         f.addSeparator()
-        this.item(f "save" "Download workbook" "file.saveAs" "" "Ctrl+S")
+        this.item(f "save" "Save" "file.save" "" "Ctrl+S")
+        this.item(f "download" "Download a copy" "file.saveAs" "" "Ctrl+Shift+S")
         this.item(f "ods" "Download .ods" "file.exportOds" "" "")
         this.item(f "csv" "Download .csv" "file.exportCsv" "" "")
         this.item(f "tsv" "Download .tsv" "file.exportTsv" "" "")
@@ -944,7 +952,7 @@ class SheetsApp {
         qat = (new RibbonCtl)
         qat.tid = "sx-qat"
         qat.name = "Quick Access Toolbar"
-        this.tool(qat "qat-save" "Save" (SheetsApp.icon("save")) "file.saveAs" "" false)
+        this.tool(qat "qat-save" "Save" (SheetsApp.icon("save")) "file.save" "" false)
         this.tool(qat "qat-undo" "Undo" (SheetsApp.icon("undo")) "edit.undo" "" false)
         this.tool(qat "qat-redo" "Redo" (SheetsApp.icon("redo")) "edit.redo" "" false)
 
@@ -1682,6 +1690,12 @@ class SheetsApp {
         UiTree.clearChildren(ctxHolder)
         this.mount(ctxHolder ctxMenu)
         root.addChild(ctxHolder)
+
+        ; --- key tip badges, placed over the controls they press ------------
+        tipHolder.id = "sx-keytips"
+        tipHolder.className = "sx-keytips"
+        UiTree.clearChildren(tipHolder)
+        root.addChild(tipHolder)
 
         ; --- the dialogs: modal overlays, so they take no room in the page --
         dlgHolder.id = "sx-dlg-holder"
@@ -2702,6 +2716,7 @@ class SheetsApp {
         } {
             UiTree.inline(gridEl "width" "100%")
         }
+        this.placeTips()
         def page:EVGElement (ui.layout())
         if ctxOpen {
             if (this.fitCtxMenu()) {
@@ -2715,7 +2730,7 @@ class SheetsApp {
         def ki:int 0
         while (ki < (array_length root.children)) {
             def kid:EVGElement (itemAt root.children ki)
-            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder") && (kid.id != "sx-dlg-holder") && (kid.id != "sx-pane")) {
+            if ((kid.id != "sx-grid") && (kid.id != "sx-ctx-holder") && (kid.id != "sx-dlg-holder") && (kid.id != "sx-pane") && (kid.id != "sx-keytips")) {
                 used = (used + kid.calculatedHeight + 1.0)
             }
             ki = (ki + 1)
@@ -2959,6 +2974,9 @@ class SheetsApp {
     }
 
     fn pointer:void (x:int y:int down:boolean shift:boolean ctrl:boolean) {
+        if (down && (keyTips > 0)) {
+            this.stopTips()
+        }
         if gridCapture {
             grid.pointer((x - gx) (y - gy) down shift ctrl)
             if (down == false) {
@@ -3613,6 +3631,8 @@ class SheetsApp {
             t.addItem("t-left" "Move left" (at <= 0))
             this.act("t-right" "sheet.move.right" "" "")
             t.addItem("t-right" "Move right" (at >= (n - 1)))
+            this.act("t-movecopy" "sheet.moveCopy" "" "")
+            t.addItem("t-movecopy" "Move or Copy…" false)
             t.addSeparator()
             this.act("t-delete" "sheet.delete" "" "")
             t.addItem("t-delete" "Delete…" (n <= 1))
@@ -3751,6 +3771,33 @@ class SheetsApp {
 
     ; Keys arrive by their DOM names ("ArrowLeft", "Enter", "F6", "a").
     fn key:void (name:string shift:boolean ctrl:boolean) {
+        if (keyTips > 0) {
+            if (name == "Escape") {
+                if ((strlen tipTyped) > 0) {
+                    tipTyped = ""
+                } {
+                    if (keyTips == 2) {
+                        this.showTips(1)
+                    } {
+                        this.stopTips()
+                    }
+                }
+                this.sync()
+                return
+            }
+            this.stopTips()
+            if (name == "Alt") {
+                this.sync()
+                return
+            }
+        }
+        if (name == "Alt") {
+            if (this.tipsAllowed()) {
+                this.showTips(1)
+            }
+            this.sync()
+            return
+        }
         ; F6 walks the regions, the way an office suite does: menubar,
         ; toolbar, sheet, tabs, and round again.
         if (name == "F6") {
@@ -3768,6 +3815,7 @@ class SheetsApp {
                 if (showRibbon && (readOnly == false) && ((array_length tools) == 0)) {
                     gridFocused = false
                     ui.focus(("sx-ribtabs-tab-" + ribbonTab))
+                    this.showTips(1)
                 }
             }
             this.sync()
@@ -3860,6 +3908,15 @@ class SheetsApp {
     ; Printable text, and Ctrl chords (`ctrl` true, `s` the letter). A chord
     ; goes to the sheet wherever focus is: Ctrl+Z undoes from the toolbar too.
     fn text:void (s:string shift:boolean ctrl:boolean) {
+        if (keyTips > 0) {
+            if ctrl {
+                this.stopTips()
+            } {
+                this.typeTip(s)
+                this.sync()
+                return
+            }
+        }
         ; While a dialog is up its fields take the text, and a chord is the
         ; field's (Ctrl+A selects the query), not the sheet's.
         if (this.dialogOpen()) {
@@ -4080,6 +4137,244 @@ class SheetsApp {
 
     fn rectOf:string (tid:string) {
         return (ui.rectOf(tid))
+    }
+
+    ; --- key tips ---------------------------------------------------------------
+    ; Excel's: Alt (or F10) puts a letter on each ribbon tab; a tab's letter
+    ; shows its commands' letters; a command's letters press it. Escape steps
+    ; back a level. The Home tab uses Excel's own letters; a command Excel has
+    ; no letter for, or any on another tab, gets "Y1", "Y2"… as Excel does for
+    ; its overflow.
+
+    fn tipsAllowed:boolean () {
+        return (showRibbon && (readOnly == false) && ((this.dialogOpen()) == false))
+    }
+
+    fn keyTipsOn:boolean () {
+        return (keyTips > 0)
+    }
+
+    ; "level|typed|code=tid,code=tid…" for a test.
+    fn keyTipState:string () {
+        def parts:[string]
+        def i:int 0
+        while (i < (array_length tipCodes)) {
+            push parts ((itemAt tipCodes i) + "=" + (itemAt tipTids i))
+            i = (i + 1)
+        }
+        return ((to_string keyTips) + "|" + tipTyped + "|" + (join parts ","))
+    }
+
+    sfn tabTip:string (value:string) {
+        def tabs:[string] ([] _:string ("file" "F" "home" "H" "insert" "N" "draw" "JI" "pagelayout" "P" "formulas" "M" "data" "A" "review" "R" "view" "W" "automate" "Y2"))
+        def i:int 0
+        while ((i + 1) < (array_length tabs)) {
+            if ((itemAt tabs i) == value) {
+                return (itemAt tabs (i + 1))
+            }
+            i = (i + 2)
+        }
+        return ""
+    }
+
+    ; Excel's Home tab letters, by the ribbon item's value.
+    sfn homeTip:string (value:string) {
+        def m:[string] ([] _:string ("h-cut" "X" "h-copy" "C" "painter" "FP" "h-grow" "FG" "h-shrink" "FK" "bold" "1" "italic" "2" "underline" "3" "fill" "H" "color" "FC" "h-top" "AT" "h-middle" "AM" "h-bottom" "AB" "h-orient" "FQ" "wrap" "W" "left" "AL" "center" "AC" "right" "AR" "h-indless" "AO" "h-indmore" "AI" "currency" "AN" "percent" "P" "h-comma" "K" "decmore" "0" "decless" "9" "h-autosum" "U"))
+        def i:int 0
+        while ((i + 1) < (array_length m)) {
+            if ((itemAt m i) == value) {
+                return (itemAt m (i + 1))
+            }
+            i = (i + 2)
+        }
+        return ""
+    }
+
+    sfn autoTip:string (n:int) {
+        def digits:string "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        def per:int (strlen digits)
+        def lead:string "Y"
+        if (n >= per) {
+            lead = "Z"
+            n = (n - per)
+        }
+        if (n >= per) {
+            lead = "Q"
+            n = (n - per)
+        }
+        if (n >= per) {
+            return ""
+        }
+        return (lead + (substring digits n (n + 1)))
+    }
+
+    ; Where a control is laid out, if it is on show above the grid.
+    fn tipRect:[int] (tid:string) {
+        def out:[int]
+        def r:string (ui.rectOf(tid))
+        if ((strlen r) == 0) {
+            return out
+        }
+        def parts:[string] (strsplit r ",")
+        if ((array_length parts) < 4) {
+            return out
+        }
+        def x:int (?? (to_int (itemAt parts 0)) 0)
+        def y:int (?? (to_int (itemAt parts 1)) 0)
+        def w:int (?? (to_int (itemAt parts 2)) 0)
+        def h:int (?? (to_int (itemAt parts 3)) 0)
+        if ((w <= 0) || (h <= 0) || ((y + h) > (gy + 2))) {
+            return out
+        }
+        push out x
+        push out y
+        push out w
+        push out h
+        return out
+    }
+
+    fn addTip:void (code:string tid:string) {
+        if (((strlen code) == 0) || ((array_length (this.tipRect(tid))) < 4)) {
+            return
+        }
+        push tipCodes code
+        push tipTids tid
+    }
+
+    fn showTips:void (level:int) {
+        clear tipCodes
+        clear tipTids
+        tipTyped = ""
+        keyTips = level
+        ; Lay out first: the tab just chosen has not been placed yet.
+        def laid:EVGElement (this.layout())
+        if (level == 1) {
+            def ti:int 0
+            while (ti < (array_length ribTabs.items)) {
+                def titem:UiItem (itemAt ribTabs.items ti)
+                def tv:string titem.value
+                this.addTip((SheetsApp.tabTip(tv)) ("sx-ribtabs-tab-" + tv))
+                ti = (ti + 1)
+            }
+            return
+        }
+        def taken:[string]
+        def pendingTids:[string]
+        def gs:[RibbonCtl] (this.ribbonGroups())
+        def gi:int 0
+        while (gi < (array_length gs)) {
+            def g:RibbonCtl (itemAt gs gi)
+            def ii:int 0
+            while (ii < (array_length g.items)) {
+                def it:RibbonItem (itemAt g.items ii)
+                if ((it.separator == false) && (it.disabled == false)) {
+                    def code:string ""
+                    if (ribbonTab == "home") {
+                        code = (SheetsApp.homeTip(it.value))
+                    }
+                    if ((strlen code) > 0) {
+                        this.addTip(code (g.itemTid(it.value)))
+                    } {
+                        push pendingTids (g.itemTid(it.value))
+                    }
+                }
+                ii = (ii + 1)
+            }
+            gi = (gi + 1)
+        }
+        def menus:[MenuCtl] (this.ribbonMenus())
+        def mcodes:[string] ([] _:string ("FF" "FS" "N" "B" "L" "T" "J" "V" "M" "I" "D" "O" "FI" "E" "S" "FD"))
+        def mi:int 0
+        while (mi < (array_length menus)) {
+            def mctl:MenuCtl (itemAt menus mi)
+            def mt:string (mctl.triggerTid())
+            if ((ribbonTab == "home") && (mi < (array_length mcodes))) {
+                this.addTip((itemAt mcodes mi) mt)
+            } {
+                push pendingTids mt
+            }
+            mi = (mi + 1)
+        }
+        def auto:int 0
+        def pi:int 0
+        while (pi < (array_length pendingTids)) {
+            def pt:string (itemAt pendingTids pi)
+            if ((array_length (this.tipRect(pt))) == 4) {
+                this.addTip((SheetsApp.autoTip(auto)) pt)
+                auto = (auto + 1)
+            }
+            pi = (pi + 1)
+        }
+    }
+
+    fn stopTips:void () {
+        keyTips = 0
+        tipTyped = ""
+        clear tipCodes
+        clear tipTids
+    }
+
+    fn typeTip:void (s:string) {
+        def typed:string (tipTyped + (to_uppercase s))
+        def exact:int -1
+        def partial:int 0
+        def i:int 0
+        while (i < (array_length tipCodes)) {
+            def c:string (itemAt tipCodes i)
+            if (c == typed) {
+                exact = i
+            }
+            if ((indexOf c typed) == 0) {
+                partial = (partial + 1)
+            }
+            i = (i + 1)
+        }
+        if (exact >= 0) {
+            def tid:string (itemAt tipTids exact)
+            def level:int keyTips
+            this.stopTips()
+            def pressed:boolean (this.pressId(tid))
+            if ((level == 1) && (tid != "sx-ribtabs-tab-file")) {
+                this.showTips(2)
+            }
+            return
+        }
+        if (partial > 0) {
+            tipTyped = typed
+        }
+    }
+
+    ; The badges, rebuilt each frame from where their controls were laid out.
+    fn placeTips:void () {
+        UiTree.clearChildren(tipHolder)
+        if (keyTips == 0) {
+            return
+        }
+        def i:int 0
+        while (i < (array_length tipCodes)) {
+            def code:string (itemAt tipCodes i)
+            if ((indexOf code tipTyped) == 0) {
+                def rc:[int] (this.tipRect((itemAt tipTids i)))
+                if ((array_length rc) == 4) {
+                    def b:EVGElement (EVGElement.createDiv())
+                    b.className = "sx-keytip"
+                    b.a11yHidden = true
+                    def bw:int (10 + ((strlen code) * 7))
+                    def bx:int (((itemAt rc 0) + (idiv (itemAt rc 2) 2)) - (idiv bw 2))
+                    def by:int (((itemAt rc 1) + (itemAt rc 3)) - 10)
+                    UiTree.inline(b "width" ((to_string bw) + "px"))
+                    UiTree.inline(b "left" ((to_string bx) + "px"))
+                    UiTree.inline(b "top" ((to_string by) + "px"))
+                    def w:EVGElement (EVGElement.createSpan())
+                    w.className = "sx-keytip-word"
+                    w.textContent = code
+                    w.elementType = 1
+                    b.addChild(w)
+                    tipHolder.addChild(b)
+                }
+            }
+            i = (i + 1)
+        }
     }
 
     ; How the ribbon reads, for the parity benchmark's clarity rows: the

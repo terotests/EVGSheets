@@ -13,8 +13,8 @@
 ;   └───────────────────────────────────────────────────────┘
 ;
 ; Goal Seek, Data Table, Consolidate, Forecast Sheet, From Web, Define Name,
-; Use in Formula, Symbol, Sort, Text to Columns and the chart's Select Data
-; and Move Chart are core commands that take their answers as one argument
+; Use in Formula, Symbol, Sort, Text to Columns, Move or Copy (sheet) and the
+; chart's Select Data and Move Chart are core commands that take their answers as one argument
 ; ("set=B4;to=100;by=B2"). Clicked on the ribbon they got none and did
 ; nothing. This dialog asks the questions, writes the argument and runs the
 ; same command; a command that refuses keeps the dialog open and says why.
@@ -67,7 +67,7 @@ class FormDialog extends SxDialog {
     ; --- which commands ask --------------------------------------------------
 
     sfn asks:boolean (cmd:string) {
-        def all:[string] ([] _:string ("data.goalSeek" "data.dataTable" "data.consolidate" "data.forecastSheet" "data.fromWeb" "formulas.defineName" "formulas.useInFormula" "insert.symbol" "data.sort" "data.customSort" "data.textToColumns" "chart.selectData" "chart.move" "chart.formatAxis" "chart.formatColors"))
+        def all:[string] ([] _:string ("data.goalSeek" "data.dataTable" "data.consolidate" "data.forecastSheet" "data.fromWeb" "formulas.defineName" "formulas.useInFormula" "insert.symbol" "data.sort" "data.customSort" "data.textToColumns" "chart.selectData" "chart.move" "chart.formatAxis" "chart.formatColors" "sheet.move" "sheet.moveCopy"))
         def i:int 0
         while (i < (array_length all)) {
             if ((itemAt all i) == cmd) {
@@ -120,6 +120,9 @@ class FormDialog extends SxDialog {
         }
         if (cmd == "chart.formatColors") {
             return "Format Chart Area"
+        }
+        if ((cmd == "sheet.move") || (cmd == "sheet.moveCopy")) {
+            return "Move or Copy"
         }
         return cmd
     }
@@ -425,6 +428,31 @@ class FormDialog extends SxDialog {
             def act:SpreadsheetModel (app.book.sheetAt(app.book.activeIndex))
             s0.value = act.name
         }
+        if ((kind == "sheet.move") || (kind == "sheet.moveCopy")) {
+            ; Excel's Move or Copy: the sheet goes before the one chosen, or to
+            ; the end; "Create a copy" leaves the original where it is.
+            this.addSelect(0 "Before sheet")
+            def mi:int 0
+            def nextName:string ""
+            while (mi < (app.book.sheetCount())) {
+                def msh:SpreadsheetModel (app.book.sheetAt(mi))
+                s0.addItem(("before:" + msh.name) msh.name false)
+                if (mi == (app.book.activeIndex + 1)) {
+                    nextName = msh.name
+                }
+                mi = (mi + 1)
+            }
+            s0.addItem("end" "(move to end)" false)
+            if ((strlen nextName) > 0) {
+                s0.value = ("before:" + nextName)
+            } {
+                s0.value = "end"
+            }
+            this.addSelect(1 "Create a copy")
+            s1.addItem("" "No" false)
+            s1.addItem("copy:" "Yes" false)
+            s1.value = ""
+        }
         def j:int 0
         while (j < 6) {
             def s:SelectCtl (this.selectAt(j))
@@ -482,6 +510,9 @@ class FormDialog extends SxDialog {
         if (kind == "chart.formatColors") {
             return ("colors=" + (trim in0.value) + ";area=" + (trim in1.value) + ";outline=" + (trim in2.value) + ";titleSize=" + (trim in3.value))
         }
+        if ((kind == "sheet.move") || (kind == "sheet.moveCopy")) {
+            return (s1.value + s0.value)
+        }
         if (kind == "data.textToColumns") {
             if (s0.value == "other") {
                 return in0.value
@@ -495,6 +526,9 @@ class FormDialog extends SxDialog {
     fn runs:string () {
         if (kind == "data.sort") {
             return "data.customSort"
+        }
+        if (kind == "sheet.move") {
+            return "sheet.moveCopy"
         }
         return kind
     }

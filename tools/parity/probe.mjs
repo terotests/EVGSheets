@@ -88,6 +88,24 @@ page.on("crash", () => console.log("  page crashed"));
 let commands = [];
 let excelKindsCount = 1;
 let actions = [];
+// P1: the target workbook opened from its bytes and drawn (controller.open
+// parses, lays out and paints before it resolves). Five runs; the median is
+// the value, the first (least warmed up) is shown beside it.
+async function perfCheck() {
+  const runs = await page.evaluate(async () => {
+    const raw = await (await fetch("/target.xlsx")).arrayBuffer();
+    const out = [];
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now();
+      await window.sheet.open(raw.slice(0), "quarterly-sales-dashboard.xlsx");
+      out.push(Math.round(performance.now() - t0));
+    }
+    return out;
+  });
+  const sorted = runs.slice().sort((a, b) => a - b);
+  const median = sorted[2];
+  ok("perf.openPaint", median > 0 && median <= 500, median + " ms median of " + runs.join(", "));
+}
 try {
   await page.goto(`http://localhost:${PORT}/?xlsx=target.xlsx&name=quarterly-sales-dashboard.xlsx&theme=light`);
   await page.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
@@ -96,6 +114,10 @@ try {
   // What the editor can be asked to do: the core's command table and the
   // menu/ribbon/context actions of the app. report.mjs matches the catalog's
   // EVGSheets command ids against these.
+  if (process.env.PROBE_PERF) {
+    await perfCheck();
+    throw new Error("PROBE_PERF: only the timing ran");
+  }
   commands = await page.evaluate(() => window.sheet.app.grid.app.commands.commands.map((c) => c.id));
   actions = await page.evaluate(() => Object.values(window.sheet.app.actions).map((a) => a.command));
 
@@ -1674,6 +1696,7 @@ try {
   const closed = await S();
   ok("cmd.file.close", closed.sheets.length === 1 && closed.source === "" && (await get(0, 0)) === "", closed.sheets.length + " sheet(s), source '" + closed.source + "'");
 
+  await perfCheck();
   ok("ui.noErrors", errors.length === 0, errors.slice(0, 2).join(" | "));
 } catch (e) {
   ok("probe.finished", false, e && e.stack ? e.stack.split("\n").slice(0, 2).join(" ") : String(e));
@@ -1689,6 +1712,6 @@ const out = {
   commands: [...new Set(commands)].sort(),
   actions: [...new Set(actions)].sort(),
 };
-if (!process.env.PROBE_NEW && !process.env.PROBE_NEW2 && !process.env.PROBE_UI && !process.env.PROBE_NF) fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
+if (!process.env.PROBE_NEW && !process.env.PROBE_NEW2 && !process.env.PROBE_UI && !process.env.PROBE_NF && !process.env.PROBE_PERF) fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
 const passed = Object.values(results).filter((r) => r.pass).length;
 console.log(`\n${passed}/${Object.keys(results).length} probe checks pass (a failure is a measured gap, not a broken run)`);

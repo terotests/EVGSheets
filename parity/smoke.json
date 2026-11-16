@@ -1,5 +1,5 @@
 {
- "passed": 140,
+ "passed": 148,
  "checks": [
   {
    "name": "a plain visit opens an empty workbook",
@@ -59,6 +59,22 @@
   },
   {
    "name": "the reader is told Bold is pressed",
+   "ok": true
+  },
+  {
+   "name": "Alt shows key tips on the ribbon tabs",
+   "ok": true
+  },
+  {
+   "name": "…H shows the Home tab's commands",
+   "ok": true
+  },
+  {
+   "name": "…and 1 is Bold",
+   "ok": true
+  },
+  {
+   "name": "…Escape steps back to the tabs, then closes the tips",
    "ok": true
   },
   {
@@ -478,6 +494,14 @@
    "ok": true
   },
   {
+   "name": "Move or Copy… opens its dialog",
+   "ok": true
+  },
+  {
+   "name": "…and Create a copy puts one at the end",
+   "ok": true
+  },
+  {
    "name": "dragging a tab reorders the sheets",
    "ok": true
   },
@@ -547,6 +571,14 @@
   },
   {
    "name": "Download .ods gives an OpenDocument file",
+   "ok": true
+  },
+  {
+   "name": "Save writes back to the file it opened",
+   "ok": true
+  },
+  {
+   "name": "Save asks once for a new workbook, then saves in place",
    "ok": true
   },
   {

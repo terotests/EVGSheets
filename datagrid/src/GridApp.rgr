@@ -1464,7 +1464,7 @@ class GridApp {
         commandsReady = true
         commands.add("file.new" "New workbook" "File" "Ctrl+N")
         commands.add("file.open" "Open a workbook…" "File" "Ctrl+O")
-        commands.add("file.save" "Save as .xlsx" "File" "Ctrl+S")
+        commands.add("file.save" "Save" "File" "Ctrl+S")
         commands.add("file.saveAs" "Save a copy as…" "File" "Ctrl+Shift+S")
         commands.add("edit.undo" "Undo" "Edit" "Ctrl+Z")
         commands.add("edit.redo" "Redo" "Edit" "Ctrl+Y")
@@ -2718,6 +2718,13 @@ class GridApp {
     ; ask the host for a path (Save As). Headless `--save` uses
     ; `saveXlsxDefaultSilent` so it never blocks on a dialog.
     fn saveXlsxDefault:boolean () {
+        ; In a browser the page writes the file: back over the one it opened
+        ; when it holds a handle to it, otherwise wherever the person picks.
+        if hostWritesFiles {
+            fileRequest = "save"
+            view.status = "saving…"
+            return true
+        }
         def src:string book.sourcePath
         if ((strlen src) == 0) {
             fileRequest = "saveAs"

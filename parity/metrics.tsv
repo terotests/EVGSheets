@@ -12,5 +12,5 @@ CH1	charts	Excel chart subtypes drawn	count of ~60	higher	60	25	probe:cmd.chart.
 CH2	charts	Charts read from an .xlsx	yes/no	higher	1	1	probe:wb.charts	1	tools/parity/probe.mjs	the target workbook's two charts
 CH3	charts	Charts written into a saved .xlsx	count	higher	all	all	probe:cmd.chart.saveXlsx	27	tools/parity/probe.mjs	DrawingML chart parts in the file saved after chart.kinds (waterfall, funnel, Pareto and box plot go in as clustered columns)
 X1	formats	File formats read or written (xlsx, csv, tsv, xls, xlsb, ods, pdf, html)	count of 8	higher	8	8	computed	3	probe	xlsx (wb.charts), PDF and HTML out (probe), CSV, TSV, xls, xlsb and ods opened through the file picker (smoke)
-P1	performance	Open and first paint of the target workbook	ms	lower	unmeasured	unmeasured	unmeasured	500	datagrid/bench	not yet wired into the benchmark
+P1	performance	Open and first paint of the target workbook	ms	lower	unmeasured	unmeasured	probe:perf.openPaint	500	tools/parity/probe.mjs	controller.open on the file's bytes (parse, layout, paint) at 1650×1030, median of five runs
 T1	tests	Browser checks run by the benchmark	count	higher	-	~1930 tests	computed	300	parity/smoke.json + parity/probe.json	smoke checks + probe checks

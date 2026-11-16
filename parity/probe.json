@@ -1294,6 +1294,10 @@
    "pass": true,
    "value": "1 sheet(s), source ''"
   },
+  "perf.openPaint": {
+   "pass": true,
+   "value": "39 ms median of 63, 39, 39, 39, 39"
+  },
   "ui.noErrors": {
    "pass": true,
    "value": ""
@@ -1716,6 +1720,7 @@
   "file.exportTsv",
   "file.new",
   "file.open",
+  "file.save",
   "file.saveAs",
   "format.align",
   "format.autofit.column",

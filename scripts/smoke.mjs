@@ -228,6 +228,34 @@ try {
   ok("the reader is told Bold is pressed", pressed === String(!wasBold), String(pressed));
   await click(page, "sx-rb-text-bold");
 
+  // Key tips: Alt shows a letter on each ribbon tab, H the Home tab's, 1 is Bold.
+  await page.evaluate(() => window.sheet.run("nav.goto", "D8"));
+  await page.keyboard.press("Alt");
+  await page.waitForTimeout(80);
+  const tips1 = await page.evaluate(() => window.sheet.app.keyTipState());
+  ok("Alt shows key tips on the ribbon tabs", /^1\|\|/.test(tips1) && tips1.includes("H=sx-ribtabs-tab-home") && tips1.includes("N=sx-ribtabs-tab-insert"), tips1.slice(0, 120));
+  await shot(page, "02b_keytips");
+  await page.keyboard.press("h");
+  await page.waitForTimeout(80);
+  const tips2 = await page.evaluate(() => window.sheet.app.keyTipState());
+  ok("…H shows the Home tab's commands", /^2\|/.test(tips2) && /(^|,|\|)1=sx-rb-[a-z]+-bold/.test(tips2) && tips2.split(",").length > 15, tips2.slice(0, 160));
+  const boldBefore = (await state(page)).bold;
+  await page.keyboard.press("1");
+  await page.waitForTimeout(80);
+  s = await state(page);
+  ok("…and 1 is Bold", s.bold === !boldBefore && (await page.evaluate(() => window.sheet.app.keyTipState())).startsWith("0|"), String(s.bold));
+  await page.keyboard.press("Alt");
+  await page.keyboard.press("n");
+  await page.waitForTimeout(80);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(40);
+  const back = await page.evaluate(() => window.sheet.app.keyTipState());
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(40);
+  const off = await page.evaluate(() => window.sheet.app.keyTipState());
+  ok("…Escape steps back to the tabs, then closes the tips", back.startsWith("1|") && off.startsWith("0|"), back.slice(0, 20) + " / " + off.slice(0, 20));
+  await page.evaluate(() => { window.sheet.run("format.bold"); window.sheet.app.ribbonTab = "home"; window.sheet.app.buildChrome(); window.sheet.app.sync(); window.sheet.redraw(); });
+
   // The ribbon is Excel's: no menu bar over it, its groups named under them.
   const clar = JSON.parse(await page.evaluate(() => window.sheet.app.ribbonClarity()));
   ok("the full editor has no menu bar over the ribbon", (await page.evaluate(() => window.sheet.app.rectOf("sx-mb-format-trigger"))) === "");
@@ -767,6 +795,20 @@ try {
   await click(page, "sx-delsheet-ok");
   s = await state(page);
   ok("…and Delete deletes it", s.sheets.join(",") === names0.join(",") && !(await page.evaluate(() => window.sheet.app.delSheet.win.open)), s.sheets.join(","));
+  // Move or Copy… from the tab menu: a copy of the first sheet, put at the end.
+  const t0m = await centre(page, "sx-tabs-tab-0");
+  await page.mouse.click(t0m.x, t0m.y, { button: "right" });
+  await page.waitForTimeout(100);
+  await click(page, "sx-ctx-item-t-movecopy");
+  await page.waitForTimeout(100);
+  ok("Move or Copy… opens its dialog", await page.evaluate(() => window.sheet.app.form.win.open && window.sheet.app.form.win.title === "Move or Copy"));
+  await formSet(() => { const f = window.sheet.app.form; f.s0.value = "end"; f.s1.value = "copy:"; });
+  await click(page, "sx-form-ok");
+  await page.waitForTimeout(100);
+  s = await state(page);
+  ok("…and Create a copy puts one at the end", !(await formOpen()) && s.sheets.length === names0.length + 1 && s.sheets[0] === names0[0] && s.sheets[s.sheets.length - 1] === names0[0] + " (2)", s.sheets.join(","));
+  await page.evaluate(() => { const a = window.sheet.app.grid.app; a.runCommand("sheet.delete", ""); a.setActiveSheet(0); window.sheet.app.sync(); window.sheet.redraw(); });
+  await page.waitForTimeout(100);
   // Dragging the first tab past the second.
   const d0 = await centre(page, "sx-tabs-tab-0");
   const d2 = await centre(page, "sx-tabs-tab-2");
@@ -851,6 +893,8 @@ try {
     ["units.tsv", 0, [0, 0], /\S/],
   ]) {
     const chooser = fmt.waitForEvent("filechooser", { timeout: 10000 });
+    // The plain file input: without File System Access the page falls back to it.
+    await fmt.evaluate(() => { window.showOpenFilePicker = undefined; });
     await fmt.evaluate(() => window.sheet.run("file.open", ""));
     await (await chooser).setFiles(path.join(FIX, file));
     await fmt.waitForFunction((f) => window.sheet.app.grid.app.book.sourcePath === f, file, { timeout: 20000 }).catch(() => {});
@@ -866,6 +910,34 @@ try {
   const odsPath = await d.path();
   const head = odsPath ? fs.readFileSync(odsPath).subarray(0, 120).toString("latin1") : "";
   ok("Download .ods gives an OpenDocument file", /\.ods$/.test(d.suggestedFilename()) && head.startsWith("PK") && head.includes("application/vnd.oasis.opendocument.spreadsheet"), d.suggestedFilename());
+
+  // Save in place, through stand-ins for the File System Access pickers: a
+  // workbook opened from a handle is written back to it without asking; a new
+  // one asks once where to go, and after that saves there too.
+  await fmt.evaluate((arr) => {
+    window.__writes = [];
+    window.__asked = 0;
+    const handle = (name, data) => ({
+      name,
+      getFile: async () => new File([new Uint8Array(data)], name),
+      createWritable: async () => ({ write: async (d) => { window.__writes.push(name + ":" + (d.byteLength ?? d.length ?? 0)); }, close: async () => {} }),
+    });
+    window.showOpenFilePicker = async () => [handle("book.xlsx", arr)];
+    window.showSaveFilePicker = async (o) => { window.__asked++; return handle(o.suggestedName, []); };
+  }, Array.from(fs.readFileSync(path.join(REPO, "parity", "fixtures", "quarterly-sales-dashboard.xlsx"))));
+  await fmt.evaluate(() => window.sheet.run("file.open", ""));
+  await fmt.waitForFunction(() => window.sheet.app.grid.app.book.sourcePath === "book.xlsx", null, { timeout: 20000 }).catch(() => {});
+  await fmt.evaluate(() => window.sheet.run("file.save", ""));
+  await fmt.waitForFunction(() => window.__writes.length >= 1, null, { timeout: 20000 }).catch(() => {});
+  const inPlace = await fmt.evaluate(() => ({ w: window.__writes.slice(), asked: window.__asked }));
+  ok("Save writes back to the file it opened", inPlace.asked === 0 && inPlace.w.length === 1 && /^book\.xlsx:\d{4,}$/.test(inPlace.w[0]), JSON.stringify(inPlace));
+  await fmt.evaluate(() => window.sheet.run("file.new", ""));
+  await fmt.evaluate(() => window.sheet.run("file.save", ""));
+  await fmt.waitForFunction(() => window.__writes.length >= 2, null, { timeout: 20000 }).catch(() => {});
+  await fmt.evaluate(() => window.sheet.run("file.save", ""));
+  await fmt.waitForFunction(() => window.__writes.length >= 3, null, { timeout: 20000 }).catch(() => {});
+  const fresh = await fmt.evaluate(() => ({ w: window.__writes.slice(1), asked: window.__asked }));
+  ok("Save asks once for a new workbook, then saves in place", fresh.asked === 1 && fresh.w.length === 2 && fresh.w.every((x) => /^workbook\.xlsx:/.test(x)), JSON.stringify(fresh));
   await fmt.close();
 
   // --- the embeds page --------------------------------------------------------
