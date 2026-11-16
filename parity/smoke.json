@@ -1,5 +1,5 @@
 {
- "passed": 137,
+ "passed": 140,
  "checks": [
   {
    "name": "a plain visit opens an empty workbook",
@@ -407,6 +407,18 @@
   },
   {
    "name": "a type chosen redraws the chart on the sheet",
+   "ok": true
+  },
+  {
+   "name": "the Format pane moves the legend",
+   "ok": true
+  },
+  {
+   "name": "…and opens Format Axis as a form",
+   "ok": true
+  },
+  {
+   "name": "Format Axis sets the bounds and the number format",
    "ok": true
   },
   {

@@ -203,6 +203,9 @@ class GridApp {
     ; The task pane the chrome shows at the right ("" for none): "pivotFields",
     ; "comments", "watch", "selection", "formatChart", "functions".
     def paneKind:string ""
+    ; A pane row that wants a form filled in names its command here; the host
+    ; opens the form and clears it.
+    def paneForm:string ""
     ; Insert Function's category ("insert" for all) and search text, and the
     ; PivotTable the field list was opened on.
     def paneCategory:string ""
@@ -6016,6 +6019,9 @@ class GridApp {
         commands.add("chart.formatSelection" "Format Selection" "Chart" "")
         commands.addArg("chart.shapeFill" "Shape Fill" "Chart" "")
         commands.addArg("chart.shapeOutline" "Shape Outline" "Chart" "")
+        commands.addArg("chart.formatElement" "Format Chart Element" "Chart" "")
+        commands.addArg("chart.formatAxis" "Format Axis" "Chart" "")
+        commands.addArg("chart.formatColors" "Format Colours" "Chart" "")
         commands.addArg("insert.recommendedPivotTables" "Recommended PivotTables" "Insert" "")
         commands.addArg("insert.pivotChart" "PivotChart" "Insert" "")
         commands.addArg("table.summarizePivot" "Summarize with PivotTable" "Table" "")
@@ -11906,6 +11912,28 @@ class GridApp {
             push rows ("Axis titles: " + (GridApp.onOff(ch.axisTitles)))
             push rows "Switch Row/Column"
             push rows "Next colour style"
+            def lp:string ch.legendPos
+            if ((strlen lp) == 0) {
+                lp = "right"
+            }
+            push rows ("Legend position: " + lp)
+            def dp:string ch.labelPos
+            if ((strlen dp) == 0) {
+                dp = "outside end"
+            }
+            push rows ("Data label position: " + dp)
+            push rows ("Logarithmic scale: " + (GridApp.onOff(ch.logScale)))
+            def lw:string "automatic"
+            if (ch.lineWidth > 0) {
+                lw = ((to_string ch.lineWidth) + " px")
+            }
+            push rows ("Line width: " + lw)
+            def bounds:string "automatic"
+            if (((strlen ch.valueMin) > 0) || ((strlen ch.valueMax) > 0)) {
+                bounds = (ch.valueMin + " to " + ch.valueMax)
+            }
+            push rows ("Axis bounds and number format: " + bounds + "…")
+            push rows "Colours, chart area and title size…"
             return rows
         }
         return rows
@@ -12215,7 +12243,62 @@ class GridApp {
             if (idx == 5) {
                 return (this.runChartCommand("chart.switchRowColumn" ""))
             }
-            return (this.runChartCommand("chart.changeColors" ""))
+            if (idx == 6) {
+                return (this.runChartCommand("chart.changeColors" ""))
+            }
+            def fk:int (this.paneChartIndex())
+            if (fk < 0) {
+                return false
+            }
+            def fp:ChartPanel (view.chartLayer.panelAt(fk))
+            def fc:GridChart fp.chart
+            if (idx == 7) {
+                def order:[string] ([] _:string ("right" "bottom" "top" "left"))
+                def cur:string fc.legendPos
+                if ((strlen cur) == 0) {
+                    cur = "right"
+                }
+                def ni:int 0
+                def oi:int 0
+                while (oi < 4) {
+                    if ((itemAt order oi) == cur) {
+                        ni = (oi + 1)
+                        if (ni >= 4) {
+                            ni = 0
+                        }
+                    }
+                    oi = (oi + 1)
+                }
+                return (this.runChartCommand("chart.formatElement" ("legend=" + (itemAt order ni))))
+            }
+            if (idx == 8) {
+                if (fc.labelPos == "inside") {
+                    return (this.runChartCommand("chart.formatElement" "labels=outside"))
+                }
+                return (this.runChartCommand("chart.formatElement" "labels=inside"))
+            }
+            if (idx == 9) {
+                if fc.logScale {
+                    return (this.runChartCommand("chart.formatElement" "log=off"))
+                }
+                return (this.runChartCommand("chart.formatElement" "log=on"))
+            }
+            if (idx == 10) {
+                def nw:int (fc.lineWidth + 1)
+                if (nw > 5) {
+                    nw = 0
+                }
+                return (this.runChartCommand("chart.formatElement" ("lineWidth=" + (to_string nw))))
+            }
+            if (idx == 11) {
+                paneForm = "chart.formatAxis"
+                return true
+            }
+            if (idx == 12) {
+                paneForm = "chart.formatColors"
+                return true
+            }
+            return false
         }
         return false
     }
@@ -12727,6 +12810,21 @@ class GridApp {
         }
         if (id == "chart.shapeOutline") {
             ch.outlineColor = arg
+            this.chartChanged(p)
+            return true
+        }
+        if ((id == "chart.formatElement") || ((id == "chart.formatAxis") || (id == "chart.formatColors"))) {
+            ; "key=value;key=value": legend, min, max, log, format, labels,
+            ; lineWidth, titleSize, colors, area, xTitle, yTitle, fill, outline.
+            if ((strlen arg) == 0) {
+                view.status = "Say what to format, for example legend=bottom."
+                return false
+            }
+            if ((ch.setFormats(arg)) == false) {
+                view.status = ("Could not format: " + arg)
+                this.chartChanged(p)
+                return false
+            }
             this.chartChanged(p)
             return true
         }

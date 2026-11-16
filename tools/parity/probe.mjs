@@ -1588,6 +1588,28 @@ try {
   await check("chart.formatSelection", async () => [await M("G.paneKind === 'formatChart'")]);
   await run("chart.move", "300,200");
   await check("chart.move", async () => { const c = await chartState(); return [c.x === 300, c.x]; });
+  // Format pane elements, through the commands its rows and forms run.
+  await run("chart.set", "Column");
+  await run("chart.formatElement", "legend=bottom;lineWidth=3");
+  await check("chart.formatElement", async () => { const c = await chartState(); return [c.ok && /"orient":"bottom"/.test(c.spec), c.ok]; });
+  await run("chart.formatAxis", "min=0;max=40;format=0.0;yTitle=Euros");
+  await check("chart.formatAxis", async () => { const c = await chartState(); return [c.ok && /"domain":\[0,40\]/.test(c.spec) && /"format":".1f"/.test(c.spec) && /"title":"Euros"/.test(c.spec), c.ok]; });
+  await run("chart.formatColors", "colors=#112233,#445566;area=#fafafa;titleSize=16");
+  await check("chart.formatColors", async () => { const c = await chartState(); return [c.ok && (/"range":\["#112233","#445566"\]/.test(c.spec) || /"mark":\{"color":"#112233"\}/.test(c.spec)) && /"background":"#fafafa"/.test(c.spec), c.ok]; });
+  // Every Excel chart subtype the picker offers, drawn from a range it suits:
+  // three series (high, low, close) for most, one series for waterfall,
+  // funnel and Pareto.
+  await run("sheet.add");
+  for (const [ref, v] of [["A1", "Month"], ["B1", "High"], ["C1", "Low"], ["D1", "Close"], ["A2", "Jan"], ["B2", "12"], ["C2", "8"], ["D2", "10"], ["A3", "Feb"], ["B3", "15"], ["C3", "9"], ["D3", "13"], ["A4", "Mar"], ["B4", "11"], ["C4", "6"], ["D4", "7"], ["A5", "Apr"], ["B5", "17"], ["C5", "11"], ["D5", "16"], ["F1", "Step"], ["G1", "Amount"], ["F2", "Start"], ["G2", "12"], ["F3", "Sales"], ["G3", "8"], ["F4", "Costs"], ["G4", "-5"], ["F5", "Tax"], ["G5", "-2"]]) await put(ref, v);
+  const excelKinds = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+  const drawn = [];
+  for (const k of excelKinds) {
+    await at([16, 17, 26, 27, 28].includes(k) ? "F1" : "A1");
+    await run("insert.recommendedCharts", String(k));
+    const c = await chartState();
+    if (c.ok && c.kind === k) drawn.push(k);
+  }
+  await check("chart.kinds", async () => [drawn.length === excelKinds.length, drawn.length + " of " + excelKinds.length + " drawn"]);
 
   // Names, auditing, evaluation, the watch window and manual calculation.
   await run("sheet.add");

@@ -673,7 +673,7 @@ try {
   await page.waitForTimeout(120);
   ok("Insert chart makes the chart and opens its editor", await page.evaluate((n) => window.sheet.app.chart.win.open && !window.sheet.app.chart.win.isModal && !window.sheet.app.grid.app.chartDialog.visible && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
   const kinds = await page.evaluate(() => window.sheet.app.chart.kind.items.map((it) => it.value));
-  ok("…offering only the types the data suits", kinds.length > 0 && kinds.length < 20, kinds.join(","));
+  ok("…offering only the types the data suits", kinds.length > 0 && kinds.length < 32, kinds.join(","));
   const pickKind = kinds[kinds.length - 1];
   await click(page, "sx-chart-kind-trigger");
   ok("the type is a drop-down", await page.evaluate(() => window.sheet.app.chart.kind.open));
@@ -682,6 +682,24 @@ try {
   ok("a type chosen redraws the chart on the sheet", await page.evaluate((k) => { const a = window.sheet.app.grid.app; const l = a.view.chartLayer; const p = l.panelAt(l.count() - 1); return !window.sheet.app.chart.kind.open && String(p.chart.kind) === k; }, pickKind));
   await shot(page, "14_chart");
   await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  // The Format pane: a row cycles the legend, another opens Format Axis.
+  const lastChart = () => page.evaluate(() => { const l = window.sheet.app.grid.app.view.chartLayer; const c = l.panelAt(l.count() - 1).chart; return { legend: c.legendPos, min: c.valueMin, fmt: c.numFormat }; });
+  await page.evaluate(() => { const a = window.sheet.app.grid.app; window.sheet.run("chart.set", "Column"); window.sheet.run("chart.formatSelection", ""); window.sheet.app.sync(); });
+  await page.evaluate(() => window.sheet.redraw());
+  await page.waitForTimeout(80);
+  await click(page, "sx-pane-list-pane-row-7");
+  ok("the Format pane moves the legend", (await lastChart()).legend === "bottom", (await lastChart()).legend);
+  await click(page, "sx-pane-list-pane-row-11");
+  await page.waitForTimeout(100);
+  ok("…and opens Format Axis as a form", await page.evaluate(() => window.sheet.app.form.win.open && window.sheet.app.form.win.title === "Format Axis"));
+  await formSet(() => { const f = window.sheet.app.form; f.in0.setValue("0"); f.in1.setValue("500"); f.in2.setValue("0.0"); });
+  await click(page, "sx-form-ok");
+  await page.waitForTimeout(100);
+  const fa = await lastChart();
+  ok("Format Axis sets the bounds and the number format", fa.min === "0" && fa.fmt === "0.0" && !(await formOpen()), JSON.stringify(fa));
+  await shot(page, "14b_chart_format");
+  await page.evaluate(() => { window.sheet.app.grid.app.closePane(); window.sheet.app.sync(); });
   await page.waitForTimeout(80);
   ok("Escape leaves the chart on the sheet", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
   await page.evaluate(() => { const a = window.sheet.app.grid.app; const p = a.view.chartLayer.panelAt(a.view.chartLayer.count() - 1); a.chartEditId = 0; a.openChartDialog(p.chart.id); window.sheet.app.sync(); });

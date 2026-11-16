@@ -991,6 +991,41 @@ class ChartTest {
         this.checkTrue("to the kind that was asked for" (ChartTest.hasSub(edited "\"area\"")))
         this.checkTrue("and the far side knows what it can become" (back.suits((ChartKind.pie())) == false))
 
+        print "== element formatting =="
+        def fch:GridChart (ChartTest.chartOver(0 0 6 2))
+        fch.id = 950
+        fch.kind = (ChartKind.column())
+        this.checkTrue("formats are taken" (fch.setFormats("legend=bottom;min=50;max=200;format=#,##0.0;labels=inside;titleSize=18;colors=#112233, #445566;area=#fafafa;yTitle=Units")))
+        this.checkFalse("an unknown key is refused" (fch.setFormats("wobble=1")))
+        this.checkFalse("a bound that is not a number is refused" (fch.setFormat("min" "lots")))
+        fch.dataLabels = true
+        fch.title = "Formatted"
+        def fdata (new ChartData)
+        fdata.extract(wide fch)
+        def fspec:string (fdata.specJson(fch 360 240))
+        this.checkTrue("the legend moves" (ChartTest.hasSub(fspec "\"orient\":\"bottom\"")))
+        this.checkTrue("the axis has the bounds" (ChartTest.hasSub(fspec "\"domain\":[50,200]")))
+        this.checkTrue("and the number format" (ChartTest.hasSub(fspec "\"format\":\",.1f\"")))
+        this.checkTrue("the series colours" (ChartTest.hasSub(fspec "[\"#112233\",\"#445566\"]")))
+        this.checkTrue("the chart area" (ChartTest.hasSub(fspec "\"background\":\"#fafafa\"")))
+        this.checkTrue("the title size" (ChartTest.hasSub(fspec "\"fontSize\":18")))
+        this.checkTrue("the axis title typed" (ChartTest.hasSub(fspec "\"title\":\"Units\"")))
+        this.checkTrue("labels inside the bars" (ChartTest.hasSub(fspec "\"dy\":9")))
+        fch.logScale = true
+        def lspec:string (fdata.specJson(fch 360 240))
+        this.checkTrue("a log scale" (ChartTest.hasSub(lspec "\"type\":\"log\"")))
+        def fdl (new EVGDisplayList)
+        def fview (new GridChartView)
+        fview.paint(fdl wide fch tr 0 0 360 240)
+        this.check("a formatted chart draws without complaint" (ChartTest.complaint(fdl)) "")
+        def fcopy:GridChart (new GridChart)
+        fcopy.copyFrom(fch)
+        this.check("a copy keeps the formatting" (fcopy.formatText()) (fch.formatText()))
+        def fdoc:ChartDoc (ChartDocCodec.decode((ChartDocCodec.encode(wide fch))))
+        this.check("and so does the chart document" (fdoc.chart.formatText()) (fch.formatText()))
+        this.check("Excel number formats read as d3" (ChartData.d3Format("0%")) ".0%")
+        this.check("currency" (ChartData.d3Format("$#,##0.00")) "$,.2f")
+
         ; It rides in the HTML flavour, so a paste can find it.
         def carriedHtml:string (clipApp.clipboardHtml)
         this.checkTrue("the clipboard html carries the document" (ChartTest.hasSub(carriedHtml (ChartDocCodec.attrName()))))

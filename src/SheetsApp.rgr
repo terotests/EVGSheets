@@ -1367,6 +1367,10 @@ class SheetsApp {
         def cdLoc:RibbonCtl (this.grp("chartdesign" "sx-rb-cdloc" "Location"))
         this.word(cdLoc "cd-move" "Move chart" "Move Chart" "chart.move" "")
         this.word(cdLoc "cd-format" "Format selection" "Format" "chart.formatSelection" "")
+        def cdFmt:RibbonCtl (this.grp("chartdesign" "sx-rb-cdfmt" "Format"))
+        this.word(cdFmt "cd-axis" "Format axis" "Axis" "chart.formatAxis" "")
+        this.word(cdFmt "cd-area" "Format chart area" "Chart Area" "chart.formatColors" "")
+        this.word(cdFmt "cd-legend" "Legend at the bottom" "Legend Bottom" "chart.formatElement" "legend=bottom")
 
         ribTabs = (new TabsCtl)
         ribTabs.tid = "sx-ribtabs"
@@ -3355,6 +3359,11 @@ class SheetsApp {
             def idx:int (?? (to_int (substring v 9 (strlen v))) -1)
             def ok:boolean (grid.app.paneChoose(idx))
             grid.app.refreshAll()
+            def want:string grid.app.paneForm
+            if ((strlen want) > 0) {
+                grid.app.paneForm = ""
+                def opened:boolean (this.openForm(want))
+            }
             return true
         }
         return false

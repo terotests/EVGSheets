@@ -55,7 +55,7 @@ D2	Dialogs and panes	Paste Special	1	yes	yes	smoke:Paste pastes the value and cl
 D3	Dialogs and panes	Format Cells (Number, Alignment, Font, Border, Fill, Protection)	2	yes	yes	probe:ui.formatCellsPane	
 D4	Dialogs and panes	Conditional Formatting Rules Manager	1	yes	yes	smoke:Delete rule removes it	
 D5	Dialogs and panes	Data Validation	1	yes	yes	smoke:Add rule puts a list rule on the cell	
-D6	Dialogs and panes	Insert Chart and a chart format pane	1	yes	partial	smoke:a type chosen redraws the chart on the sheet	type, series and title editor; no element formatting
+D6	Dialogs and panes	Insert Chart and a chart format pane	1	yes	yes	smoke:Format Axis sets the bounds and the number format	
 D7	Dialogs and panes	Task panes (Comments, Watch Window, Selection)	2	yes	yes	probe:ui.taskPanes	
 A1	Accessibility	Accessible tree with cells for screen readers	1	no	yes	smoke:the tree has a menubar, toolbars, a grid and tabs	GridCraft's grid is not exposed
 A2	Accessibility	Keyboard reaches every part (F6 cycle)	1	yes	yes	smoke:F6 leaves the sheet for the chrome	

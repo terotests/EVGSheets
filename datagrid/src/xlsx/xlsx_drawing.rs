@@ -68,6 +68,8 @@ impl XlsxDrawing {
         let mut bar_dir: String = "col".to_string();
         let mut grouping: String = String::new();
         let mut plot: String = String::new();
+        let mut plots: String = String::new();
+        let mut scatter_style: String = String::new();
         while p.borrow().pos < p.borrow().srcLen {
             let t: Rc<RefCell<XmlTag>> = p.borrow_mut().nextTag();
             if !t.borrow().valid {
@@ -85,6 +87,12 @@ impl XlsxDrawing {
                 in_val = opening;
             }
             if opening {
+                if DgNative::str_len(&local) > 5 && DgNative::index_of(&local, "Chart") == DgNative::str_len(&local) - 5 && local != "chart" {
+                    plots = format!("{} {}", plots, local);
+                }
+                if local == "scatterStyle" {
+                    scatter_style = t.borrow().attr("val");
+                }
                 if plot.is_empty() {
                     if DgNative::str_len(&local) > 5 {
                         if DgNative::index_of(&local, "Chart") == DgNative::str_len(&local) - 5 {
@@ -115,15 +123,44 @@ impl XlsxDrawing {
         }
         img.borrow_mut().chartKind = 1;
         if plot == "barChart" || plot == "bar3DChart" {
-            if bar_dir == "bar" {
+            let horizontal: bool = bar_dir == "bar";
+            if horizontal {
                 img.borrow_mut().chartKind = 2;
             }
-            if grouping == "stacked" || grouping == "percentStacked" {
+            if grouping == "stacked" {
                 img.borrow_mut().chartKind = 3;
+                if horizontal {
+                    img.borrow_mut().chartKind = 21;
+                }
+            }
+            if grouping == "percentStacked" {
+                img.borrow_mut().chartKind = 4;
+                if horizontal {
+                    img.borrow_mut().chartKind = 22;
+                }
+            }
+            // Columns and a line in one plot area: Excel's combo chart.
+            if DgNative::index_of(&plots, "lineChart") >= 0 {
+                img.borrow_mut().chartKind = 25;
             }
         }
         if (plot == "lineChart" || plot == "line3DChart") || plot == "radarChart" {
             img.borrow_mut().chartKind = 6;
+            if grouping == "stacked" {
+                img.borrow_mut().chartKind = 30;
+            }
+            if grouping == "percentStacked" {
+                img.borrow_mut().chartKind = 31;
+            }
+            if DgNative::index_of(&plots, "barChart") >= 0 {
+                img.borrow_mut().chartKind = 25;
+            }
+        }
+        if plot == "stockChart" {
+            img.borrow_mut().chartKind = 29;
+        }
+        if plot == "bubbleChart" {
+            img.borrow_mut().chartKind = 14;
         }
         if plot == "pieChart" || plot == "pie3DChart" {
             img.borrow_mut().chartKind = 16;
@@ -131,11 +168,26 @@ impl XlsxDrawing {
         if plot == "doughnutChart" {
             img.borrow_mut().chartKind = 17;
         }
-        if plot == "areaChart" {
+        if plot == "areaChart" || plot == "area3DChart" {
             img.borrow_mut().chartKind = 10;
+            if grouping == "stacked" {
+                img.borrow_mut().chartKind = 11;
+            }
+            if grouping == "percentStacked" {
+                img.borrow_mut().chartKind = 23;
+            }
         }
         if plot == "scatterChart" {
             img.borrow_mut().chartKind = 13;
+            // "lineMarker" is also what Excel writes for markers only (the
+            // line hidden in the series' shape), so only a plain "line" is
+            // taken as lines through the points.
+            if scatter_style == "line" {
+                img.borrow_mut().chartKind = 24;
+            }
+            if scatter_style == "smoothMarker" || scatter_style == "smooth" {
+                img.borrow_mut().chartKind = 32;
+            }
         }
     }
     /// One anchor, up to its closing tag. `endName` is the anchor's own element

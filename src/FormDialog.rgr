@@ -31,6 +31,7 @@ class FormDialog extends SxDialog {
     def in1:InputCtl (new InputCtl)
     def in2:InputCtl (new InputCtl)
     def in3:InputCtl (new InputCtl)
+    def in4:InputCtl (new InputCtl)
     def s0:SelectCtl (new SelectCtl)
     def s1:SelectCtl (new SelectCtl)
     def s2:SelectCtl (new SelectCtl)
@@ -52,6 +53,7 @@ class FormDialog extends SxDialog {
         this.field(in1 "sx-form-in1" "")
         this.field(in2 "sx-form-in2" "")
         this.field(in3 "sx-form-in3" "")
+        this.field(in4 "sx-form-in4" "")
         s0.tid = "sx-form-s0"
         s1.tid = "sx-form-s1"
         s2.tid = "sx-form-s2"
@@ -65,7 +67,7 @@ class FormDialog extends SxDialog {
     ; --- which commands ask --------------------------------------------------
 
     sfn asks:boolean (cmd:string) {
-        def all:[string] ([] _:string ("data.goalSeek" "data.dataTable" "data.consolidate" "data.forecastSheet" "data.fromWeb" "formulas.defineName" "formulas.useInFormula" "insert.symbol" "data.sort" "data.customSort" "data.textToColumns" "chart.selectData" "chart.move"))
+        def all:[string] ([] _:string ("data.goalSeek" "data.dataTable" "data.consolidate" "data.forecastSheet" "data.fromWeb" "formulas.defineName" "formulas.useInFormula" "insert.symbol" "data.sort" "data.customSort" "data.textToColumns" "chart.selectData" "chart.move" "chart.formatAxis" "chart.formatColors"))
         def i:int 0
         while (i < (array_length all)) {
             if ((itemAt all i) == cmd) {
@@ -113,6 +115,12 @@ class FormDialog extends SxDialog {
         if (cmd == "chart.move") {
             return "Move Chart"
         }
+        if (cmd == "chart.formatAxis") {
+            return "Format Axis"
+        }
+        if (cmd == "chart.formatColors") {
+            return "Format Chart Area"
+        }
         return cmd
     }
 
@@ -127,6 +135,9 @@ class FormDialog extends SxDialog {
         }
         if (i == 3) {
             return in3
+        }
+        if (i == 4) {
+            return in4
         }
         return in0
     }
@@ -157,6 +168,7 @@ class FormDialog extends SxDialog {
         push a in1
         push a in2
         push a in3
+        push a in4
         push a s0
         push a s1
         push a s2
@@ -196,7 +208,7 @@ class FormDialog extends SxDialog {
     }
 
     fn entersDefault:boolean (target:string) {
-        return ((in0.owns(target)) || (in1.owns(target)) || (in2.owns(target)) || (in3.owns(target)))
+        return ((in0.owns(target)) || (in1.owns(target)) || (in2.owns(target)) || (in3.owns(target)) || (in4.owns(target)))
     }
 
     fn defaultTid:string () {
@@ -379,6 +391,29 @@ class FormDialog extends SxDialog {
             }
             this.addInput(0 "Chart data range" range)
         }
+        if ((kind == "chart.formatAxis") || (kind == "chart.formatColors")) {
+            def fi:int (app.activeChartPanel())
+            if (fi >= 0) {
+                def fp:ChartPanel (app.view.chartLayer.panelAt(fi))
+                def fc:GridChart fp.chart
+                if (kind == "chart.formatAxis") {
+                    this.addInput(0 "Minimum" fc.valueMin)
+                    this.addInput(1 "Maximum" fc.valueMax)
+                    this.addInput(2 "Number format" fc.numFormat)
+                    this.addInput(3 "Vertical axis title" fc.yTitle)
+                    this.addInput(4 "Horizontal axis title" fc.xTitle)
+                } {
+                    this.addInput(0 "Series colours" fc.seriesColors)
+                    this.addInput(1 "Chart area fill" fc.areaFill)
+                    this.addInput(2 "Outline" fc.outlineColor)
+                    def ts:string ""
+                    if (fc.titleSize > 0) {
+                        ts = (to_string fc.titleSize)
+                    }
+                    this.addInput(3 "Title size (pt)" ts)
+                }
+            }
+        }
         if (kind == "chart.move") {
             this.addSelect(0 "Move to sheet")
             def si:int 0
@@ -440,6 +475,12 @@ class FormDialog extends SxDialog {
                 spec = (spec + "," + s4.value + " " + s5.value)
             }
             return spec
+        }
+        if (kind == "chart.formatAxis") {
+            return ("min=" + (trim in0.value) + ";max=" + (trim in1.value) + ";format=" + (trim in2.value) + ";yTitle=" + (trim in3.value) + ";xTitle=" + (trim in4.value))
+        }
+        if (kind == "chart.formatColors") {
+            return ("colors=" + (trim in0.value) + ";area=" + (trim in1.value) + ";outline=" + (trim in2.value) + ";titleSize=" + (trim in3.value))
         }
         if (kind == "data.textToColumns") {
             if (s0.value == "other") {
@@ -526,5 +567,6 @@ class FormDialog extends SxDialog {
         this.caretFor(in1 focusId)
         this.caretFor(in2 focusId)
         this.caretFor(in3 focusId)
+        this.caretFor(in4 focusId)
     }
 }

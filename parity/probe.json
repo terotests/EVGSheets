@@ -774,9 +774,25 @@
    "pass": true,
    "value": "300"
   },
+  "cmd.chart.formatElement": {
+   "pass": true,
+   "value": "true"
+  },
+  "cmd.chart.formatAxis": {
+   "pass": true,
+   "value": "true"
+  },
+  "cmd.chart.formatColors": {
+   "pass": true,
+   "value": "true"
+  },
+  "cmd.chart.kinds": {
+   "pass": true,
+   "value": "27 of 27 drawn"
+  },
   "cmd.formulas.defineName": {
    "pass": true,
-   "value": "30 Sheet11!$A$2:$A$3"
+   "value": "30 Sheet12!$A$2:$A$3"
   },
   "cmd.formulas.useInFormula": {
    "pass": true,
@@ -804,7 +820,7 @@
   },
   "cmd.formulas.watchWindow": {
    "pass": true,
-   "value": "Sheet11!C2 watch"
+   "value": "Sheet12!C2 watch"
   },
   "cmd.formulas.calculationOptions": {
    "pass": true,
@@ -1140,7 +1156,7 @@
   },
   "cmd.sheet.move": {
    "pass": true,
-   "value": "Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Panes,DataTools,Sheet14,Descriptive Statistics,Sheet16,Forecast,Import,Import Query,Shapes,Sheet8,Sheet7,Sheet4 → Shapes,Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Panes,DataTools,Sheet14,Descriptive Statistics,Sheet16,Forecast,Import,Import Query,Sheet8,Sheet7,Sheet4"
+   "value": "Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Sheet12,Panes,DataTools,Sheet15,Descriptive Statistics,Sheet17,Forecast,Import,Import Query,Shapes,Sheet8,Sheet7,Sheet4 → Shapes,Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Sheet12,Panes,DataTools,Sheet15,Descriptive Statistics,Sheet17,Forecast,Import,Import Query,Sheet8,Sheet7,Sheet4"
   },
   "cmd.home.addIns": {
    "pass": true,
@@ -1176,7 +1192,7 @@
   },
   "cmd.view.switchWindows": {
    "pass": true,
-   "value": "20 / 19"
+   "value": "21 / 20"
   },
   "cmd.view.arrangeAll": {
    "pass": true,
@@ -1260,7 +1276,7 @@
   },
   "cmd.file.saveAs": {
    "pass": true,
-   "value": "86039 bytes"
+   "value": "88319 bytes"
   },
   "cmd.home.numberFormat.custom": {
    "pass": true,
@@ -1292,6 +1308,9 @@
   "chart.addElement",
   "chart.changeColors",
   "chart.copy",
+  "chart.formatAxis",
+  "chart.formatColors",
+  "chart.formatElement",
   "chart.formatSelection",
   "chart.move",
   "chart.quickLayout",
@@ -1624,6 +1643,9 @@
   "automate.recordActions",
   "chart.addElement",
   "chart.changeColors",
+  "chart.formatAxis",
+  "chart.formatColors",
+  "chart.formatElement",
   "chart.formatSelection",
   "chart.move",
   "chart.quickLayout",

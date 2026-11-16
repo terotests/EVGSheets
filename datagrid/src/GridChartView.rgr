@@ -239,7 +239,11 @@ class GridChartView {
     ; the style's own background first, so a dark chart is dark to its edges
     ; rather than a dark card on a white one.
     fn paint:void (dl:EVGDisplayList model:SpreadsheetModel ch:GridChart tr:UITextRenderer bx:int by:int bw:int bh:int) {
-        def back:EVGColor (EVGColor.parse((ChartStyle.background(ch.style))))
+        def backText:string (ChartStyle.background(ch.style))
+        if ((strlen ch.areaFill) > 0) {
+            backText = ch.areaFill
+        }
+        def back:EVGColor (EVGColor.parse(backText))
         this.pushRect(dl bx by bw bh back)
         def r:ChartRender (this.renderFor(model ch bw bh))
         if (r.ok == false) {
