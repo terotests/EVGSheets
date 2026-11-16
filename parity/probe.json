@@ -452,7 +452,7 @@
   },
   "cmd.formulas.insertFunction": {
    "pass": true,
-   "value": "89 → VLOOKUP → =VLOOKUP("
+   "value": "113 → VLOOKUP → =VLOOKUP("
   },
   "cmd.data.removeDuplicates": {
    "pass": true,
@@ -812,7 +812,7 @@
   },
   "cmd.formulas.financial.list": {
    "pass": true,
-   "value": "6 listed, =PMT("
+   "value": "12 listed, =PMT("
   },
   "cmd.formulas.logical.list": {
    "pass": true,
@@ -824,19 +824,19 @@
   },
   "cmd.formulas.dateTime.list": {
    "pass": true,
-   "value": "9 listed, =DATE("
+   "value": "16 listed, =DATE("
   },
   "cmd.formulas.lookupReference.list": {
    "pass": true,
-   "value": "10 listed, =VLOOKUP("
+   "value": "17 listed, =VLOOKUP("
   },
   "cmd.formulas.mathTrig.list": {
    "pass": true,
-   "value": "16 listed, =ROUND("
+   "value": "18 listed, =ROUND("
   },
   "cmd.formulas.moreFunctions.list": {
    "pass": true,
-   "value": "18 listed, =AVERAGE("
+   "value": "20 listed, =AVERAGE("
   },
   "cmd.formulas.recentlyUsed.list": {
    "pass": true,

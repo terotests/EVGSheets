@@ -544,6 +544,17 @@ try {
   { const st = await page.evaluate(() => window.sheet.state()); ok("…and OK types the symbol", st.editText === "€" || st.formula === "€", JSON.stringify([st.editing, st.editText, st.cell, st.status, await formOpen()])); }
   await page.keyboard.press("Escape");
 
+  // Functions typed into the sheet: one from the second library, an array
+  // constant that spills, and a reference function.
+  for (const [ref, f] of [["Y50", "=TEXTBEFORE(\"north,south\",\",\")"], ["Y51", "=SUM({1,2;3,4})"], ["Y52", "=SEQUENCE(2,2)"], ["Y55", "=ROW()+COLUMN(C1)"]]) {
+    await page.evaluate((r) => window.sheet.run("nav.goto", r), ref);
+    await page.keyboard.type(f);
+    await page.keyboard.press("Enter");
+  }
+  await page.waitForTimeout(80);
+  const fv = [await cellAt(49, 24), await cellAt(50, 24), await cellAt(52, 25), await cellAt(54, 24)];
+  ok("typed functions: TEXTBEFORE, an array constant, SEQUENCE spilling, ROW", fv.join("|") === "north|10|4|58", fv.join("|"));
+
   // Chart commands with no chart selected say so instead of opening.
   ok("Select Data without a chart says to select one", !(await ribbon("chart.selectData")) && !(await formOpen()) && (await page.evaluate(() => window.sheet.state().status)).includes("chart"));
 

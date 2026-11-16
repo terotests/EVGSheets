@@ -7,7 +7,7 @@ U3	ui	Commands reachable from the first tab	count	higher	~60	unmeasured	probe:ui
 U5	ui	Controls on show on the first tab	count	lower	~45	unmeasured	probe:ui.homeClarity	55	tools/parity/probe.mjs	buttons and drop-down triggers laid out at 1650 px; the check also needs every toolbar in a labelled group and no abbreviated or doubled command
 U4	ui	Modal dialogs on EVGUI	count	higher	~100	54	14	25	src/*Dialog.rgr	one WindowCtl dialog per file
 W1	workbook	Target workbook checks that pass	count of 15	higher	15	unmeasured	computed	15	parity/probe.json wb.*	quarterly-sales-dashboard.xlsx opened at 1650×1030
-F1	formulas	Worksheet functions	count of 523	higher	523	513	computed	300	datagrid/src/formula_functions.rs	names in FormulaFunctions::isKnown
+F1	formulas	Worksheet functions	count of 523	higher	523	513	computed	300	datagrid/src/formula_functions.rs	names in FormulaFunctions::isKnown and FormulaMore::names
 CH1	charts	Excel chart subtypes drawn	count of ~60	higher	60	25	15	30	datagrid/src/GridChart.rgr	column, bar, stacked, 100% stacked, histogram, line, line with markers, smooth line, area, stacked area, scatter, bubble, pie, doughnut, box and whisker
 CH2	charts	Charts read from an .xlsx	yes/no	higher	1	1	probe:wb.charts	1	tools/parity/probe.mjs	the target workbook's two charts
 X1	formats	File formats read or written (xlsx, csv, tsv, xls, xlsb, ods, pdf, html)	count of 8	higher	8	8	computed	3	probe	xlsx (wb.charts), PDF and HTML out (probe), CSV, TSV, xls, xlsb and ods opened through the file picker (smoke)

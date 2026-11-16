@@ -103,7 +103,10 @@ const gaps = ui
 // --- functions --------------------------------------------------------------------
 const ff = fs.readFileSync(P("datagrid", "src", "formula_functions.rs"), "utf8");
 const known = ff.slice(ff.indexOf("pub fn isKnown"), ff.indexOf("\n    }\n", ff.indexOf("pub fn isKnown")));
-const functions = [...new Set([...known.matchAll(/"([A-Z][A-Z0-9.]*)"/g)].map((m) => m[1]))].sort();
+// FormulaFunctions::isKnown falls through to FormulaMore::names().
+const fm = fs.readFileSync(P("datagrid", "src", "formula_more.rs"), "utf8");
+const moreNames = (fm.match(/pub fn names\(\) -> String \{\s*"([^"]*)"/) || ["", ""])[1].trim().split(/\s+/).filter(Boolean);
+const functions = [...new Set([...known.matchAll(/"([A-Z][A-Z0-9.]*)"/g)].map((m) => m[1]).concat(moreNames))].sort();
 
 // --- metrics ----------------------------------------------------------------------
 const wbIds = Object.keys(probe?.results || {}).filter((k) => k.startsWith("wb."));

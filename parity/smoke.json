@@ -1,5 +1,5 @@
 {
- "passed": 136,
+ "passed": 137,
  "checks": [
   {
    "name": "a plain visit opens an empty workbook",
@@ -295,6 +295,10 @@
   },
   {
    "name": "…and OK types the symbol",
+   "ok": true
+  },
+  {
+   "name": "typed functions: TEXTBEFORE, an array constant, SEQUENCE spilling, ROW",
    "ok": true
   },
   {
