@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use crate::rgr::DgNative;
 use crate::formula_functions::FormulaFunctions;
+use crate::formula_more::FormulaMore;
 use crate::formula_value::FormulaValue;
 use crate::sheet_table::SheetTable;
 use crate::spreadsheet_model::SpreadsheetModel;
@@ -1004,6 +1005,25 @@ impl FormulaParser {
         if n.borrow().kind == 9 {
             return FormulaParser::serializeTableRef(n);
         }
+        if n.borrow().kind == 10 {
+            let mut out2: String = "{".to_string();
+            let cols: i64 = n.borrow().col2;
+            let mut j: i64 = 0;
+            let kn2: i64 = n.borrow().kids.len() as i64;
+            while j < kn2 {
+                if j > 0 {
+                    if cols > 0 && j % cols == 0 {
+                        out2 = format!("{};", out2);
+                    } else {
+                        out2 = format!("{},", out2);
+                    }
+                }
+                out2 = format!("{}{}", out2, FormulaParser::serializeNode(&n.borrow().kids[j as usize].clone()));
+                j += 1;
+            }
+            let close: String = "}".to_string();
+            return format!("{}{}", out2, close);
+        }
         String::new()
     }
     /// A structured reference, written back the way the file spelled it. Which
@@ -1356,6 +1376,11 @@ impl FormulaParser {
             }
             return inner;
         }
+        // {1,2;3,4}: an array constant, rows split by ";" (kind 10, the
+        // items row-major in kids, the shape in row2 x col2).
+        if ch == 123 {
+            return self.parseArrayConstant();
+        }
         // `[Column]` with no table in front: the table the formula sits in.
         if ch == 91 {
             return self.parseStructured(String::new());
@@ -1370,6 +1395,58 @@ impl FormulaParser {
         e2.borrow_mut().kind = 8;
         e2.borrow_mut().text = "#VALUE!".to_string();
         e2
+    }
+    pub fn parseArrayConstant(&mut self) -> Rc<RefCell<FormulaNode>> {
+        self.next();
+        let arr: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+        arr.borrow_mut().kind = 10;
+        let mut rows: i64 = 1;
+        let mut cols: i64 = 0;
+        let mut in_row: i64 = 0;
+        loop {
+            self.skipWs();
+            let item: Rc<RefCell<FormulaNode>> = self.parseExpr();
+            arr.borrow_mut().kids.push(item.clone());
+            in_row += 1;
+            self.skipWs();
+            let ch: i64 = self.peek();
+            if ch == 44 {
+                self.next();
+                continue;
+            }
+            if ch == 59 {
+                self.next();
+                if cols == 0 {
+                    cols = in_row;
+                } else {
+                    if in_row != cols {
+                        self.ok = false;
+                        self.err = "#VALUE!".to_string();
+                    }
+                }
+                in_row = 0;
+                rows += 1;
+                continue;
+            }
+            if ch == 125 {
+                self.next();
+                break;
+            }
+            self.ok = false;
+            self.err = "#VALUE!".to_string();
+            break;
+        }
+        if cols == 0 {
+            cols = in_row;
+        } else {
+            if in_row != cols {
+                self.ok = false;
+                self.err = "#VALUE!".to_string();
+            }
+        }
+        arr.borrow_mut().row2 = rows;
+        arr.borrow_mut().col2 = cols;
+        arr
     }
     pub fn parseNumber(&mut self) -> Rc<RefCell<FormulaNode>> {
         let start: i64 = self.pos;
@@ -1742,6 +1819,12 @@ pub struct FormulaEngine {
     pub curRow: i64,
     pub curCol: i64,
     pub curSheet: i64,
+    /// Formulas that call OFFSET, INDIRECT, RAND, RANDBETWEEN, TODAY or NOW:
+    /// what they read is not in their text, so every edit recalculates them.
+    pub volatileKeys: HashMap<String,bool>,
+    /// RAND's state: a linear congruential generator, seeded from the clock
+    /// the host sets.
+    pub randState: f64,
 }
 
 impl FormulaEngine {
@@ -1762,6 +1845,8 @@ impl FormulaEngine {
             curRow: 0,
             curCol: 0,
             curSheet: 0,
+            volatileKeys: HashMap::new(),
+            randState: 0.0,
         }
     }
     /// A1, $B$7, XFD1048576: one to three letters then digits.
@@ -1986,6 +2071,21 @@ impl FormulaEngine {
         } else {
             self.calcStatus.insert(key.clone(), "unsupported".to_string());
         }
+        if FormulaEngine::isVolatile(expr) {
+            self.volatileKeys.insert(key.clone(), true);
+        } else {
+            self.volatileKeys.remove(&key);
+        }
+    }
+    pub fn isVolatile(expr: &str) -> bool {
+        let u: String = FormulaFunctions::upper(expr);
+        let names: Vec<String> = vec!["OFFSET(".to_string(), "INDIRECT(".to_string(), "RAND(".to_string(), "RANDBETWEEN(".to_string(), "TODAY(".to_string(), "NOW(".to_string()];
+        for nm in names.iter() {
+            if DgNative::index_of(&u, nm) >= 0 {
+                return true;
+            }
+        }
+        false
     }
     /// Remove key from previous reverse edges before re-registering.
     pub fn pruneDeps(&mut self, key: &str) {
@@ -2154,6 +2254,12 @@ impl FormulaEngine {
     pub fn markEdited(&mut self, sheet_idx: i64, row: i64, col: i64) {
         let key: String = self.cellKey(sheet_idx, row, col);
         let mut visited: HashMap<String,bool> = HashMap::new();
+        let vkeys: Vec<String> = self.volatileKeys.keys().cloned().collect();
+        for vk in vkeys.iter() {
+            if *vk != key {
+                self.markDirty(vk, &mut visited);
+            }
+        }
         // Mark dependents dirty (not the edited value cell itself — it is already current).
         if self.usedBy.contains_key(&key) {
             let mut kids: Vec<String> = Vec::new();
@@ -2622,6 +2728,17 @@ impl FormulaEngine {
             let sheet: String = n.borrow().sheet.clone();
             return self.readCell(&sheet, sheet_idx, n.borrow().row.clone(), n.borrow().col.clone());
         }
+        if n.borrow().kind == 10 {
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut j: i64 = 0;
+            let kn: i64 = n.borrow().kids.len() as i64;
+            while j < kn {
+                let v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[j as usize].clone(), sheet_idx);
+                items.push(v.borrow().single());
+                j += 1;
+            }
+            return FormulaValue::fromArray(n.borrow().row2, n.borrow().col2, &items);
+        }
         if n.borrow().kind == 4 {
             // A range IS a value now: a rectangle of them. What it comes to
             // depends on where it is used — a function that wants a table gets
@@ -2777,17 +2894,13 @@ impl FormulaEngine {
             return FormulaValue::fromNumber(a / b);
         }
         if n.borrow().op == "^" {
-            let p: i64 = b.floor() as i64;
-            let mut acc: f64 = 1.0;
-            let mut i: i64 = 0;
-            if p < 0 {
-                return FormulaValue::fromError("#VALUE!".to_string());
+            if a < 0.0 && b.floor() != b {
+                return FormulaValue::fromError("#NUM!".to_string());
             }
-            while i < p {
-                acc *= a;
-                i += 1;
+            if a == 0.0 && b < 0.0 {
+                return FormulaValue::fromError("#DIV/0!".to_string());
             }
-            return FormulaValue::fromNumber(acc);
+            return FormulaValue::fromNumber(FormulaMore::powD(a, b));
         }
         if n.borrow().op == "<" {
             return FormulaValue::fromBool(a < b);
@@ -2904,17 +3017,15 @@ impl FormulaEngine {
             return FormulaValue::fromNumber(a / b);
         }
         if op == "^" {
-            let p: i64 = b.floor() as i64;
-            if p < 0 {
-                return FormulaValue::fromError("#VALUE!".to_string());
+            // 2^0.5, 2^-1 and (-8)^3 as Excel has them; a negative base with a
+            // fractional exponent has no real answer, and 0^-1 divides by zero.
+            if a < 0.0 && b.floor() != b {
+                return FormulaValue::fromError("#NUM!".to_string());
             }
-            let mut acc: f64 = 1.0;
-            let mut i: i64 = 0;
-            while i < p {
-                acc *= a;
-                i += 1;
+            if a == 0.0 && b < 0.0 {
+                return FormulaValue::fromError("#DIV/0!".to_string());
             }
-            return FormulaValue::fromNumber(acc);
+            return FormulaValue::fromNumber(FormulaMore::powD(a, b));
         }
         if op == "<" {
             return FormulaValue::fromBool(a < b);
@@ -2932,6 +3043,10 @@ impl FormulaEngine {
     }
     pub fn evalCall(&mut self, n: &Rc<RefCell<FormulaNode>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
         let name: String = n.borrow().fnName.clone();
+        let by_ref: Rc<RefCell<FormulaValue>> = self.evalRefCall(n, sheet_idx);
+        if !by_ref.borrow().isBlank() {
+            return by_ref;
+        }
         let mut args: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
         let mut i: i64 = 0;
         let kn: i64 = n.borrow().kids.len() as i64;
@@ -2972,6 +3087,187 @@ impl FormulaEngine {
             return FormulaValue::fromError("#NAME?".to_string());
         }
         FormulaFunctions::invoke(&name, &args)
+    }
+    /// The functions that need a reference rather than its values, and RAND.
+    /// Blank when the call is none of them.
+    pub fn evalRefCall(&mut self, n: &Rc<RefCell<FormulaNode>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
+        let name: String = FormulaFunctions::upper(&n.borrow().fnName.clone());
+        let kn: i64 = n.borrow().kids.len() as i64;
+        let mut first: Option<Rc<RefCell<FormulaNode>>> = None;
+        if kn > 0 {
+            first = Some(n.borrow().kids[0].clone());
+        }
+        let mut ref_kind: i64 = -1;
+        if let Some(f) = first.clone() {
+            ref_kind = f.borrow().kind;
+        }
+        let is_ref: bool = ref_kind == 3 || ref_kind == 4;
+        if name == "ROW" || name == "COLUMN" {
+            if kn == 0 {
+                if name == "ROW" {
+                    return FormulaValue::fromNumber((self.curRow + 1) as f64);
+                }
+                return FormulaValue::fromNumber((self.curCol + 1) as f64);
+            }
+            if !is_ref {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let f2: Rc<RefCell<FormulaNode>> = first.clone().unwrap();
+            if name == "ROW" {
+                return FormulaValue::fromNumber((f2.borrow().row + 1) as f64);
+            }
+            return FormulaValue::fromNumber((f2.borrow().col + 1) as f64);
+        }
+        if name == "ROWS" || name == "COLUMNS" {
+            if kn < 1 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let f3: Rc<RefCell<FormulaNode>> = first.clone().unwrap();
+            if ref_kind == 3 {
+                return FormulaValue::fromNumber(1.0);
+            }
+            if ref_kind == 4 {
+                if name == "ROWS" {
+                    return FormulaValue::fromNumber((f3.borrow().row2 - f3.borrow().row + 1) as f64);
+                }
+                return FormulaValue::fromNumber((f3.borrow().col2 - f3.borrow().col + 1) as f64);
+            }
+            let v: Rc<RefCell<FormulaValue>> = self.evalNode(&f3, sheet_idx);
+            if v.borrow().isArray() {
+                if name == "ROWS" {
+                    return FormulaValue::fromNumber(v.borrow().rows as f64);
+                }
+                return FormulaValue::fromNumber(v.borrow().cols as f64);
+            }
+            if v.borrow().kind == 4 {
+                return v;
+            }
+            return FormulaValue::fromNumber(1.0);
+        }
+        if name == "ISREF" {
+            return FormulaValue::fromBool(is_ref);
+        }
+        if name == "ISFORMULA" || name == "FORMULATEXT" {
+            if !is_ref {
+                if name == "ISFORMULA" {
+                    return FormulaValue::fromError("#VALUE!".to_string());
+                }
+                return FormulaValue::fromError("#N/A".to_string());
+            }
+            let f4: Rc<RefCell<FormulaNode>> = first.clone().unwrap();
+            let mut si: i64 = sheet_idx;
+            if !f4.borrow().sheet.is_empty() {
+                si = self.sheetByName(&f4.borrow().sheet.clone());
+                if si < 0 {
+                    return FormulaValue::fromError("#REF!".to_string());
+                }
+            }
+            let sheet: Rc<RefCell<SpreadsheetModel>> = (self.book.as_ref().unwrap()).borrow().sheetAt(si);
+            let f: String = sheet.borrow().getFormula(f4.borrow().row, f4.borrow().col);
+            if name == "ISFORMULA" {
+                return FormulaValue::fromBool(!f.is_empty());
+            }
+            if f.is_empty() {
+                return FormulaValue::fromError("#N/A".to_string());
+            }
+            if DgNative::char_at(&f, 0) == 61 {
+                return FormulaValue::fromString(f.clone());
+            }
+            return FormulaValue::fromString(format!("={}", f));
+        }
+        if name == "RAND" || name == "RANDBETWEEN" {
+            if self.randState <= 0.0 {
+                self.randState = (self.todaySerial * 86400.0).floor() + 12345.0;
+            }
+            let m: f64 = 2147483647.0;
+            let next: f64 = self.randState * 48271.0;
+            self.randState = next - (next / m).floor() * m;
+            let u: f64 = self.randState / m;
+            if name == "RAND" {
+                return FormulaValue::fromNumber(u);
+            }
+            if kn < 2 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lo_v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[0].clone(), sheet_idx);
+            let hi_v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[1].clone(), sheet_idx);
+            let lo: f64 = lo_v.borrow().asNumber().floor();
+            let hi: f64 = hi_v.borrow().asNumber().floor();
+            if hi < lo {
+                return FormulaValue::fromError("#NUM!".to_string());
+            }
+            return FormulaValue::fromNumber(lo + (u * (hi - lo + 1.0)).floor());
+        }
+        if name == "OFFSET" {
+            if kn < 3 || !is_ref {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let base: Rc<RefCell<FormulaNode>> = first.clone().unwrap();
+            let dr_v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[1].clone(), sheet_idx);
+            let dc_v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[2].clone(), sheet_idx);
+            if dr_v.borrow().isError() {
+                return dr_v;
+            }
+            if dc_v.borrow().isError() {
+                return dc_v;
+            }
+            let dr: i64 = dr_v.borrow().single().borrow().asNumber().floor() as i64;
+            let dc: i64 = dc_v.borrow().single().borrow().asNumber().floor() as i64;
+            let mut h: i64 = 1;
+            let mut w: i64 = 1;
+            if ref_kind == 4 {
+                h = base.borrow().row2 - base.borrow().row + 1;
+                w = base.borrow().col2 - base.borrow().col + 1;
+            }
+            if kn > 3 {
+                let hv: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[3].clone(), sheet_idx);
+                if !hv.borrow().isBlank() {
+                    h = hv.borrow().single().borrow().asNumber().floor() as i64;
+                }
+            }
+            if kn > 4 {
+                let wv: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[4].clone(), sheet_idx);
+                if !wv.borrow().isBlank() {
+                    w = wv.borrow().single().borrow().asNumber().floor() as i64;
+                }
+            }
+            let r0: i64 = base.borrow().row + dr;
+            let c0: i64 = base.borrow().col + dc;
+            if r0 < 0 || c0 < 0 || h < 1 || w < 1 {
+                return FormulaValue::fromError("#REF!".to_string());
+            }
+            let node: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+            node.borrow_mut().sheet = base.borrow().sheet.clone();
+            node.borrow_mut().row = r0;
+            node.borrow_mut().col = c0;
+            if h == 1 && w == 1 {
+                node.borrow_mut().kind = 3;
+            } else {
+                node.borrow_mut().kind = 4;
+                node.borrow_mut().row2 = r0 + h - 1;
+                node.borrow_mut().col2 = c0 + w - 1;
+            }
+            return self.evalNode(&node, sheet_idx);
+        }
+        if name == "INDIRECT" {
+            if kn < 1 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let tv: Rc<RefCell<FormulaValue>> = self.evalNode(&first.clone().unwrap(), sheet_idx);
+            if tv.borrow().isError() {
+                return tv;
+            }
+            let text: String = tv.borrow().single().borrow().asDisplay();
+            let expanded: String = self.expandNames(&text);
+            let node2: Rc<RefCell<FormulaNode>> = self.parser.borrow_mut().parse(&expanded);
+            let ok: bool = self.parser.borrow().ok;
+            let k2: i64 = node2.borrow().kind;
+            if !ok || (k2 != 3 && k2 != 4) {
+                return FormulaValue::fromError("#REF!".to_string());
+            }
+            return self.evalNode(&node2, sheet_idx);
+        }
+        FormulaValue::blank()
     }
     /// A range, read into an array value that remembers its shape. VLOOKUP
     /// reads down a column and across a row; INDEX picks by row and column;

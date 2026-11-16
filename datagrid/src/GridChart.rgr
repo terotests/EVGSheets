@@ -56,9 +56,33 @@ class ChartKind {
     sfn radial:int ()      { return 18 }
     sfn heatmap:int ()     { return 19 }
     sfn boxplot:int ()     { return 20 }
-    ; `first` / `last` are names the compiler keeps for itself, hence these.
+    sfn stackedBar:int ()  { return 21 }
+    sfn normalizedBar:int () { return 22 }
+    sfn normalizedArea:int () { return 23 }
+    sfn scatterLines:int () { return 24 }
+    sfn combo:int ()       { return 25 }
+    sfn waterfall:int ()   { return 26 }
+    sfn funnel:int ()      { return 27 }
+    sfn pareto:int ()      { return 28 }
+    sfn stock:int ()       { return 29 }
+    sfn stackedLine:int () { return 30 }
+    sfn normalizedLine:int () { return 31 }
+    sfn scatterSmooth:int () { return 32 }
+
     sfn lowest:int ()  { return 1 }
-    sfn highest:int () { return 20 }
+    sfn highest:int () { return 32 }
+
+    ; Kinds drawn as several layers. The label and outline decoration works on
+    ; a single mark, so these keep their own.
+    sfn layered:boolean (kind:int) {
+        if (kind == 25) {
+            return true
+        }
+        if (kind == 28) {
+            return true
+        }
+        return (kind == 29)
+    }
 
     sfn label:string (kind:int) {
         if (kind == 1)  { return "Column" }
@@ -81,6 +105,18 @@ class ChartKind {
         if (kind == 18) { return "Radial" }
         if (kind == 19) { return "Heatmap" }
         if (kind == 20) { return "Box plot" }
+        if (kind == 21) { return "Stacked bar" }
+        if (kind == 22) { return "100% stacked bar" }
+        if (kind == 23) { return "100% stacked area" }
+        if (kind == 24) { return "Scatter + lines" }
+        if (kind == 25) { return "Column + line" }
+        if (kind == 26) { return "Waterfall" }
+        if (kind == 27) { return "Funnel" }
+        if (kind == 28) { return "Pareto" }
+        if (kind == 29) { return "Stock (high-low-close)" }
+        if (kind == 30) { return "Stacked line" }
+        if (kind == 31) { return "100% stacked line" }
+        if (kind == 32) { return "Scatter + smooth lines" }
         return "Column"
     }
 
@@ -89,10 +125,10 @@ class ChartKind {
     ; columns plotted against each other, which is a different question about
     ; the same selection.
     sfn wantsXY:boolean (kind:int) {
-        if (kind == 13) {
+        if ((kind == 13) || (kind == 14)) {
             return true
         }
-        return (kind == 14)
+        return ((kind == 24) || (kind == 32))
     }
 }
 
@@ -299,6 +335,29 @@ class GridChart {
     def transposed:boolean false
     def fillColor:string ""
     def outlineColor:string ""
+    ; Element formatting (the Format pane). Empty means as the style has it.
+    ;   legendPos    "" (right), "top", "bottom", "left"
+    ;   valueMin/Max the value axis bounds, as typed
+    ;   logScale     a logarithmic value axis
+    ;   numFormat    the value axis and label number format ("," "0%" "$,")
+    ;   labelPos     "" (outside end) or "inside"
+    ;   lineWidth    line thickness in pixels, 0 for the style's
+    ;   titleSize    chart title size in points, 0 for the style's
+    ;   seriesColors colours for the series in order, comma separated
+    ;   areaFill     the chart area's background
+    ;   xTitle/yTitle axis titles typed in place of the headers
+    def legendPos:string ""
+    def valueMin:string ""
+    def valueMax:string ""
+    def logScale:boolean false
+    def numFormat:string ""
+    def labelPos:string ""
+    def lineWidth:int 0
+    def titleSize:int 0
+    def seriesColors:string ""
+    def areaFill:string ""
+    def xTitle:string ""
+    def yTitle:string ""
     ; Window rectangle, in page pixels.
     def x:int 0
     def y:int 0
@@ -347,11 +406,189 @@ class GridChart {
         transposed = o.transposed
         fillColor = o.fillColor
         outlineColor = o.outlineColor
+        def fmt:string (o.formatText())
+        this.setFormats(fmt)
         x = o.x
         y = o.y
         w = o.w
         h = o.h
         dirty = true
+    }
+
+    ; One formatting element by its key, as the Format pane and
+    ; `chart.formatElement` name them. False for a key or value it does not
+    ; know, so a typo is reported rather than ignored.
+    fn setFormat:boolean (key:string val:string) {
+        def k:string (to_lowercase (trim key))
+        def v:string (trim val)
+        if (k == "legend") {
+            def lv:string (to_lowercase v)
+            if ((lv == "right") || (lv == "")) {
+                legendPos = ""
+                showLegend = true
+                return true
+            }
+            if ((lv == "top") || ((lv == "bottom") || (lv == "left"))) {
+                legendPos = lv
+                showLegend = true
+                return true
+            }
+            if (lv == "none") {
+                showLegend = false
+                return true
+            }
+            return false
+        }
+        if ((k == "min") || (k == "max")) {
+            if ((strlen v) > 0) {
+                if ((ChartData.looksNumeric(v)) == false) {
+                    return false
+                }
+            }
+            if (k == "min") {
+                valueMin = v
+            } {
+                valueMax = v
+            }
+            return true
+        }
+        if (k == "log") {
+            logScale = ((v == "on") || ((v == "true") || (v == "1")))
+            return true
+        }
+        if (k == "format") {
+            numFormat = v
+            return true
+        }
+        if (k == "labels") {
+            def pv:string (to_lowercase v)
+            if ((pv == "") || (pv == "outside")) {
+                labelPos = ""
+                return true
+            }
+            if (pv == "inside") {
+                labelPos = "inside"
+                return true
+            }
+            if (pv == "on") {
+                dataLabels = true
+                return true
+            }
+            if (pv == "off") {
+                dataLabels = false
+                return true
+            }
+            return false
+        }
+        if ((k == "linewidth") || (k == "titlesize")) {
+            def n@(optional):int (to_int v)
+            def got:int 0
+            if (!null? n) {
+                got = (unwrap n)
+            }
+            if ((strlen v) == 0) {
+                got = 0
+            } {
+                if ((null? n) || ((got < 0) || (got > 48))) {
+                    return false
+                }
+            }
+            if (k == "linewidth") {
+                lineWidth = got
+            } {
+                titleSize = got
+            }
+            return true
+        }
+        if (k == "colors") {
+            seriesColors = v
+            return true
+        }
+        if (k == "area") {
+            areaFill = v
+            return true
+        }
+        if (k == "xtitle") {
+            xTitle = v
+            return true
+        }
+        if (k == "ytitle") {
+            yTitle = v
+            return true
+        }
+        if (k == "fill") {
+            fillColor = v
+            return true
+        }
+        if (k == "datalabels") {
+            dataLabels = (v == "1")
+            return true
+        }
+        if (k == "gridlines") {
+            if ((v == "") || ((v == "on") || (v == "off"))) {
+                gridlines = v
+                return true
+            }
+            return false
+        }
+        if (k == "axistitles") {
+            axisTitles = (v != "0")
+            return true
+        }
+        if (k == "outline") {
+            outlineColor = v
+            return true
+        }
+        return false
+    }
+
+    ; "key=value;key=value", each through setFormat. False if any failed.
+    fn setFormats:boolean (text:string) {
+        def ok:boolean true
+        def rest:string text
+        while ((strlen rest) > 0) {
+            def semi:int (indexOf rest ";")
+            def part:string rest
+            if (semi >= 0) {
+                part = (substring rest 0 semi)
+                rest = (substring rest (semi + 1) (strlen rest))
+            } {
+                rest = ""
+            }
+            def eq:int (indexOf part "=")
+            if (eq > 0) {
+                if ((this.setFormat((substring part 0 eq) (substring part (eq + 1) (strlen part)))) == false) {
+                    ok = false
+                }
+            } {
+                if ((strlen (trim part)) > 0) {
+                    ok = false
+                }
+            }
+        }
+        return ok
+    }
+
+    ; Everything setFormat holds, in the form setFormats reads back.
+    fn formatText:string () {
+        def out:string ""
+        def leg:string legendPos
+        if (showLegend == false) {
+            leg = "none"
+        }
+        out = (out + "legend=" + leg)
+        out = (out + ";min=" + valueMin + ";max=" + valueMax)
+        if logScale {
+            out = (out + ";log=on")
+        } {
+            out = (out + ";log=off")
+        }
+        out = (out + ";format=" + numFormat + ";labels=" + labelPos)
+        out = (out + ";lineWidth=" + (to_string lineWidth) + ";titleSize=" + (to_string titleSize))
+        out = (out + ";colors=" + seriesColors + ";area=" + areaFill)
+        out = (out + ";xTitle=" + xTitle + ";yTitle=" + yTitle)
+        out = (out + ";fill=" + fillColor + ";outline=" + outlineColor)
+        return out
     }
 
     fn rangeLabel:string () {
@@ -1149,6 +1386,40 @@ class ChartData {
         if (kind == (ChartKind.boxplot())) {
             return (nc >= 3)
         }
+        if ((kind == (ChartKind.stackedBar())) || (kind == (ChartKind.normalizedBar()))) {
+            return (ns >= 2)
+        }
+        if ((kind == (ChartKind.normalizedArea())) || ((kind == (ChartKind.stackedLine())) || (kind == (ChartKind.normalizedLine())))) {
+            if (ns < 2) {
+                return false
+            }
+            return (nc >= 2)
+        }
+        ; Lines through XY points need two columns and two points.
+        if ((kind == (ChartKind.scatterLines())) || (kind == (ChartKind.scatterSmooth()))) {
+            if (ns < 2) {
+                return false
+            }
+            return (nc >= 2)
+        }
+        ; Columns for the first series, lines for the rest.
+        if (kind == (ChartKind.combo())) {
+            return (ns >= 2)
+        }
+        ; Waterfall, funnel and Pareto read one series, as a pie does.
+        if ((kind == (ChartKind.waterfall())) || ((kind == (ChartKind.funnel())) || (kind == (ChartKind.pareto())))) {
+            if (ns != 1) {
+                return false
+            }
+            return (nc >= 2)
+        }
+        ; High, low and close: three columns in that order.
+        if (kind == (ChartKind.stock())) {
+            if (ns < 3) {
+                return false
+            }
+            return (nc >= 2)
+        }
         return true
     }
 
@@ -1345,6 +1616,12 @@ class ChartData {
         ; orders a pie's wedges and its key, and sorted alphabetically the key
         ; read Apr, Feb, Jan while the wedges ran Jan, Feb, Mar.
         out = (out + ",\"sort\":null")
+        ; Colours chosen in the Format pane, on the scale itself: a palette in
+        ; `config.range` is read only as a scheme name.
+        def pal:string (ChartData.paletteOf(ch))
+        if ((strlen pal) > 0) {
+            out = (out + ",\"scale\":{\"range\":[" + pal + "]}")
+        }
         if (ch.showLegend == false) {
             out = (out + ",\"legend\":null")
         }
@@ -1408,6 +1685,12 @@ class ChartData {
 
     fn specJsonIn:string (ch:GridChart plotW:int plotH:int) {
         def kind:int ch.kind
+        if ((strlen ch.xTitle) > 0) {
+            catTitle = ch.xTitle
+        }
+        if ((strlen ch.yTitle) > 0) {
+            valueTitle = ch.yTitle
+        }
         if (ch.axisTitles == false) {
             catTitle = ""
             valueTitle = ""
@@ -1425,21 +1708,51 @@ class ChartData {
         }
         def out:string "{"
         out = ((out + "\"width\":") + (to_string plotW) + ",\"height\":" + (to_string plotH))
-        out = ((out + ",\"background\":\"") + (ChartStyle.background(ch.style)) + "\"")
+        def bg:string (ChartStyle.background(ch.style))
+        if ((strlen ch.areaFill) > 0) {
+            bg = ch.areaFill
+        }
+        out = ((out + ",\"background\":\"") + (ChartData.jsonEscape(bg)) + "\"")
         if ((strlen ch.title) > 0) {
             def shownTitle:string (ChartData.clipText(ch.title (to_int (((to_double plotW) + 60.0) / 7.5))))
             out = ((out + ",\"title\":\"") + (ChartData.jsonEscape(shownTitle)) + "\"")
         }
+        def rows:string ""
         if (ChartKind.wantsXY(kind)) {
-            out = ((out + ",\"data\":{\"values\":[") + (this.rowsXyJson()) + "]}")
+            rows = (this.rowsXyJson())
         } {
-            out = ((out + ",\"data\":{\"values\":[") + (this.rowsJson(single)) + "]}")
+            rows = (this.rowsJson(single))
         }
+        if (kind == (ChartKind.combo())) {
+            rows = (this.comboRowsJson())
+        }
+        if (kind == (ChartKind.waterfall())) {
+            rows = (this.waterfallRowsJson())
+        }
+        if (kind == (ChartKind.funnel())) {
+            rows = (this.funnelRowsJson())
+        }
+        if (kind == (ChartKind.pareto())) {
+            rows = (this.paretoRowsJson())
+        }
+        if (kind == (ChartKind.stock())) {
+            rows = (this.stockRowsJson())
+        }
+        if (kind == (ChartKind.stackedLine())) {
+            rows = (this.stackedLineRowsJson(false))
+        }
+        if (kind == (ChartKind.normalizedLine())) {
+            rows = (this.stackedLineRowsJson(true))
+        }
+        out = ((out + ",\"data\":{\"values\":[") + rows + "]}")
 
         def multi:boolean ((this.seriesCount()) > 1)
         def colour:string (this.colourJson(ch "series" seriesTitle))
         def catColour:string (this.colourJson(ch "cat" catTitle))
-        def valueField:string ("\"field\":\"value\",\"type\":\"quantitative\"" + (ChartData.titleMember(valueTitle)))
+        def stackedKind:boolean ((kind == 3) || ((kind == 11) || ((kind == 21) || (kind == 30))))
+        def extras:string (this.valueExtras(ch stackedKind))
+        def valueField:string ("\"field\":\"value\",\"type\":\"quantitative\"" + (ChartData.titleMember(valueTitle)) + extras)
+        def plainValue:string ("\"field\":\"value\",\"type\":\"quantitative\"" + (ChartData.titleMember(valueTitle)))
         ; Categories keep the order the SHEET put them in. Vega-Lite sorts a
         ; nominal domain alphabetically, which turned Jan..Jun into
         ; Apr, Feb, Jan, Jun, Mar, May — right for a bar chart of names,
@@ -1449,7 +1762,11 @@ class ChartData {
             catOrder = ",\"sort\":null"
         }
         def catField:string ("\"field\":\"cat\",\"type\":\"" + (this.catType(kind)) + "\"" + (ChartData.titleMember(catTitle)) + catOrder)
-        def sumField:string ("\"field\":\"value\",\"type\":\"quantitative\",\"aggregate\":\"sum\"" + (ChartData.titleMember(valueTitle)))
+        def sumField:string ("\"field\":\"value\",\"type\":\"quantitative\",\"aggregate\":\"sum\"" + (ChartData.titleMember(valueTitle)) + extras)
+        def normField:string ("\"field\":\"value\",\"type\":\"quantitative\",\"aggregate\":\"sum\",\"stack\":\"normalize\"" + (ChartData.titleMember(valueTitle)) + ",\"axis\":{\"format\":\".0%\"}")
+        def xyY:string ("\"field\":\"y\",\"type\":\"quantitative\"" + (ChartData.titleMember((this.seriesName(1)))) + extras)
+        def xyX:string ("\"field\":\"x\",\"type\":\"quantitative\"" + (ChartData.titleMember((this.seriesName(0)))))
+        def plainCat:string ("\"field\":\"cat\",\"type\":\"nominal\"" + (ChartData.titleMember(catTitle)) + ",\"sort\":null")
 
         ; --- bars ---
         if (kind == (ChartKind.column())) {
@@ -1462,7 +1779,7 @@ class ChartData {
         if (kind == (ChartKind.bar())) {
             out = (out + ",\"mark\":\"bar\",\"encoding\":{\"y\":{" + catField + "},\"x\":{" + valueField + "}")
             if multi {
-                out = (out + "," + colour)
+                out = (out + "," + colour + ",\"yOffset\":{\"field\":\"series\",\"type\":\"nominal\"}")
             }
             out = (out + "}")
         }
@@ -1538,18 +1855,18 @@ class ChartData {
 
         ; --- circles ---
         if (kind == (ChartKind.pie())) {
-            out = (out + ",\"mark\":\"arc\",\"encoding\":{\"theta\":{" + valueField + "}," + catColour + "}")
+            out = (out + ",\"mark\":\"arc\",\"encoding\":{\"theta\":{" + plainValue + "}," + catColour + "}")
         }
         if (kind == (ChartKind.donut())) {
-            out = (out + ",\"mark\":{\"type\":\"arc\",\"innerRadius\":40},\"encoding\":{\"theta\":{" + valueField + "}," + catColour + "}")
+            out = (out + ",\"mark\":{\"type\":\"arc\",\"innerRadius\":40},\"encoding\":{\"theta\":{" + plainValue + "}," + catColour + "}")
         }
         if (kind == (ChartKind.radial())) {
-            out = (out + ",\"mark\":{\"type\":\"arc\",\"innerRadius\":18},\"encoding\":{\"theta\":{" + valueField + "},\"radius\":{\"field\":\"value\",\"type\":\"quantitative\",\"scale\":{\"type\":\"sqrt\",\"zero\":true,\"rangeMin\":18}}," + catColour + "}")
+            out = (out + ",\"mark\":{\"type\":\"arc\",\"innerRadius\":18},\"encoding\":{\"theta\":{" + plainValue + "},\"radius\":{\"field\":\"value\",\"type\":\"quantitative\",\"scale\":{\"type\":\"sqrt\",\"zero\":true,\"rangeMin\":18}}," + catColour + "}")
         }
 
         ; --- matrices ---
         if (kind == (ChartKind.heatmap())) {
-            out = (out + ",\"mark\":\"rect\",\"encoding\":{\"x\":{" + catField + "},\"y\":{\"field\":\"series\",\"type\":\"nominal\"" + (ChartData.titleMember(seriesTitle)) + "},\"color\":{" + valueField)
+            out = (out + ",\"mark\":\"rect\",\"encoding\":{\"x\":{" + catField + "},\"y\":{\"field\":\"series\",\"type\":\"nominal\"" + (ChartData.titleMember(seriesTitle)) + "},\"color\":{" + plainValue)
             if (ch.showLegend == false) {
                 out = (out + ",\"legend\":null")
             }
@@ -1557,6 +1874,59 @@ class ChartData {
         }
         if (kind == (ChartKind.boxplot())) {
             out = (out + ",\"mark\":\"boxplot\",\"encoding\":{\"x\":{\"field\":\"series\",\"type\":\"nominal\"" + (ChartData.titleMember(seriesTitle)) + "},\"y\":{" + valueField + "}}")
+        }
+
+        ; --- more bars, lines and areas ---
+        if (kind == (ChartKind.stackedBar())) {
+            out = (out + ",\"mark\":\"bar\",\"encoding\":{\"y\":{" + catField + "},\"x\":{" + sumField + "}," + colour + "}")
+        }
+        if (kind == (ChartKind.normalizedBar())) {
+            out = (out + ",\"mark\":\"bar\",\"encoding\":{\"y\":{" + catField + "},\"x\":{" + normField + "}," + colour + "}")
+        }
+        if (kind == (ChartKind.normalizedArea())) {
+            out = (out + ",\"mark\":\"area\",\"encoding\":{\"x\":{" + catField + "},\"y\":{" + normField + "}," + colour + "}")
+        }
+        if (kind == (ChartKind.stackedLine())) {
+            out = (out + ",\"mark\":\"line\",\"encoding\":{\"x\":{" + catField + "},\"y\":{\"field\":\"top\",\"type\":\"quantitative\"" + (ChartData.titleMember(valueTitle)) + extras + "}," + colour + "}")
+        }
+        if (kind == (ChartKind.normalizedLine())) {
+            out = (out + ",\"mark\":\"line\",\"encoding\":{\"x\":{" + catField + "},\"y\":{\"field\":\"top\",\"type\":\"quantitative\"" + (ChartData.titleMember(valueTitle)) + ",\"scale\":{\"domain\":[0,1]},\"axis\":{\"format\":\".0%\"}}," + colour + "}")
+        }
+        if (kind == (ChartKind.scatterLines())) {
+            out = (out + ",\"mark\":{\"type\":\"line\",\"point\":true},\"encoding\":{\"x\":{" + xyX + "},\"y\":{" + xyY + "}}")
+        }
+        if (kind == (ChartKind.scatterSmooth())) {
+            out = (out + ",\"mark\":{\"type\":\"line\",\"point\":true,\"interpolate\":\"monotone\"},\"encoding\":{\"x\":{" + xyX + "},\"y\":{" + xyY + "}}")
+        }
+        if (kind == (ChartKind.waterfall())) {
+            def wfColour:string ("\"color\":{\"field\":\"series\",\"type\":\"nominal\",\"title\":\"\",\"scale\":{\"domain\":[\"Increase\",\"Decrease\"],\"range\":[\"#4472C4\",\"#ED7D31\"]}")
+            if (ch.showLegend == false) {
+                wfColour = (wfColour + ",\"legend\":null")
+            }
+            out = (out + ",\"mark\":\"bar\",\"encoding\":{\"x\":{" + plainCat + "},\"y\":{\"field\":\"start\",\"type\":\"quantitative\"" + (ChartData.titleMember(valueTitle)) + extras + "},\"y2\":{\"field\":\"end\"}," + wfColour + "}}")
+        }
+        if (kind == (ChartKind.funnel())) {
+            out = (out + ",\"mark\":\"bar\",\"encoding\":{\"y\":{" + plainCat + "},\"x\":{\"field\":\"lo\",\"type\":\"quantitative\",\"axis\":null},\"x2\":{\"field\":\"hi\"}}")
+        }
+
+        ; --- layered ---
+        if (kind == (ChartKind.combo())) {
+            def lineColour:string (this.colourJson(ch "series" seriesTitle))
+            out = (out + ",\"encoding\":{\"x\":{" + plainCat + "}}")
+            out = (out + ",\"layer\":[{\"transform\":[{\"filter\":\"datum.lead == 1\"}],\"mark\":\"bar\",\"encoding\":{\"y\":{" + valueField + "}," + lineColour + "}}")
+            out = (out + ",{\"transform\":[{\"filter\":\"datum.lead == 0\"}],\"mark\":{\"type\":\"line\",\"point\":true},\"encoding\":{\"y\":{" + valueField + "}," + lineColour + "}}]")
+        }
+        if (kind == (ChartKind.pareto())) {
+            out = (out + ",\"encoding\":{\"x\":{" + plainCat + "}}")
+            out = (out + ",\"layer\":[{\"mark\":\"bar\",\"encoding\":{\"y\":{" + valueField + "}}}")
+            out = (out + ",{\"mark\":{\"type\":\"line\",\"point\":true,\"color\":\"#ED7D31\"},\"encoding\":{\"y\":{\"field\":\"cum\",\"type\":\"quantitative\",\"title\":\"\",\"scale\":{\"domain\":[0,1]},\"axis\":{\"format\":\".0%\",\"orient\":\"right\"}}}}]")
+            out = (out + ",\"resolve\":{\"scale\":{\"y\":\"independent\"}}")
+        }
+        if (kind == (ChartKind.stock())) {
+            def stockY:string ("\"type\":\"quantitative\"" + (ChartData.titleMember(valueTitle)) + extras)
+            out = (out + ",\"encoding\":{\"x\":{" + plainCat + "}}")
+            out = (out + ",\"layer\":[{\"mark\":\"rule\",\"encoding\":{\"y\":{\"field\":\"low\"," + stockY + ",\"scale\":{\"zero\":false}},\"y2\":{\"field\":\"high\"}}}")
+            out = (out + ",{\"mark\":{\"type\":\"tick\",\"thickness\":2},\"encoding\":{\"y\":{\"field\":\"close\",\"type\":\"quantitative\"}}}]")
         }
 
         out = (this.decorate(ch out))
@@ -1572,10 +1942,66 @@ class ChartData {
             def scheme:string ("\"range\":{\"category\":{\"scheme\":\"" + ((ChartStyle.scheme(ch.style)) + "\"}}"))
             def fill:string ("\"range\":{\"category\":[\"" + (ch.fillColor + "\",\"#ED7D31\",\"#A5A5A5\",\"#FFC000\",\"#5B9BD5\",\"#70AD47\"]}"))
             cfg = (ChartData.replaceOnce(cfg scheme fill))
-            cfg = (ChartData.replaceOnce(cfg "\"config\":{" ("\"config\":{\"mark\":{\"color\":\"" + (ch.fillColor + "\"},"))))
+            if ((strlen ch.seriesColors) == 0) {
+                cfg = (ChartData.replaceOnce(cfg "\"config\":{" ("\"config\":{\"mark\":{\"color\":\"" + (ch.fillColor + "\"},"))))
+            }
+        }
+        if ((strlen ch.seriesColors) > 0) {
+            def firstCol:string (ChartData.colourList(ch.seriesColors))
+            def endQ:int (indexOf firstCol "\"," )
+            if (endQ > 0) {
+                firstCol = (substring firstCol 0 (endQ + 1))
+            }
+            cfg = (ChartData.replaceOnce(cfg "\"config\":{" ("\"config\":{\"mark\":{\"color\":" + (firstCol + "},"))))
+        }
+        if ((strlen ch.seriesColors) > 0) {
+            def scheme2:string ("\"range\":{\"category\":{\"scheme\":\"" + ((ChartStyle.scheme(ch.style)) + "\"}}"))
+            cfg = (ChartData.replaceOnce(cfg scheme2 ("\"range\":{\"category\":[" + (ChartData.colourList(ch.seriesColors)) + "]}")))
+        }
+        if ((strlen ch.legendPos) > 0) {
+            cfg = (ChartData.replaceOnce(cfg "\"legend\":{" ("\"legend\":{\"orient\":\"" + ch.legendPos + "\",")))
+        }
+        if (ch.titleSize > 0) {
+            cfg = (ChartData.replaceOnce(cfg "\"fontSize\":13,\"offset\"" ("\"fontSize\":" + (to_string ch.titleSize) + ",\"offset\"")))
         }
         out = ((out + ",") + cfg)
         return (out + "}")
+    }
+
+    ; The colours the series are drawn in when the reader chose them: the
+    ; Format pane's list, or Shape Fill followed by Excel's next colours.
+    sfn paletteOf:string (ch:GridChart) {
+        if ((strlen ch.seriesColors) > 0) {
+            return (ChartData.colourList(ch.seriesColors))
+        }
+        if ((strlen ch.fillColor) > 0) {
+            return ("\"" + (ChartData.jsonEscape(ch.fillColor)) + "\",\"#ED7D31\",\"#A5A5A5\",\"#FFC000\",\"#5B9BD5\",\"#70AD47\"")
+        }
+        return ""
+    }
+
+    ; "red, #00f" as a JSON list of strings.
+    sfn colourList:string (text:string) {
+        def out:string ""
+        def rest:string text
+        while ((strlen rest) > 0) {
+            def comma:int (indexOf rest ",")
+            def part:string rest
+            if (comma >= 0) {
+                part = (substring rest 0 comma)
+                rest = (substring rest (comma + 1) (strlen rest))
+            } {
+                rest = ""
+            }
+            def t:string (trim part)
+            if ((strlen t) > 0) {
+                if ((strlen out) > 0) {
+                    out = (out + ",")
+                }
+                out = (out + "\"" + (ChartData.jsonEscape(t)) + "\"")
+            }
+        }
+        return out
     }
 
     sfn replaceOnce:string (s:string find:string repl:string) {
@@ -1591,6 +2017,9 @@ class ChartData {
     fn decorate:string (ch:GridChart spec:string) {
         def at:int (indexOf spec ",\"mark\":")
         if (at < 0) {
+            return spec
+        }
+        if (ChartKind.layered(ch.kind)) {
             return spec
         }
         def head:string (substring spec 0 at)
@@ -1610,6 +2039,18 @@ class ChartData {
             }
         }
         def k:int ch.kind
+        def liney:boolean ((k >= 6) && (k <= 9))
+        if ((k == 24) || ((k == 30) || ((k == 31) || (k == 32)))) {
+            liney = true
+        }
+        if (liney && (ch.lineWidth > 0)) {
+            def sw:string ("\"strokeWidth\":" + (to_string ch.lineWidth))
+            if ((charAt mark 0) == 34) {
+                mark = ("{\"type\":" + (mark + ("," + (sw + "}"))))
+            } {
+                mark = ("{" + (sw + ("," + (substring mark 1 (strlen mark)))))
+            }
+        }
         def labelled:boolean (ch.dataLabels && ((k == 1) || ((k == 2) || ((k == 6) || (k == 7)))))
         if (labelled == false) {
             return (head + (",\"mark\":" + (mark + (",\"encoding\":" + enc))))
@@ -1618,7 +2059,23 @@ class ChartData {
         if (k == 2) {
             offset = "\"dx\":14"
         }
-        def label:string ("{\"mark\":{\"type\":\"text\"," + (offset + ",\"fontSize\":9},\"encoding\":{\"text\":{\"field\":\"value\",\"type\":\"quantitative\",\"format\":\",\"}}}"))
+        if (ch.labelPos == "inside") {
+            offset = "\"dy\":9"
+            if (k == 2) {
+                offset = "\"dx\":-14"
+            }
+            if (k == 1) {
+                offset = (offset + ",\"color\":\"#ffffff\"")
+            }
+            if (k == 2) {
+                offset = (offset + ",\"color\":\"#ffffff\"")
+            }
+        }
+        def lf:string (ChartData.d3Format(ch.numFormat))
+        if ((strlen lf) == 0) {
+            lf = ","
+        }
+        def label:string ("{\"mark\":{\"type\":\"text\"," + (offset + (",\"fontSize\":9},\"encoding\":{\"text\":{\"field\":\"value\",\"type\":\"quantitative\",\"format\":\"" + ((ChartData.jsonEscape(lf)) + "\"}}}"))))
         return (head + (",\"encoding\":" + (enc + (",\"layer\":[{\"mark\":" + (mark + ("}," + (label + "]")))))))
     }
 
@@ -1638,6 +2095,321 @@ class ChartData {
             i = (i + 1)
         }
         return true
+    }
+
+    ; The value at (category, series), and whether there is one.
+    fn has:boolean (ci:int si:int) {
+        def ns:int (this.seriesCount())
+        if ((si >= ns) || (ci >= (this.catCount()))) {
+            return false
+        }
+        return (itemAt filled ((ci * ns) + si))
+    }
+
+    fn at:double (ci:int si:int) {
+        def ns:int (this.seriesCount())
+        return (itemAt values ((ci * ns) + si))
+    }
+
+    ; A category as a JSON value: a number when the axis is numeric.
+    fn catJson:string (ci:int) {
+        def cat:string (this.shownCat(ci))
+        if catNumeric {
+            return cat
+        }
+        return ("\"" + (ChartData.jsonEscape(cat)) + "\"")
+    }
+
+    ; The largest value, or the largest category total when `stacked`; the
+    ; smallest value. What a bound left empty falls back to.
+    fn extent:double (stacked:boolean high:boolean) {
+        def ns:int (this.seriesCount())
+        def nc:int (this.catCount())
+        def best:double 0.0
+        def ci:int 0
+        while (ci < nc) {
+            def total:double 0.0
+            def si:int 0
+            while (si < ns) {
+                if (this.has(ci si)) {
+                    def v:double (this.at(ci si))
+                    if stacked {
+                        if (v > 0.0) {
+                            total = (total + v)
+                        }
+                    } {
+                        if high {
+                            if (v > best) {
+                                best = v
+                            }
+                        } {
+                            if (v < best) {
+                                best = v
+                            }
+                        }
+                    }
+                }
+                si = (si + 1)
+            }
+            if (stacked && (total > best)) {
+                best = total
+            }
+            ci = (ci + 1)
+        }
+        return best
+    }
+
+    ; The first series with a flag on each row: 1 for the series drawn as
+    ; columns in a combo chart, 0 for the ones drawn as lines.
+    fn comboRowsJson:string () {
+        def out:string ""
+        def ns:int (this.seriesCount())
+        def nc:int (this.catCount())
+        def wrote:int 0
+        def ci:int 0
+        while (ci < nc) {
+            def si:int 0
+            while (si < ns) {
+                if (this.has(ci si)) {
+                    if (wrote > 0) {
+                        out = (out + ",")
+                    }
+                    def lead:string "0"
+                    if (si == 0) {
+                        lead = "1"
+                    }
+                    out = (out + "{\"cat\":" + (this.catJson(ci)) + ",\"series\":\"" + (ChartData.jsonEscape((itemAt series si))) + "\",\"value\":" + (ChartData.num((this.at(ci si)))) + ",\"lead\":" + lead + "}")
+                    wrote = (wrote + 1)
+                }
+                si = (si + 1)
+            }
+            ci = (ci + 1)
+        }
+        return out
+    }
+
+    ; Waterfall: each bar runs from the running total before it to the one
+    ; after, coloured by which way it went.
+    fn waterfallRowsJson:string () {
+        def out:string ""
+        def nc:int (this.catCount())
+        def run:double 0.0
+        def wrote:int 0
+        def ci:int 0
+        while (ci < nc) {
+            if (this.has(ci 0)) {
+                def v:double (this.at(ci 0))
+                def dir:string "Increase"
+                if (v < 0.0) {
+                    dir = "Decrease"
+                }
+                if (wrote > 0) {
+                    out = (out + ",")
+                }
+                out = (out + "{\"cat\":" + (this.catJson(ci)) + ",\"start\":" + (ChartData.num(run)) + ",\"end\":" + (ChartData.num((run + v))) + ",\"value\":" + (ChartData.num(v)) + ",\"series\":\"" + dir + "\"}")
+                run = (run + v)
+                wrote = (wrote + 1)
+            }
+            ci = (ci + 1)
+        }
+        return out
+    }
+
+    ; Funnel: each bar centred on zero, half its value either side.
+    fn funnelRowsJson:string () {
+        def out:string ""
+        def nc:int (this.catCount())
+        def wrote:int 0
+        def ci:int 0
+        while (ci < nc) {
+            if (this.has(ci 0)) {
+                def v:double (this.at(ci 0))
+                if (v < 0.0) {
+                    v = (0.0 - v)
+                }
+                if (wrote > 0) {
+                    out = (out + ",")
+                }
+                out = (out + "{\"cat\":" + (this.catJson(ci)) + ",\"lo\":" + (ChartData.num((0.0 - (v / 2.0)))) + ",\"hi\":" + (ChartData.num((v / 2.0))) + ",\"value\":" + (ChartData.num(v)) + "}")
+                wrote = (wrote + 1)
+            }
+            ci = (ci + 1)
+        }
+        return out
+    }
+
+    ; Pareto: categories largest first, with the running share of the total.
+    fn paretoRowsJson:string () {
+        def nc:int (this.catCount())
+        def order:[int]
+        def total:double 0.0
+        def ci:int 0
+        while (ci < nc) {
+            if ((this.has(ci 0)) && ((this.at(ci 0)) > 0.0)) {
+                def v:double (this.at(ci 0))
+                def pos:int 0
+                while ((pos < (array_length order)) && ((this.at((itemAt order pos) 0)) >= v)) {
+                    pos = (pos + 1)
+                }
+                insert order pos ci
+                total = (total + v)
+            }
+            ci = (ci + 1)
+        }
+        def out:string ""
+        def run:double 0.0
+        def i:int 0
+        while (i < (array_length order)) {
+            def c:int (itemAt order i)
+            def v:double (this.at(c 0))
+            run = (run + v)
+            def share:double 0.0
+            if (total != 0.0) {
+                share = (run / total)
+            }
+            if (i > 0) {
+                out = (out + ",")
+            }
+            out = (out + "{\"cat\":" + (this.catJson(c)) + ",\"value\":" + (ChartData.num(v)) + ",\"cum\":" + (ChartData.num(share)) + "}")
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; Stacked lines: each series drawn at the running total of the series
+    ; before it, or at the running share of the category's total when
+    ; `normalize`. Worked out here because a line does not stack by itself.
+    fn stackedLineRowsJson:string (normalize:boolean) {
+        def out:string ""
+        def ns:int (this.seriesCount())
+        def nc:int (this.catCount())
+        def wrote:int 0
+        def ci:int 0
+        while (ci < nc) {
+            def total:double 0.0
+            def si:int 0
+            while (si < ns) {
+                if (this.has(ci si)) {
+                    total = (total + (this.at(ci si)))
+                }
+                si = (si + 1)
+            }
+            def run:double 0.0
+            si = 0
+            while (si < ns) {
+                if (this.has(ci si)) {
+                    run = (run + (this.at(ci si)))
+                    def top:double run
+                    if normalize {
+                        top = 0.0
+                        if (total != 0.0) {
+                            top = (run / total)
+                        }
+                    }
+                    if (wrote > 0) {
+                        out = (out + ",")
+                    }
+                    out = (out + "{\"cat\":" + (this.catJson(ci)) + ",\"series\":\"" + (ChartData.jsonEscape((itemAt series si))) + "\",\"value\":" + (ChartData.num((this.at(ci si)))) + ",\"top\":" + (ChartData.num(top)) + "}")
+                    wrote = (wrote + 1)
+                }
+                si = (si + 1)
+            }
+            ci = (ci + 1)
+        }
+        return out
+    }
+
+    ; Stock: the first three series read as high, low and close.
+    fn stockRowsJson:string () {
+        def out:string ""
+        def nc:int (this.catCount())
+        def wrote:int 0
+        def ci:int 0
+        while (ci < nc) {
+            if ((this.has(ci 0)) && ((this.has(ci 1)) && (this.has(ci 2)))) {
+                if (wrote > 0) {
+                    out = (out + ",")
+                }
+                out = (out + "{\"cat\":" + (this.catJson(ci)) + ",\"high\":" + (ChartData.num((this.at(ci 0)))) + ",\"low\":" + (ChartData.num((this.at(ci 1)))) + ",\"close\":" + (ChartData.num((this.at(ci 2)))) + "}")
+                wrote = (wrote + 1)
+            }
+            ci = (ci + 1)
+        }
+        return out
+    }
+
+    ; An Excel number format as the d3 format a chart axis reads: decimals
+    ; from the zeroes after the point, a comma for grouping, % and $ kept.
+    ; Something already in d3's grammar passes through.
+    sfn d3Format:string (fmt:string) {
+        if ((strlen fmt) == 0) {
+            return ""
+        }
+        if ((indexOf fmt "0") < 0) {
+            if ((indexOf fmt "#") < 0) {
+                return fmt
+            }
+        }
+        def dec:int 0
+        def dot:int (indexOf fmt ".")
+        if (dot >= 0) {
+            def i:int (dot + 1)
+            while ((i < (strlen fmt)) && (((charAt fmt i) == 48) || ((charAt fmt i) == 35))) {
+                dec = (dec + 1)
+                i = (i + 1)
+            }
+        }
+        def out:string ""
+        if ((indexOf fmt "$") >= 0) {
+            out = "$"
+        }
+        if ((indexOf fmt ",") >= 0) {
+            out = (out + ",")
+        }
+        out = (out + "." + (to_string dec))
+        if ((indexOf fmt "%") >= 0) {
+            return (out + "%")
+        }
+        return (out + "f")
+    }
+
+    ; What the Format pane asked of the value axis: bounds, a log scale and a
+    ; number format, as members to add to the value channel.
+    fn valueExtras:string (ch:GridChart stacked:boolean) {
+        def scale:string ""
+        if ch.logScale {
+            scale = "\"type\":\"log\""
+        }
+        def hasMin:boolean ((strlen ch.valueMin) > 0)
+        def hasMax:boolean ((strlen ch.valueMax) > 0)
+        if (hasMin || hasMax) {
+            def lo:double (this.extent(false false))
+            def hi:double (this.extent(stacked true))
+            if hasMin {
+                lo = (?? (to_double ch.valueMin) lo)
+            }
+            if hasMax {
+                hi = (?? (to_double ch.valueMax) hi)
+            }
+            if (hi > lo) {
+                if ((strlen scale) > 0) {
+                    scale = (scale + ",")
+                }
+                scale = (scale + "\"domain\":[" + (ChartData.num(lo)) + "," + (ChartData.num(hi)) + "]")
+                if (hasMin && hasMax) {
+                    scale = (scale + ",\"nice\":false")
+                }
+            }
+        }
+        def out:string ""
+        if ((strlen scale) > 0) {
+            out = (",\"scale\":{" + scale + "}")
+        }
+        def f:string (ChartData.d3Format(ch.numFormat))
+        if ((strlen f) > 0) {
+            out = (out + ",\"axis\":{\"format\":\"" + (ChartData.jsonEscape(f)) + "\"}")
+        }
+        return out
     }
 
     ; The name of the nth value column, for the axis titles of an XY chart.

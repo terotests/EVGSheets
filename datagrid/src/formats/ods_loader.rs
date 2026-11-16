@@ -10,7 +10,9 @@ use crate::cell_style::{CellBorder, CellStyle};
 use crate::date_serial::DateSerial;
 use crate::formats::ods_formula::OdsFormula;
 use crate::formats::sheet_bytes::SheetBytes;
-use crate::spreadsheet_model::SpreadsheetModel;
+use crate::spreadsheet_model::{CfRule, SpreadsheetModel};
+use crate::data_validation::DataValidation;
+use crate::formula_engine::FormulaParser;
 use crate::workbook_model::WorkbookModel;
 use crate::xlsx::xml_lite::{XmlLite, XmlTag};
 /// OdsLoader: an OpenDocument spreadsheet (.ods) into a WorkbookModel.
@@ -35,7 +37,9 @@ use crate::xlsx::xml_lite::{XmlLite, XmlTag};
 /// currencies), formulas (OpenFormula turned into Excel text, `OdsFormula`),
 /// cell styles (font, colour, fill, borders, alignment, wrap, number format),
 /// merges, column widths, row heights, hidden rows, columns and sheets,
-/// named ranges. Not read: charts, pictures, comments, conditional formats.
+/// named ranges, comments (notes), validation rules (list, whole, decimal,
+/// text length), conditional formats (cell value, colour scale, data bar,
+/// icon set) and frozen panes (settings.xml). Not read: charts, pictures.
 /// A table-cell style as read, before its parent is folded in.
 #[derive(Clone)]
 pub struct OdsCellStyle {
@@ -79,6 +83,19 @@ pub struct OdsLoader {
     pub styleIds: HashMap<String,i64>,
     /// Index 0 is what a cell with no style is drawn in.
     pub styleList: Vec<Rc<RefCell<CellStyle>>>,
+    /// Validation rules by name, as content.xml declares them before the tables.
+    pub valRules: HashMap<String,Rc<RefCell<DataValidation>>>,
+    /// The range each rule last went to on this sheet, so a column of cells
+    /// that name it becomes one range.
+    pub valLast: HashMap<String,Rc<RefCell<DataValidation>>>,
+    /// The comment of the cell cellText last read.
+    pub cellNote: String,
+    /// Frozen rows and columns by sheet name, from settings.xml.
+    pub freezeRows: HashMap<String,i64>,
+    pub freezeCols: HashMap<String,i64>,
+    /// Common styles by display name: conditions name the style they apply
+    /// that way ("ConditionalStyle_1" for "ConditionalStyle_5f_1").
+    pub displayNames: HashMap<String,String>,
 }
 
 impl OdsLoader {
@@ -95,6 +112,12 @@ impl OdsLoader {
             resolved: HashMap::new(),
             styleIds: HashMap::new(),
             styleList: Vec::new(),
+            valRules: HashMap::new(),
+            valLast: HashMap::new(),
+            cellNote: String::new(),
+            freezeRows: HashMap::new(),
+            freezeCols: HashMap::new(),
+            displayNames: HashMap::new(),
         };
         me.styleList.push(Rc::new(RefCell::new(CellStyle::new())));
         me
@@ -294,6 +317,9 @@ impl OdsLoader {
             self.readStyles(&OpcPackage::read_xml(&pkg, "styles.xml").clone());
         }
         self.readStyles(&content);
+        if OpcPackage::has_part(&pkg, "settings.xml") {
+            self.readSettings(&OpcPackage::read_xml(&pkg, "settings.xml").clone());
+        }
         OpcPackage::close(&pkg);
         if self.cellStyles.contains_key("Default") {
             self.styleList[0] = self.resolve("Default", 0);
@@ -345,6 +371,10 @@ impl OdsLoader {
                     cs.borrow_mut().parent = t.borrow().attr("style:parent-style-name");
                     cs.borrow_mut().dataStyle = t.borrow().attr("style:data-style-name");
                     self.cellStyles.insert(style_name.clone(), cs.clone());
+                    let disp: String = t.borrow().attr("style:display-name");
+                    if !disp.is_empty() {
+                        self.displayNames.insert(disp.clone(), style_name.clone());
+                    }
                     cur = cs.clone();
                     in_cell = true;
                 } else {
@@ -917,6 +947,8 @@ impl OdsLoader {
                 }
                 sheet = sh.clone();
                 in_sheet = true;
+                let no_last: HashMap<String,Rc<RefCell<DataValidation>>> = HashMap::new();
+                self.valLast = no_last.clone();
                 row = 0;
                 col_at = 0;
                 let no_defaults: HashMap<i64,String> = HashMap::new();
@@ -931,7 +963,17 @@ impl OdsLoader {
                 in_sheet = false;
                 continue;
             }
+            if nm == "content-validation" && !t.borrow().isEnd {
+                self.readValidation(&t.borrow().attr("table:name"), &t.borrow().attr("table:condition"), t.borrow().attr("table:allow-empty-cell") != "false");
+                continue;
+            }
             if !in_sheet {
+                continue;
+            }
+            if nm == "conditional-format" && !t.borrow().isEnd {
+                if !t.borrow().selfClose {
+                    self.readCondFormat(&p, &t.borrow().attr("calcext:target-range-address"), &sheet);
+                }
                 continue;
             }
             let sh2: Rc<RefCell<SpreadsheetModel>> = sheet.clone();
@@ -1017,8 +1059,10 @@ impl OdsLoader {
     }
     /// Text in a <text:p>, with ODF's coded whitespace expanded. Annotations
     /// (comments) carry their own <text:p> and are left out.
-    pub fn cellText(&self, p: &Rc<RefCell<XmlLite>>) -> String {
+    pub fn cellText(&mut self, p: &Rc<RefCell<XmlLite>>) -> String {
         let mut paras: Vec<String> = Vec::new();
+        let mut note_paras: Vec<String> = Vec::new();
+        let mut in_ann: i64 = 0;
         let mut cur: String = String::new();
         let mut in_p: i64 = 0;
         let mut skip: i64 = 0;
@@ -1048,7 +1092,17 @@ impl OdsLoader {
                 }
                 continue;
             }
-            if nm == "annotation" || nm == "frame" {
+            if nm == "annotation" {
+                if t.borrow().isEnd {
+                    in_ann -= 1;
+                } else {
+                    if !t.borrow().selfClose {
+                        in_ann += 1;
+                    }
+                }
+                continue;
+            }
+            if nm == "frame" {
                 if t.borrow().isEnd {
                     skip -= 1;
                 } else {
@@ -1064,13 +1118,24 @@ impl OdsLoader {
             if nm == "p" || nm == "h" {
                 if t.borrow().isEnd {
                     in_p -= 1;
-                    paras.push(cur.clone());
+                    if in_ann > 0 {
+                        note_paras.push(cur.clone());
+                    } else {
+                        paras.push(cur.clone());
+                    }
                     cur = String::new();
                 } else {
-                    any_p = true;
                     if t.borrow().selfClose {
-                        paras.push(String::new().to_string());
+                        if in_ann > 0 {
+                            note_paras.push(String::new().to_string());
+                        } else {
+                            any_p = true;
+                            paras.push(String::new().to_string());
+                        }
                     } else {
+                        if in_ann == 0 {
+                            any_p = true;
+                        }
                         in_p += 1;
                     }
                 }
@@ -1091,6 +1156,7 @@ impl OdsLoader {
                 cur = format!("{}\n", cur);
             }
         }
+        self.cellNote = note_paras.join("\n");
         if !any_p {
             return String::new();
         }
@@ -1122,9 +1188,26 @@ impl OdsLoader {
                 value = "FALSE".to_string();
             }
         }
+        let val_name: String = t.borrow().attr("table:content-validation-name");
         let mut text: String = String::new();
+        self.cellNote = String::new();
         if !t.borrow().selfClose {
             text = self.cellText(p);
+        }
+        if !self.cellNote.is_empty() {
+            self.ensure(sheet, row, col);
+            sheet.borrow_mut().setNote(row, col, &self.cellNote.clone());
+        }
+        if !val_name.is_empty() {
+            let mut vr: i64 = row_repeat;
+            if vr > 1024 {
+                vr = 1024;
+            }
+            let mut vc: i64 = rep;
+            if vc > 1024 {
+                vc = 1024;
+            }
+            self.placeValidation(&val_name, sheet, row, col, (row + vr) - 1, (col + vc) - 1);
         }
         if vtype == "string" || vtype.is_empty() {
             if t.borrow().has("office:string-value") {
@@ -1199,10 +1282,499 @@ impl OdsLoader {
         }
     }
     pub fn finishSheet(&self, sheet: &Rc<RefCell<SpreadsheetModel>>) {
+        let sname: String = sheet.borrow().name.clone();
+        let mut fr: i64 = 0;
+        let mut fc: i64 = 0;
+        if self.freezeRows.contains_key(&sname) {
+            fr = self.freezeRows.get(&sname).cloned().unwrap();
+        }
+        if self.freezeCols.contains_key(&sname) {
+            fc = self.freezeCols.get(&sname).cloned().unwrap();
+        }
+        if fr > 0 || fc > 0 {
+            self.ensure(sheet, fr, fc);
+            sheet.borrow_mut().setFreeze(fr, fc);
+        }
         sheet.borrow_mut().setStylesFrom(&self.styleList.clone());
         let base: Rc<RefCell<CellStyle>> = self.styleList[0].clone();
         sheet.borrow_mut().defaultFontName = base.borrow().fontName.clone();
         sheet.borrow_mut().quietWrites = false;
         sheet.borrow_mut().version = sheet.borrow().version + 1;
+    }
+    /// --- settings, validation, conditional formats ---------------------------
+    /// Frozen panes: settings.xml keeps them per table under the view's
+    /// "Tables" map. Split mode 2 is a freeze; HorizontalSplitPosition is the
+    /// number of frozen columns, VerticalSplitPosition the rows.
+    pub fn readSettings(&mut self, xml: &str) {
+        let p: Rc<RefCell<XmlLite>> = Rc::new(RefCell::new(XmlLite::new()));
+        p.borrow_mut().reset(xml.to_string());
+        let mut in_tables: bool = false;
+        let mut table: String = String::new();
+        let mut hmode: i64 = 0;
+        let mut vmode: i64 = 0;
+        let mut hpos: i64 = 0;
+        let mut vpos: i64 = 0;
+        loop {
+            let t: Rc<RefCell<XmlTag>> = p.borrow_mut().nextTag();
+            if !t.borrow().valid {
+                break;
+            }
+            let nm: String = t.borrow().name.clone();
+            if nm == "config-item-map-named" {
+                if t.borrow().isEnd {
+                    in_tables = false;
+                } else {
+                    in_tables = t.borrow().attr("config:name") == "Tables";
+                }
+                continue;
+            }
+            if !in_tables {
+                continue;
+            }
+            if nm == "config-item-map-entry" {
+                if t.borrow().isEnd {
+                    if !table.is_empty() {
+                        if vmode == 2 && vpos > 0 {
+                            self.freezeRows.insert(table.clone(), vpos);
+                        }
+                        if hmode == 2 && hpos > 0 {
+                            self.freezeCols.insert(table.clone(), hpos);
+                        }
+                    }
+                    table = String::new();
+                } else {
+                    table = t.borrow().attr("config:name");
+                    hmode = 0;
+                    vmode = 0;
+                    hpos = 0;
+                    vpos = 0;
+                }
+                continue;
+            }
+            if nm == "config-item" && !t.borrow().isEnd && !t.borrow().selfClose {
+                let key: String = t.borrow().attr("config:name");
+                let v: i64 = OdsLoader::toInt(&p.borrow_mut().readTextUntilEnd("config-item").trim().to_string(), 0);
+                if key == "HorizontalSplitMode" {
+                    hmode = v;
+                }
+                if key == "VerticalSplitMode" {
+                    vmode = v;
+                }
+                if key == "HorizontalSplitPosition" {
+                    hpos = v;
+                }
+                if key == "VerticalSplitPosition" {
+                    vpos = v;
+                }
+            }
+        }
+    }
+    /// The arguments of `fname(...)` inside s, split on ',' or ';' outside
+    /// quotes. Empty when s does not call fname.
+    pub fn argsOf(s: &str, fname: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let at: i64 = DgNative::index_of(s, &format!("{}(", fname));
+        if at < 0 {
+            return out;
+        }
+        let n: i64 = DgNative::str_len(s);
+        let mut i: i64 = at + DgNative::str_len(fname) + 1;
+        let mut depth: i64 = 0;
+        let mut quoted: bool = false;
+        let mut start: i64 = i;
+        while i < n {
+            let c: i64 = DgNative::char_at(s, i);
+            if c == 34 {
+                quoted = !quoted;
+            }
+            if !quoted {
+                if c == 40 {
+                    depth += 1;
+                }
+                if c == 41 {
+                    if depth == 0 {
+                        let last: String = DgNative::substr(s, start, i).trim().to_string();
+                        if !last.is_empty() || !out.is_empty() {
+                            out.push(last.clone());
+                        }
+                        return out;
+                    }
+                    depth -= 1;
+                }
+                if (c == 44 || c == 59) && depth == 0 {
+                    out.push(DgNative::substr(s, start, i).trim().to_string());
+                    start = i + 1;
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+    /// "<=5" → ["lessThanOrEqual", "5"]; empty when s starts with no comparison.
+    pub fn compareOf(s: &str) -> Vec<String> {
+        let t: String = s.trim().to_string();
+        let mut out: Vec<String> = Vec::new();
+        let ops: Vec<String> = vec![">=".to_string(), "<=".to_string(), "!=".to_string(), "<>".to_string(), "=".to_string(), ">".to_string(), "<".to_string()];
+        let names: Vec<String> = vec!["greaterThanOrEqual".to_string(), "lessThanOrEqual".to_string(), "notEqual".to_string(), "notEqual".to_string(), "equal".to_string(), "greaterThan".to_string(), "lessThan".to_string()];
+        let mut k: i64 = 0;
+        while k < (ops.len() as i64) {
+            let o: String = ops[k as usize].clone();
+            if DgNative::index_of(&t, &o) == 0 {
+                out.push(names[k as usize].clone());
+                out.push(DgNative::substr(&t, DgNative::str_len(&o), DgNative::str_len(&t)).trim().to_string());
+                return out;
+            }
+            k += 1;
+        }
+        out
+    }
+    /// A validation argument as OOXML writes a formula: no leading '=', and
+    /// references in Excel form.
+    pub fn valueArg(s: &str) -> String {
+        if DgNative::index_of(s, "[") >= 0 {
+            return OdsFormula::toExcel(s);
+        }
+        s.to_string()
+    }
+    /// table:condition, e.g. `of:cell-content-is-whole-number() and
+    /// cell-content-is-between(1,100)`, as a DataValidation. Date and time
+    /// rules and custom formulas are not read.
+    pub fn readValidation(&mut self, name: &str, cond0: &str, allow_blank: bool) {
+        if name.is_empty() {
+            return;
+        }
+        let mut cond: String = cond0.to_string();
+        if DgNative::index_of(&cond, "of:") == 0 {
+            cond = DgNative::substr(&cond, 3, DgNative::str_len(&cond));
+        }
+        let dv: Rc<RefCell<DataValidation>> = Rc::new(RefCell::new(DataValidation::new()));
+        dv.borrow_mut().allowBlank = allow_blank;
+        let items: Vec<String> = OdsLoader::argsOf(&cond, "cell-content-is-in-list");
+        if !items.is_empty() {
+            dv.borrow_mut().kind = "list".to_string();
+            if DgNative::char_at(&items[0], 0) == 34 {
+                let mut vals: Vec<String> = Vec::new();
+                let mut i: i64 = 0;
+                while i < (items.len() as i64) {
+                    vals.push((items[i as usize].split("\"").map(|s| s.to_string()).collect::<Vec<String>>()).join(""));
+                    i += 1;
+                }
+                dv.borrow_mut().f1 = format!("\"{}\"", vals.join(","));
+            } else {
+                dv.borrow_mut().f1 = OdsLoader::valueArg(&items[0]);
+            }
+            self.valRules.insert(name.to_string(), dv.clone());
+            return;
+        }
+        let mut rest: String = String::new();
+        if DgNative::index_of(&cond, "cell-content-is-whole-number()") >= 0 {
+            dv.borrow_mut().kind = "whole".to_string();
+        }
+        if DgNative::index_of(&cond, "cell-content-is-decimal-number()") >= 0 {
+            dv.borrow_mut().kind = "decimal".to_string();
+        }
+        let tl: i64 = DgNative::index_of(&cond, "cell-content-text-length()");
+        if tl >= 0 {
+            dv.borrow_mut().kind = "textLength".to_string();
+            rest = DgNative::substr(&cond, tl + 26, DgNative::str_len(&cond));
+        }
+        let tb: Vec<String> = OdsLoader::argsOf(&cond, "cell-content-text-length-is-between");
+        let tnb: Vec<String> = OdsLoader::argsOf(&cond, "cell-content-text-length-is-not-between");
+        if !tb.is_empty() || !tnb.is_empty() {
+            dv.borrow_mut().kind = "textLength".to_string();
+        }
+        if dv.borrow().kind.is_empty() || dv.borrow().kind == "any" {
+            return;
+        }
+        let bt: Vec<String> = OdsLoader::argsOf(&cond, "cell-content-is-between");
+        let nbt: Vec<String> = OdsLoader::argsOf(&cond, "cell-content-is-not-between");
+        let mut pair: Vec<String> = Vec::new();
+        if bt.len() == 2 {
+            dv.borrow_mut().op = "between".to_string();
+            pair = bt.clone();
+        }
+        if tb.len() == 2 {
+            dv.borrow_mut().op = "between".to_string();
+            pair = tb.clone();
+        }
+        if nbt.len() == 2 {
+            dv.borrow_mut().op = "notBetween".to_string();
+            pair = nbt.clone();
+        }
+        if tnb.len() == 2 {
+            dv.borrow_mut().op = "notBetween".to_string();
+            pair = tnb.clone();
+        }
+        if pair.len() == 2 {
+            dv.borrow_mut().f1 = OdsLoader::valueArg(&pair[0]);
+            dv.borrow_mut().f2 = OdsLoader::valueArg(&pair[1]);
+        } else {
+            let cc: i64 = DgNative::index_of(&cond, "cell-content()");
+            if cc >= 0 {
+                rest = DgNative::substr(&cond, cc + 14, DgNative::str_len(&cond));
+            }
+            let cmp: Vec<String> = OdsLoader::compareOf(&rest);
+            if cmp.is_empty() {
+                return;
+            }
+            dv.borrow_mut().op = cmp[0].clone();
+            dv.borrow_mut().f1 = OdsLoader::valueArg(&cmp[1]);
+        }
+        self.valRules.insert(name.to_string(), dv.clone());
+    }
+    /// Cells name their rule one by one; a run that continues the rule's last
+    /// range down a column (or along a row) grows it instead of adding one.
+    pub fn placeValidation(&mut self, name: &str, sheet: &Rc<RefCell<SpreadsheetModel>>, r0: i64, c0: i64, r1: i64, c1: i64) {
+        if !self.valRules.contains_key(name) {
+            return;
+        }
+        if self.valLast.contains_key(name) {
+            let last: Rc<RefCell<DataValidation>> = self.valLast.get(name).cloned().unwrap();
+            if last.borrow().c0 == c0 && last.borrow().c1 == c1 && last.borrow().r1 + 1 == r0 {
+                last.borrow_mut().r1 = r1;
+                return;
+            }
+            if last.borrow().r0 == r0 && last.borrow().r1 == r1 && last.borrow().c1 + 1 == c0 {
+                last.borrow_mut().c1 = c1;
+                return;
+            }
+        }
+        let rule: Rc<RefCell<DataValidation>> = self.valRules.get(name).cloned().unwrap();
+        let dv: Rc<RefCell<DataValidation>> = rule.borrow().copy();
+        dv.borrow_mut().r0 = r0;
+        dv.borrow_mut().c0 = c0;
+        dv.borrow_mut().r1 = r1;
+        dv.borrow_mut().c1 = c1;
+        self.ensure(sheet, r1, c1);
+        sheet.borrow_mut().addValidation(dv.clone());
+        self.valLast.insert(name.to_string(), dv.clone());
+    }
+    /// "Data.B2:Data.B5" (or one cell) → [r0, c0, r1, c1]; empty if unreadable.
+    pub fn rangeOf(part: &str) -> Vec<i64> {
+        let mut out: Vec<i64> = Vec::new();
+        let ends: Vec<String> = part.split(":").map(|s| s.to_string()).collect::<Vec<String>>();
+        let mut k: i64 = 0;
+        while k < (ends.len() as i64) && k < 2 {
+            let mut e: String = ends[k as usize].clone();
+            let dot: i64 = DgNative::last_index_of(&e, ".");
+            if dot >= 0 {
+                e = DgNative::substr(&e, dot + 1, DgNative::str_len(&e));
+            }
+            let mut rows: Vec<i64> = Vec::new();
+            let mut cols: Vec<i64> = Vec::new();
+            let mut ar: Vec<bool> = Vec::new();
+            let mut ac: Vec<bool> = Vec::new();
+            FormulaParser::parseA1(&e, &mut rows, &mut cols, &mut ar, &mut ac);
+            if rows.is_empty() || cols.is_empty() || rows[0] < 0 || cols[0] < 0 {
+                let none: Vec<i64> = Vec::new();
+                return none;
+            }
+            out.push(rows[0]);
+            out.push(cols[0]);
+            k += 1;
+        }
+        if out.len() == 2 {
+            out.push(out[0]);
+            out.push(out[1]);
+        }
+        if out.len() != 4 {
+            let none2: Vec<i64> = Vec::new();
+            return none2;
+        }
+        out
+    }
+    /// "#f8696b" → "F8696B".
+    pub fn hexOf(c: &str) -> String {
+        let mut s: String = c.trim().to_string();
+        if DgNative::index_of(&s, "#") == 0 {
+            s = DgNative::substr(&s, 1, DgNative::str_len(&s));
+        }
+        s.to_uppercase()
+    }
+    pub fn hexByte(s: &str, at: i64) -> i64 {
+        let digits: String = "0123456789ABCDEF".to_string();
+        let hi: i64 = DgNative::index_of(&digits, &DgNative::substr(s, at, at + 1));
+        let lo: i64 = DgNative::index_of(&digits, &DgNative::substr(s, at + 1, at + 2));
+        if hi < 0 || lo < 0 {
+            return 0;
+        }
+        hi * 16 + lo
+    }
+    /// The colour halfway between two "RRGGBB" colours — the middle stop of a
+    /// two-colour scale.
+    pub fn midHex(a: &str, b: &str) -> String {
+        if DgNative::str_len(a) != 6 || DgNative::str_len(b) != 6 {
+            return b.to_string();
+        }
+        let digits: String = "0123456789ABCDEF".to_string();
+        let mut out: String = String::new();
+        let mut k: i64 = 0;
+        while k < 3 {
+            let v: i64 = (OdsLoader::hexByte(a, k * 2) + OdsLoader::hexByte(b, k * 2)) / 2;
+            let hi: i64 = v / 16;
+            let lo: i64 = v - hi * 16;
+            out = format!("{}{}{}", out, DgNative::substr(&digits, hi, hi + 1), DgNative::substr(&digits, lo, lo + 1));
+            k += 1;
+        }
+        out
+    }
+    /// One <calcext:conditional-format>: its rules, applied to every range of
+    /// its target. Cell-value conditions take the fill of the style they
+    /// apply; formula and text conditions are not read.
+    pub fn readCondFormat(&mut self, p: &Rc<RefCell<XmlLite>>, target: &str, sheet: &Rc<RefCell<SpreadsheetModel>>) {
+        let mut ranges: Vec<Vec<i64>> = Vec::new();
+        let parts: Vec<String> = target.split(" ").map(|s| s.to_string()).collect::<Vec<String>>();
+        let mut i: i64 = 0;
+        while i < (parts.len() as i64) {
+            let rg: Vec<i64> = OdsLoader::rangeOf(&parts[i as usize].clone());
+            if rg.len() == 4 {
+                ranges.push(rg.clone());
+            }
+            i += 1;
+        }
+        let mut rules: Vec<Rc<RefCell<CfRule>>> = Vec::new();
+        let mut cur: Rc<RefCell<CfRule>> = Rc::new(RefCell::new(CfRule::new()));
+        let mut stops: i64 = 0;
+        loop {
+            let t: Rc<RefCell<XmlTag>> = p.borrow_mut().nextTag();
+            if !t.borrow().valid {
+                break;
+            }
+            let nm: String = t.borrow().name.clone();
+            if nm == "conditional-format" && t.borrow().isEnd {
+                break;
+            }
+            if t.borrow().isEnd {
+                if nm == "color-scale" && stops == 2 {
+                    let c1: String = cur.borrow().color1.clone();
+                    let c0: String = cur.borrow().color0.clone();
+                    cur.borrow_mut().color2 = c1.clone();
+                    cur.borrow_mut().color1 = OdsLoader::midHex(&c0, &c1);
+                }
+                continue;
+            }
+            if nm == "condition" {
+                let v: String = t.borrow().attr("calcext:value");
+                let rule: Rc<RefCell<CfRule>> = Rc::new(RefCell::new(CfRule::new()));
+                rule.borrow_mut().kind = 1;
+                let bt: Vec<String> = OdsLoader::argsOf(&v, "between");
+                let nb: Vec<String> = OdsLoader::argsOf(&v, "not-between");
+                let mut ok: bool = false;
+                if nb.len() == 2 {
+                    rule.borrow_mut().op = "notBetween".to_string();
+                    rule.borrow_mut().v1 = OdsLoader::dbl(&nb[0]);
+                    rule.borrow_mut().v2 = OdsLoader::dbl(&nb[1]);
+                    ok = true;
+                } else {
+                    if bt.len() == 2 {
+                        rule.borrow_mut().op = "between".to_string();
+                        rule.borrow_mut().v1 = OdsLoader::dbl(&bt[0]);
+                        rule.borrow_mut().v2 = OdsLoader::dbl(&bt[1]);
+                        ok = true;
+                    } else {
+                        let cmp: Vec<String> = OdsLoader::compareOf(&v);
+                        if !cmp.is_empty() {
+                            let num: Option<f64> = cmp[1].trim().parse::<f64>().ok();
+                            if num.is_some() {
+                                rule.borrow_mut().op = cmp[0].clone();
+                                rule.borrow_mut().v1 = num.unwrap();
+                                ok = true;
+                            }
+                        }
+                    }
+                }
+                if !ok {
+                    self.note("conditional formats with formulas or text conditions were not read");
+                    continue;
+                }
+                let mut style: String = t.borrow().attr("calcext:apply-style-name");
+                if !self.cellStyles.contains_key(&style) && self.displayNames.contains_key(&style) {
+                    style = self.displayNames.get(&style).cloned().unwrap();
+                }
+                let mut fill: String = String::new();
+                if !style.is_empty() && self.cellStyles.contains_key(&style) {
+                    fill = self.resolve(&style, 0).borrow().fillRgb.clone();
+                }
+                if fill.is_empty() {
+                    fill = "#C6EFCE".to_string();
+                }
+                rule.borrow_mut().fillRgb = fill.clone();
+                rules.push(rule.clone());
+                continue;
+            }
+            if nm == "color-scale" {
+                cur = Rc::new(RefCell::new(CfRule::new()));
+                cur.borrow_mut().kind = 0;
+                stops = 0;
+                rules.push(cur.clone());
+                continue;
+            }
+            if nm == "color-scale-entry" {
+                let hx: String = OdsLoader::hexOf(&t.borrow().attr("calcext:color"));
+                if stops == 0 {
+                    cur.borrow_mut().color0 = hx.clone();
+                }
+                if stops == 1 {
+                    cur.borrow_mut().color1 = hx.clone();
+                }
+                if stops == 2 {
+                    cur.borrow_mut().color2 = hx.clone();
+                }
+                stops += 1;
+                continue;
+            }
+            if nm == "data-bar" {
+                cur = Rc::new(RefCell::new(CfRule::new()));
+                cur.borrow_mut().kind = 2;
+                let pc: String = t.borrow().attr("calcext:positive-color");
+                if pc.is_empty() {
+                    cur.borrow_mut().color0 = "638EC6".to_string();
+                } else {
+                    cur.borrow_mut().color0 = OdsLoader::hexOf(&pc);
+                }
+                stops = 0;
+                rules.push(cur.clone());
+                continue;
+            }
+            if nm == "icon-set" {
+                cur = Rc::new(RefCell::new(CfRule::new()));
+                cur.borrow_mut().kind = 3;
+                let mut set_name: String = t.borrow().attr("calcext:icon-set-type");
+                if set_name.is_empty() {
+                    set_name = "3TrafficLights1".to_string();
+                }
+                cur.borrow_mut().iconSet = set_name.clone();
+                stops = 0;
+                rules.push(cur.clone());
+                continue;
+            }
+            if nm == "formatting-entry" && cur.borrow().kind == 3 {
+                if stops > 0 {
+                    let tv: Option<f64> = t.borrow().attr("calcext:value").trim().parse::<f64>().ok();
+                    if tv.is_some() {
+                        cur.borrow_mut().thresholds.push(tv.unwrap());
+                    }
+                }
+                stops += 1;
+                continue;
+            }
+        }
+        let mut ri: i64 = 0;
+        while ri < (rules.len() as i64) {
+            let rule: Rc<RefCell<CfRule>> = rules[ri as usize].clone();
+            let mut gi: i64 = 0;
+            while gi < (ranges.len() as i64) {
+                let rg: Vec<i64> = ranges[gi as usize].clone();
+                let one: Rc<RefCell<CfRule>> = rule.borrow().copy();
+                one.borrow_mut().r0 = rg[0];
+                one.borrow_mut().c0 = rg[1];
+                one.borrow_mut().r1 = rg[2];
+                one.borrow_mut().c1 = rg[3];
+                self.ensure(sheet, rg[2], rg[3]);
+                sheet.borrow_mut().addCfRule(one.clone());
+                gi += 1;
+            }
+            ri += 1;
+        }
     }
 }

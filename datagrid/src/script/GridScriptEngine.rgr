@@ -275,7 +275,7 @@ class GridScriptEngine {
             return (buffer_alloc 0)
         }
         this.ensureFonts()
-        def renderer:EVGPDFRenderer (new EVGPDFRenderer())
+        def renderer:EVGPDFRenderer (EVGPDFRenderer.new_())
         renderer.init(renderer)
         renderer.setPageSize(defaultPageWidth defaultPageHeight)
         renderer.setFontManager((fonts.getManager()))

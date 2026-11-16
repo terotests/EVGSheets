@@ -8,6 +8,7 @@ use crate::rgr::DgNative;
 use crate::date_serial::DateSerial;
 use crate::formula_value::FormulaValue;
 use crate::xlsx_number_format::XlsxNumberFormat;
+use crate::formula_more::FormulaMore;
 
 /// FormulaFunctions - pure, unit-testable spreadsheet function library.
 ///
@@ -400,12 +401,13 @@ impl FormulaFunctions {
         if ((((n == "PMT" || n == "PV") || n == "FV") || n == "NPER") || n == "NPV") || n == "SLN" {
             return true;
         }
-        false
+        FormulaMore::isKnown(&n)
     }
     /// Every function name this library answers, space-separated — for docs,
     /// hosts, and "what do we actually have?" checks.
     pub fn catalog() -> String {
-        "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW SUBTOTAL STDEV STDEV.S STDEVP STDEV.P VAR VAR.S VARP VAR.P PMT PV FV NPER NPV SLN".to_string()
+        let more: String = FormulaMore::names();
+        format!("{}{}", "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW SUBTOTAL STDEV STDEV.S STDEVP STDEV.P VAR VAR.S VARP VAR.P PMT PV FV NPER NPV SLN".to_string(), DgNative::substr(&more, 0, DgNative::str_len(&more) - 1))
     }
     /// Dispatch by uppercase function name. (`call` is reserved in Ranger.)
     pub fn invoke(name: &str, args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
@@ -712,6 +714,9 @@ impl FormulaFunctions {
         }
         if n == "TRANSPOSE" {
             return FormulaFunctions::fnTranspose(args);
+        }
+        if FormulaMore::isKnown(&n) {
+            return FormulaMore::invoke(&n, args);
         }
         FormulaValue::fromError("#NAME?".to_string())
     }
@@ -1429,17 +1434,14 @@ impl FormulaFunctions {
             return b;
         }
         let base: f64 = a.borrow().asNumber();
-        let exp: i64 = (b.borrow().asNumber()).floor() as i64;
-        if exp < 0 {
+        let exp: f64 = b.borrow().asNumber();
+        if base < 0.0 && exp.floor() != exp {
             return FormulaValue::fromError("#NUM!".to_string());
         }
-        let mut acc: f64 = 1.0;
-        let mut i: i64 = 0;
-        while i < exp {
-            acc *= base;
-            i += 1;
+        if base == 0.0 && exp < 0.0 {
+            return FormulaValue::fromError("#DIV/0!".to_string());
         }
-        FormulaValue::fromNumber(acc)
+        FormulaValue::fromNumber(FormulaMore::powD(base, exp))
     }
     pub fn fnSqrt(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 1);
@@ -2096,7 +2098,10 @@ impl FormulaFunctions {
                     vals[(j + 1) as usize] = cur;
                     j -= 1;
                 } else {
-                    j = -1;
+                    // Stop here: the key goes after `cur`. (Setting j to -1
+                    // to leave the loop put every key that was already in
+                    // place at the front, so a sorted list came back wrong.)
+                    break;
                 }
             }
             vals[(j + 1) as usize] = key;

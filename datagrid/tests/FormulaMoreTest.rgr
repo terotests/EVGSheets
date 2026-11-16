@@ -1,0 +1,277 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; FormulaMoreTest - the functions in formula_more.rs and the reference
+; functions in FormulaEngine (ROW, COLUMN, OFFSET, INDIRECT…), evaluated as
+; formulas on a small sheet, each against the value Excel gives.
+; ==============================================================================
+;
+;   A: 10 20 30 40 50      B: 1 2 3 4 5      C1: "a,b,c"   D1: 45658 (2025-01-01)
+;   E1: "=A1*2"            F1:F3: 2 4 4
+; ==============================================================================
+
+Import "../src/lib.rs"
+
+class MoreChecker {
+    def passed:int 0
+    def failed:int 0
+
+    fn ok:void (name:string cond:boolean detail:string) {
+        if cond {
+            passed = (passed + 1)
+            print ("  PASS " + name)
+        } {
+            failed = (failed + 1)
+            print ("  FAIL " + name + "  (" + detail + ")")
+        }
+    }
+}
+
+class FormulaMoreTest {
+    def c:MoreChecker (new MoreChecker)
+    def book:WorkbookModel (WorkbookModel.new_())
+    def s:SpreadsheetModel (SpreadsheetModel.new_())
+    def eng:FormulaEngine (FormulaEngine.new_())
+    def at:int 0
+
+    fn setup:void () {
+        s.name = "S"
+        s.resize(400 12)
+        def r:int 0
+        while (r < 5) {
+            s.setCellRaw(r 0 (to_string ((r + 1) * 10)))
+            s.setCellRaw(r 1 (to_string (r + 1)))
+            r = (r + 1)
+        }
+        s.setCellRaw(0 2 "a,b,c")
+        s.setCellRaw(0 3 "45658")
+        s.setFormula(0 4 "=A1*2")
+        s.setCellRaw(0 5 "2")
+        s.setCellRaw(1 5 "4")
+        s.setCellRaw(2 5 "4")
+        book.addSheet(s)
+        eng.attach(book)
+        eng.rebuildAll()
+        at = 10
+    }
+
+    ; The formula in a fresh cell of column H, and what it shows.
+    fn ev:string (expr:string) {
+        at = (at + 1)
+        s.setFormula(at 7 expr)
+        eng.syncCell(0 at 7)
+        eng.recalcDirty()
+        return (s.getCell(at 7))
+    }
+
+    fn num:void (expr:string want:double) {
+        def got:string (this.ev(expr))
+        def v@(optional):double (to_double (trim got))
+        def ok:boolean false
+        if (!null? v) {
+            def d:double ((unwrap v) - want)
+            if (d < 0.0) {
+                d = (0.0 - d)
+            }
+            def tol:double 0.000001
+            def aw:double want
+            if (aw < 0.0) {
+                aw = (0.0 - aw)
+            }
+            if (aw > 1.0) {
+                tol = (aw * 0.000001)
+            }
+            ok = (d <= tol)
+        }
+        c.ok((expr + " = " + (to_string want)) ok got)
+    }
+
+    fn str:void (expr:string want:string) {
+        def got:string (this.ev(expr))
+        c.ok((expr + " = " + want) (got == want) got)
+    }
+
+    sfn main:void () {
+        def t:FormulaMoreTest (new FormulaMoreTest)
+        t.setup()
+        t.run()
+        print ("passed " + (to_string t.c.passed) + ", failed " + (to_string t.c.failed))
+        if (t.c.failed > 0) {
+            print "SOME TESTS FAILED"
+        } {
+            print "ALL PASS"
+        }
+    }
+
+    fn run:void () {
+        print "== operators =="
+        this.num("=2^0.5" 1.4142135623731)
+        this.num("=2^-1" 0.5)
+        this.num("=(-2)^3" -8.0)
+        this.str("=(-8)^0.5" "#NUM!")
+        this.num("=POWER(9,0.5)" 3.0)
+
+        print "== math =="
+        this.num("=LOG(8,2)" 3.0)
+        this.num("=LOG(100)" 2.0)
+        this.num("=EVEN(1.5)" 2.0)
+        this.num("=ODD(2)" 3.0)
+        this.num("=EVEN(-1)" -2.0)
+        this.str("=ISEVEN(4)" "TRUE")
+        this.num("=FACT(5)" 120.0)
+        this.num("=FACTDOUBLE(7)" 105.0)
+        this.num("=COMBIN(8,2)" 28.0)
+        this.num("=COMBINA(4,3)" 20.0)
+        this.num("=PERMUT(5,2)" 20.0)
+        this.num("=GCD(24,36)" 12.0)
+        this.num("=LCM(4,6)" 12.0)
+        this.num("=QUOTIENT(-7,2)" -3.0)
+        this.num("=MROUND(10,3)" 9.0)
+        this.num("=CEILING.MATH(4.3)" 5.0)
+        this.num("=CEILING.MATH(-4.3)" -4.0)
+        this.num("=CEILING.MATH(-4.3,1,1)" -5.0)
+        this.num("=FLOOR.MATH(-4.3)" -5.0)
+        this.num("=FLOOR.MATH(-4.3,1,1)" -4.0)
+        this.num("=SUMSQ(3,4)" 25.0)
+        this.num("=SUMX2MY2(A1:A2,B1:B2)" 495.0)
+        this.num("=DEGREES(PI())" 180.0)
+        this.num("=SIN(PI()/2)" 1.0)
+        this.num("=COS(0)" 1.0)
+        this.num("=TAN(PI()/4)" 1.0)
+        this.num("=ASIN(1)" 1.5707963267949)
+        this.num("=ACOS(0.5)" 1.0471975511966)
+        this.num("=ATAN(1)" 0.785398163397448)
+        this.num("=ATAN2(-1,-1)" -2.35619449019234)
+        this.num("=SINH(1)" 1.1752011936438)
+        this.num("=TANH(0.5)" 0.46211715726001)
+        this.str("=DEC2BIN(10)" "1010")
+        this.str("=DEC2HEX(255,4)" "00FF")
+        this.num("=HEX2DEC(\"FF\")" 255.0)
+        this.num("=BIN2DEC(\"1111111111\")" -1.0)
+        this.str("=BASE(255,16)" "FF")
+        this.num("=DECIMAL(\"zz\",36)" 1295.0)
+        this.str("=ROMAN(1999)" "MCMXCIX")
+        this.num("=ARABIC(\"MCMXCIX\")" 1999.0)
+        this.num("=MULTINOMIAL(2,3)" 10.0)
+
+        print "== statistics =="
+        this.num("=SMALL(A1:A5,1)" 10.0)
+        this.num("=MEDIAN(A1:A4)" 25.0)
+        this.num("=MAXIFS(A1:A5,B1:B5,\"<4\")" 30.0)
+        this.num("=MINIFS(A1:A5,B1:B5,\">2\")" 30.0)
+        this.num("=RANK(30,A1:A5)" 3.0)
+        this.num("=RANK.EQ(30,A1:A5,1)" 3.0)
+        this.num("=RANK.AVG(4,F1:F3)" 1.5)
+        this.num("=MODE(F1:F3)" 4.0)
+        this.num("=PERCENTILE(A1:A5,0.25)" 20.0)
+        this.num("=PERCENTILE.EXC(A1:A5,0.25)" 15.0)
+        this.num("=QUARTILE(A1:A5,3)" 40.0)
+        this.num("=PERCENTRANK(A1:A5,30)" 0.5)
+        this.num("=GEOMEAN(F1:F3)" 3.1748021039364)
+        this.num("=HARMEAN(F1:F3)" 3.0)
+        this.num("=AVEDEV(A1:A5)" 12.0)
+        this.num("=DEVSQ(A1:A5)" 1000.0)
+        this.num("=CORREL(A1:A5,B1:B5)" 1.0)
+        this.num("=SLOPE(A1:A5,B1:B5)" 10.0)
+        this.num("=INTERCEPT(A1:A5,B1:B5)" 0.0)
+        this.num("=RSQ(A1:A5,B1:B5)" 1.0)
+        this.num("=FORECAST(6,A1:A5,B1:B5)" 60.0)
+        this.num("=COVARIANCE.S(A1:A5,B1:B5)" 25.0)
+        this.num("=COVARIANCE.P(A1:A5,B1:B5)" 20.0)
+        this.num("=STANDARDIZE(42,40,1.5)" 1.33333333333333)
+        this.num("=TRIMMEAN(A1:A5,0.4)" 30.0)
+        this.num("=AVERAGEA(A1:A2,TRUE)" 10.3333333333333)
+
+        print "== dates and times =="
+        this.num("=TIME(12,30,0)" 0.520833333333333)
+        this.num("=HOUR(0.75)" 18.0)
+        this.num("=MINUTE(TIME(1,45,30))" 45.0)
+        this.num("=SECOND(TIME(1,45,30))" 30.0)
+        this.num("=TIMEVALUE(\"6:00 PM\")" 0.75)
+        this.num("=WEEKNUM(D1)" 1.0)
+        this.num("=WEEKNUM(DATE(2025,3,10),2)" 11.0)
+        this.num("=ISOWEEKNUM(DATE(2021,1,1))" 53.0)
+        this.num("=NETWORKDAYS(DATE(2025,1,1),DATE(2025,1,31))" 23.0)
+        this.num("=NETWORKDAYS(DATE(2025,1,1),DATE(2025,1,31),D1)" 22.0)
+        this.num("=WORKDAY(DATE(2025,1,3),1)" 45663.0)
+        this.num("=WORKDAY.INTL(DATE(2025,1,3),1,11)" 45661.0)
+        this.num("=DATEDIF(DATE(2020,5,15),DATE(2025,3,1),\"Y\")" 4.0)
+        this.num("=DATEDIF(DATE(2020,5,15),DATE(2025,3,1),\"YM\")" 9.0)
+        this.num("=DATEDIF(DATE(2020,5,15),DATE(2025,3,1),\"MD\")" 14.0)
+        this.num("=DAYS360(DATE(2025,1,30),DATE(2025,2,28))" 28.0)
+        this.num("=YEARFRAC(DATE(2025,1,1),DATE(2025,7,1))" 0.5)
+        this.num("=YEARFRAC(DATE(2025,1,1),DATE(2025,7,1),3)" 0.495890410958904)
+
+        print "== text and information =="
+        this.str("=TEXTBEFORE(C1,\",\")" "a")
+        this.str("=TEXTAFTER(C1,\",\",2)" "c")
+        this.str("=TEXTAFTER(C1,\",\",-1)" "c")
+        this.str("=INDEX(TEXTSPLIT(C1,\",\"),1,2)" "b")
+        this.num("=COLUMNS(TEXTSPLIT(C1,\",\"))" 3.0)
+        this.num("=NUMBERVALUE(\"1.234,5\",\",\",\".\")" 1234.5)
+        this.str("=FIXED(1234.567,1)" "1,234.6")
+        this.str("=FIXED(1234.567,1,TRUE)" "1234.6")
+        this.str("=DOLLAR(-1234.5)" "($1,234.50)")
+        this.num("=UNICODE(\"A\")" 65.0)
+        this.str("=UNICHAR(66)" "B")
+        this.str("=ISLOGICAL(TRUE)" "TRUE")
+        this.str("=ISNA(NA())" "TRUE")
+        this.num("=TYPE(\"x\")" 2.0)
+        this.num("=ERROR.TYPE(1/0)" 2.0)
+        this.str("=ADDRESS(2,3)" "$C$2")
+        this.str("=ADDRESS(2,3,4)" "C2")
+        this.str("=ADDRESS(1,28,1,TRUE,\"My Sheet\")" "'My Sheet'!$AB$1")
+        this.str("=HYPERLINK(\"https://x.org\",\"x\")" "x")
+
+        print "== references =="
+        this.str("=ROW()>11" "TRUE")
+        this.num("=ROW(A7)" 7.0)
+        this.num("=COLUMN(C1)" 3.0)
+        this.num("=ROWS(A1:A5)" 5.0)
+        this.num("=COLUMNS(A1:C1)" 3.0)
+        this.num("=SUM(OFFSET(A1,1,0,3,1))" 90.0)
+        this.num("=OFFSET(A1,2,1)" 3.0)
+        this.num("=INDIRECT(\"A4\")" 40.0)
+        this.num("=SUM(INDIRECT(\"A1:A\"&B3))" 60.0)
+        this.str("=ISREF(A1)" "TRUE")
+        this.str("=ISFORMULA(E1)" "TRUE")
+        this.str("=FORMULATEXT(E1)" "=A1*2")
+        this.num("=RANDBETWEEN(3,3)" 3.0)
+
+        print "== arrays =="
+        this.num("=XMATCH(30,A1:A5)" 3.0)
+        this.num("=XMATCH(35,A1:A5,1)" 4.0)
+        this.num("=XMATCH(35,A1:A5,-1)" 3.0)
+        this.num("=XMATCH(\"b*\",{\"apple\",\"banana\"},2)" 2.0)
+        this.num("=SUM(SEQUENCE(4))" 10.0)
+        this.num("=INDEX(SEQUENCE(2,3,10,5),2,1)" 25.0)
+        this.num("=SUM(TAKE(A1:A5,2))" 30.0)
+        this.num("=SUM(TAKE(A1:A5,-2))" 90.0)
+        this.num("=SUM(DROP(A1:A5,3))" 90.0)
+        this.num("=ROWS(VSTACK(A1:A2,A3:A5))" 5.0)
+        this.num("=COLUMNS(HSTACK(A1:A2,B1:B2))" 2.0)
+        this.num("=INDEX(CHOOSECOLS(A1:B5,2),3,1)" 3.0)
+        this.num("=INDEX(CHOOSEROWS(A1:A5,-1),1,1)" 50.0)
+        this.num("=INDEX(SORTBY(A1:A5,B1:B5,-1),1,1)" 50.0)
+        this.num("=COLUMNS(TOROW(A1:B2))" 4.0)
+        this.num("=ROWS(WRAPROWS(SEQUENCE(5),2))" 3.0)
+
+        print "== finance =="
+        this.num("=IPMT(0.1/12,1,36,8000)" -66.6666666666667)
+        this.num("=PPMT(0.1/12,1,24,2000)" -75.6231860083663)
+        this.num("=RATE(48,-200,8000)" 0.00770147248820165)
+        this.num("=IRR({-70000,12000,15000,18000,21000,26000})" 0.0866309480365316)
+        this.num("=NPV(0.1,-10000,3000,4200,6800)" 1188.44341233522)
+        this.num("=XNPV(0.09,{-10000,2750,4250,3250,2750},{39448,39508,39751,39859,39904})" 2086.6476020554)
+        this.num("=XIRR({-10000,2750,4250,3250,2750},{39448,39508,39751,39859,39904})" 0.373362535238647)
+        this.num("=MIRR({-120000,39000,30000,21000,37000,46000},0.1,0.12)" 0.126094130365905)
+        this.num("=DDB(2400,300,10,1)" 480.0)
+        this.num("=DB(1000000,100000,6,1,7)" 186083.333333333)
+        this.num("=SYD(30000,7500,10,1)" 4090.90909090909)
+        this.num("=EFFECT(0.0525,4)" 0.0535426673707584)
+        this.num("=NOMINAL(0.053543,4)" 0.0525003697081)
+        this.num("=CUMIPMT(0.09/12,360,125000,13,24,0)" -11135.2321307508)
+        this.num("=PDURATION(0.025,2000,2200)" 3.85986616262266)
+        this.num("=RRI(96,10000,11000)" 0.000993236547441)
+    }
+}

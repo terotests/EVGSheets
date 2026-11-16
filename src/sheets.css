@@ -533,6 +533,32 @@
 /* The trigger is a point, and its name is for a reader only. */
 .ui-contextmenu-trigger { width: 1px; height: 1px; font-size: 1px; color: rgba(0, 0, 0, 0); }
 
+/* --- key tips: letter badges over the ribbon (Alt or F10) ------------------------- */
+.sx-keytips {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 1px;
+  height: 1px;
+}
+.sx-keytip {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 16px;
+  border-radius: 3px;
+  background-color: #3b3b3b;
+  border: 1px solid #ffffff;
+}
+.sx-keytip-word {
+  font-family: "Open Sans";
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
 /* --- dialogs (WindowCtl, modal) --------------------------------------------------- */
 
 /* The holder takes no room: the dialog is an overlay centred on the page. */
@@ -727,6 +753,7 @@
 .sx-rule-on { border: 2px solid var(--accent); }
 .sx-gone { display: none; }
 .sx-dlg-label-mid { color: var(--text); font-size: 13px; line-height: 18px; width: 64px; flex-shrink: 0; }
+.sx-form-label { color: var(--text); font-size: 13px; line-height: 18px; width: 128px; flex-shrink: 0; }
 .sx-dlg-actions-split { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: space-between; gap: 8px; padding-top: 4px; }
 
 /* A drop-down (SelectCtl): a field-like trigger and a menu-like list. */

@@ -1,0 +1,606 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; =============================================================================
+; FormDialog — the questions a ribbon command asks before it can run
+; =============================================================================
+;
+;   ┌─ Goal Seek ─────────────────────────────────────── × ┐
+;   │ Set cell           [B4______________]                │
+;   │ To value           [100_____________]                │
+;   │ By changing cell   [B2______________]                │
+;   │ (what went wrong, when it did)                        │
+;   │                                     [Cancel] [OK]     │
+;   └───────────────────────────────────────────────────────┘
+;
+; Goal Seek, Data Table, Consolidate, Forecast Sheet, From Web, Define Name,
+; Use in Formula, Symbol, Sort, Text to Columns, Move or Copy (sheet) and the
+; chart's Select Data and Move Chart are core commands that take their answers as one argument
+; ("set=B4;to=100;by=B2"). Clicked on the ribbon they got none and did
+; nothing. This dialog asks the questions, writes the argument and runs the
+; same command; a command that refuses keeps the dialog open and says why.
+;
+; One dialog serves them all: `kind` picks which rows show. Up to four text
+; fields and six drop-downs, made once, so focus and the controller list do
+; not change shape between forms.
+; =============================================================================
+
+Import "SxDialog.rgr"
+
+class FormDialog extends SxDialog {
+    def in0:InputCtl (new InputCtl)
+    def in1:InputCtl (new InputCtl)
+    def in2:InputCtl (new InputCtl)
+    def in3:InputCtl (new InputCtl)
+    def in4:InputCtl (new InputCtl)
+    def s0:SelectCtl (new SelectCtl)
+    def s1:SelectCtl (new SelectCtl)
+    def s2:SelectCtl (new SelectCtl)
+    def s3:SelectCtl (new SelectCtl)
+    def s4:SelectCtl (new SelectCtl)
+    def s5:SelectCtl (new SelectCtl)
+    def cancelBtn:ButtonCtl (new ButtonCtl)
+    def okBtn:ButtonCtl (new ButtonCtl)
+    ; Which form: the command id it runs.
+    def kind:string ""
+    ; The rows on show, in order: "i0".."i3" for fields, "s0".."s5" for
+    ; drop-downs, each with its label.
+    def rows:[string]
+    def labels:[string]
+
+    Constructor () {
+        this.setup("sx-form" "Form")
+        this.field(in0 "sx-form-in0" "")
+        this.field(in1 "sx-form-in1" "")
+        this.field(in2 "sx-form-in2" "")
+        this.field(in3 "sx-form-in3" "")
+        this.field(in4 "sx-form-in4" "")
+        s0.tid = "sx-form-s0"
+        s1.tid = "sx-form-s1"
+        s2.tid = "sx-form-s2"
+        s3.tid = "sx-form-s3"
+        s4.tid = "sx-form-s4"
+        s5.tid = "sx-form-s5"
+        this.button(cancelBtn "sx-form-cancel" "Cancel" "secondary")
+        this.button(okBtn "sx-form-ok" "OK" "primary")
+    }
+
+    ; --- which commands ask --------------------------------------------------
+
+    sfn asks:boolean (cmd:string) {
+        def all:[string] ([] _:string ("data.goalSeek" "data.dataTable" "data.consolidate" "data.forecastSheet" "data.fromWeb" "formulas.defineName" "formulas.useInFormula" "insert.symbol" "data.sort" "data.customSort" "data.textToColumns" "chart.selectData" "chart.move" "chart.formatAxis" "chart.formatColors" "sheet.move" "sheet.moveCopy"))
+        def i:int 0
+        while (i < (array_length all)) {
+            if ((itemAt all i) == cmd) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+
+    sfn titleOf:string (cmd:string) {
+        if (cmd == "data.goalSeek") {
+            return "Goal Seek"
+        }
+        if (cmd == "data.dataTable") {
+            return "Data Table"
+        }
+        if (cmd == "data.consolidate") {
+            return "Consolidate"
+        }
+        if (cmd == "data.forecastSheet") {
+            return "Create Forecast Worksheet"
+        }
+        if (cmd == "data.fromWeb") {
+            return "From Web"
+        }
+        if (cmd == "formulas.defineName") {
+            return "New Name"
+        }
+        if (cmd == "formulas.useInFormula") {
+            return "Use in Formula"
+        }
+        if (cmd == "insert.symbol") {
+            return "Symbol"
+        }
+        if ((cmd == "data.sort") || (cmd == "data.customSort")) {
+            return "Sort"
+        }
+        if (cmd == "data.textToColumns") {
+            return "Text to Columns"
+        }
+        if (cmd == "chart.selectData") {
+            return "Select Data Source"
+        }
+        if (cmd == "chart.move") {
+            return "Move Chart"
+        }
+        if (cmd == "chart.formatAxis") {
+            return "Format Axis"
+        }
+        if (cmd == "chart.formatColors") {
+            return "Format Chart Area"
+        }
+        if ((cmd == "sheet.move") || (cmd == "sheet.moveCopy")) {
+            return "Move or Copy"
+        }
+        return cmd
+    }
+
+    ; --- controllers -----------------------------------------------------------
+
+    fn inputAt:InputCtl (i:int) {
+        if (i == 1) {
+            return in1
+        }
+        if (i == 2) {
+            return in2
+        }
+        if (i == 3) {
+            return in3
+        }
+        if (i == 4) {
+            return in4
+        }
+        return in0
+    }
+
+    fn selectAt:SelectCtl (i:int) {
+        if (i == 1) {
+            return s1
+        }
+        if (i == 2) {
+            return s2
+        }
+        if (i == 3) {
+            return s3
+        }
+        if (i == 4) {
+            return s4
+        }
+        if (i == 5) {
+            return s5
+        }
+        return s0
+    }
+
+    fn ctls:[UiCtl] () {
+        def a:[UiCtl]
+        push a win
+        push a in0
+        push a in1
+        push a in2
+        push a in3
+        push a in4
+        push a s0
+        push a s1
+        push a s2
+        push a s3
+        push a s4
+        push a s5
+        push a cancelBtn
+        push a okBtn
+        return a
+    }
+
+    fn rowTid:string (r:string) {
+        def n:int (?? (to_int (substring r 1 2)) 0)
+        if ((substring r 0 1) == "i") {
+            def c:InputCtl (this.inputAt(n))
+            return c.tid
+        }
+        def s:SelectCtl (this.selectAt(n))
+        return (s.triggerTid())
+    }
+
+    fn ring:[string] () {
+        def a:[string]
+        def i:int 0
+        while (i < (array_length rows)) {
+            push a (this.rowTid((itemAt rows i)))
+            i = (i + 1)
+        }
+        push a cancelBtn.tid
+        push a okBtn.tid
+        push a (win.closeTid())
+        return a
+    }
+
+    fn isButton:boolean (target:string) {
+        return ((target == cancelBtn.tid) || (target == okBtn.tid))
+    }
+
+    fn entersDefault:boolean (target:string) {
+        return ((in0.owns(target)) || (in1.owns(target)) || (in2.owns(target)) || (in3.owns(target)) || (in4.owns(target)))
+    }
+
+    fn defaultTid:string () {
+        return okBtn.tid
+    }
+
+    fn holdsKeys:boolean (target:string) {
+        return (s0.open || s1.open || s2.open || s3.open || s4.open || s5.open)
+    }
+
+    fn writes:boolean () {
+        return (kind != "formulas.useInFormula")
+    }
+
+    ; --- the body --------------------------------------------------------------
+
+    fn addInput:void (i:int lbl:string value:string) {
+        def c:InputCtl (this.inputAt(i))
+        c.name = lbl
+        c.setValue(value)
+        push rows ("i" + (to_string i))
+        push labels lbl
+    }
+
+    fn addSelect:void (i:int lbl:string) {
+        def s:SelectCtl (this.selectAt(i))
+        s.name = lbl
+        clear s.items
+        s.value = ""
+        push rows ("s" + (to_string i))
+        push labels lbl
+    }
+
+    fn line:EVGElement (lbl:string el:EVGElement) {
+        def r:EVGElement (this.row("sx-dlg-field"))
+        def l:EVGElement (this.label(lbl))
+        l.className = "sx-form-label"
+        r.addChild(l)
+        r.addChild(el)
+        return r
+    }
+
+    fn buildBody:void () {
+        def body:EVGElement (unwrap win.bodyEl)
+        body.className = "sx-dlg-body"
+        UiTree.clearChildren(body)
+        def i:int 0
+        while (i < (array_length rows)) {
+            def r:string (itemAt rows i)
+            def n:int (?? (to_int (substring r 1 2)) 0)
+            if ((substring r 0 1) == "i") {
+                def c:InputCtl (this.inputAt(n))
+                body.addChild((this.line((itemAt labels i) (unwrap c.rootEl))))
+            } {
+                def s:SelectCtl (this.selectAt(n))
+                body.addChild((this.line((itemAt labels i) (unwrap s.rootEl))))
+            }
+            i = (i + 1)
+        }
+        body.addChild((this.statusRow()))
+        def acts:EVGElement (this.row("sx-dlg-actions"))
+        acts.addChild((unwrap cancelBtn.rootEl))
+        acts.addChild((unwrap okBtn.rootEl))
+        body.addChild(acts)
+    }
+
+    ; --- the forms ---------------------------------------------------------------
+
+    fn sortColumns:void (s:SelectCtl app:GridApp withNone:boolean) {
+        def rg:[int] (app.currentRegion())
+        if withNone {
+            s.addItem("" "(none)" false)
+        }
+        def c:int (itemAt rg 1)
+        while (c <= (itemAt rg 3)) {
+            def letter:string (SpreadsheetModel.colLabel(c))
+            def head:string (app.model.getCell((itemAt rg 0) c))
+            def shown:string ("Column " + letter)
+            if ((strlen head) > 0) {
+                shown = (shown + " — " + head)
+            }
+            s.addItem(letter shown false)
+            c = (c + 1)
+        }
+    }
+
+    fn orders:void (s:SelectCtl) {
+        s.addItem("asc" "A to Z, smallest first" false)
+        s.addItem("desc" "Z to A, largest first" false)
+        s.value = "asc"
+    }
+
+    fn plan:void (app:GridApp) {
+        clear rows
+        clear labels
+        def here:string (SpreadsheetModel.cellLabel(app.sel.active.row app.sel.active.col))
+        if (kind == "data.goalSeek") {
+            this.addInput(0 "Set cell" here)
+            this.addInput(1 "To value" "")
+            this.addInput(2 "By changing cell" "")
+        }
+        if (kind == "data.dataTable") {
+            this.addInput(0 "Row input cell" "")
+            this.addInput(1 "Column input cell" "")
+        }
+        if (kind == "data.consolidate") {
+            this.addSelect(0 "Function")
+            s0.addItem("sum" "Sum" false)
+            s0.addItem("average" "Average" false)
+            s0.addItem("count" "Count" false)
+            s0.addItem("max" "Max" false)
+            s0.addItem("min" "Min" false)
+            s0.value = "sum"
+            this.addInput(0 "References" (app.selectionRef()))
+        }
+        if (kind == "data.forecastSheet") {
+            this.addInput(0 "Points to forecast" "3")
+        }
+        if (kind == "data.fromWeb") {
+            this.addInput(0 "URL" "https://")
+        }
+        if (kind == "formulas.defineName") {
+            this.addInput(0 "Name" "")
+            this.addInput(1 "Refers to" ("=" + (app.selectionRef())))
+        }
+        if (kind == "formulas.useInFormula") {
+            this.addSelect(0 "Name")
+            def i:int 0
+            while (i < (array_length app.book.nameOrder)) {
+                def nm:string (itemAt app.book.nameOrder i)
+                s0.addItem(nm nm false)
+                if (i == 0) {
+                    s0.value = nm
+                }
+                i = (i + 1)
+            }
+        }
+        if (kind == "insert.symbol") {
+            this.addSelect(0 "Symbol")
+            def syms:[string] ([] _:string ("©" "®" "™" "€" "£" "¥" "¢" "°" "±" "×" "÷" "≤" "≥" "≠" "≈" "∞" "√" "π" "Σ" "µ" "Ω" "§" "¶" "•" "…" "–" "—" "→" "←" "↑" "↓" "✓" "✗" "½" "¼" "¾"))
+            def k:int 0
+            while (k < (array_length syms)) {
+                s0.addItem((itemAt syms k) (itemAt syms k) false)
+                k = (k + 1)
+            }
+            s0.value = "©"
+            this.addInput(0 "Or type it" "")
+        }
+        if ((kind == "data.sort") || (kind == "data.customSort")) {
+            this.addSelect(0 "Sort by")
+            this.sortColumns(s0 app false)
+            s0.value = (SpreadsheetModel.colLabel(app.sel.active.col))
+            this.addSelect(1 "Order")
+            this.orders(s1)
+            this.addSelect(2 "Then by")
+            this.sortColumns(s2 app true)
+            this.addSelect(3 "Order")
+            this.orders(s3)
+            this.addSelect(4 "Then by")
+            this.sortColumns(s4 app true)
+            this.addSelect(5 "Order")
+            this.orders(s5)
+        }
+        if (kind == "data.textToColumns") {
+            this.addSelect(0 "Delimiter")
+            s0.addItem("," "Comma" false)
+            s0.addItem("tab" "Tab" false)
+            s0.addItem(";" "Semicolon" false)
+            s0.addItem(" " "Space" false)
+            s0.addItem("other" "Other" false)
+            s0.value = ","
+            this.addInput(0 "Other" "")
+        }
+        if (kind == "chart.selectData") {
+            def pi:int (app.activeChartPanel())
+            def range:string ""
+            if (pi >= 0) {
+                def p:ChartPanel (app.view.chartLayer.panelAt(pi))
+                range = (p.chart.rangeLabel())
+            }
+            this.addInput(0 "Chart data range" range)
+        }
+        if ((kind == "chart.formatAxis") || (kind == "chart.formatColors")) {
+            def fi:int (app.activeChartPanel())
+            if (fi >= 0) {
+                def fp:ChartPanel (app.view.chartLayer.panelAt(fi))
+                def fc:GridChart fp.chart
+                if (kind == "chart.formatAxis") {
+                    this.addInput(0 "Minimum" fc.valueMin)
+                    this.addInput(1 "Maximum" fc.valueMax)
+                    this.addInput(2 "Number format" fc.numFormat)
+                    this.addInput(3 "Vertical axis title" fc.yTitle)
+                    this.addInput(4 "Horizontal axis title" fc.xTitle)
+                } {
+                    this.addInput(0 "Series colours" fc.seriesColors)
+                    this.addInput(1 "Chart area fill" fc.areaFill)
+                    this.addInput(2 "Outline" fc.outlineColor)
+                    def ts:string ""
+                    if (fc.titleSize > 0) {
+                        ts = (to_string fc.titleSize)
+                    }
+                    this.addInput(3 "Title size (pt)" ts)
+                }
+            }
+        }
+        if (kind == "chart.move") {
+            this.addSelect(0 "Move to sheet")
+            def si:int 0
+            while (si < (app.book.sheetCount())) {
+                def sh:SpreadsheetModel (app.book.sheetAt(si))
+                s0.addItem(sh.name sh.name false)
+                si = (si + 1)
+            }
+            def act:SpreadsheetModel (app.book.sheetAt(app.book.activeIndex))
+            s0.value = act.name
+        }
+        if ((kind == "sheet.move") || (kind == "sheet.moveCopy")) {
+            ; Excel's Move or Copy: the sheet goes before the one chosen, or to
+            ; the end; "Create a copy" leaves the original where it is.
+            this.addSelect(0 "Before sheet")
+            def mi:int 0
+            def nextName:string ""
+            while (mi < (app.book.sheetCount())) {
+                def msh:SpreadsheetModel (app.book.sheetAt(mi))
+                s0.addItem(("before:" + msh.name) msh.name false)
+                if (mi == (app.book.activeIndex + 1)) {
+                    nextName = msh.name
+                }
+                mi = (mi + 1)
+            }
+            s0.addItem("end" "(move to end)" false)
+            if ((strlen nextName) > 0) {
+                s0.value = ("before:" + nextName)
+            } {
+                s0.value = "end"
+            }
+            this.addSelect(1 "Create a copy")
+            s1.addItem("" "No" false)
+            s1.addItem("copy:" "Yes" false)
+            s1.value = ""
+        }
+        def j:int 0
+        while (j < 6) {
+            def s:SelectCtl (this.selectAt(j))
+            s.build()
+            j = (j + 1)
+        }
+    }
+
+    ; The core's argument, from what the form holds.
+    fn argument:string () {
+        if (kind == "data.goalSeek") {
+            return ("set=" + (trim in0.value) + ";to=" + (trim in1.value) + ";by=" + (trim in2.value))
+        }
+        if (kind == "data.dataTable") {
+            if ((strlen (trim in1.value)) > 0) {
+                return ("col=" + (trim in1.value))
+            }
+            return ("row=" + (trim in0.value))
+        }
+        if (kind == "data.consolidate") {
+            return (s0.value + ":" + (trim in0.value))
+        }
+        if (kind == "data.forecastSheet") {
+            return ("n=" + (trim in0.value))
+        }
+        if (kind == "formulas.defineName") {
+            def ref:string (trim in1.value)
+            if ((indexOf ref "=") == 0) {
+                ref = (substring ref 1 (strlen ref))
+            }
+            return ((trim in0.value) + "=" + ref)
+        }
+        if ((kind == "formulas.useInFormula") || (kind == "chart.move")) {
+            return s0.value
+        }
+        if (kind == "insert.symbol") {
+            if ((strlen in0.value) > 0) {
+                return in0.value
+            }
+            return s0.value
+        }
+        if ((kind == "data.sort") || (kind == "data.customSort")) {
+            def spec:string (s0.value + " " + s1.value)
+            if ((strlen s2.value) > 0) {
+                spec = (spec + "," + s2.value + " " + s3.value)
+            }
+            if ((strlen s4.value) > 0) {
+                spec = (spec + "," + s4.value + " " + s5.value)
+            }
+            return spec
+        }
+        if (kind == "chart.formatAxis") {
+            return ("min=" + (trim in0.value) + ";max=" + (trim in1.value) + ";format=" + (trim in2.value) + ";yTitle=" + (trim in3.value) + ";xTitle=" + (trim in4.value))
+        }
+        if (kind == "chart.formatColors") {
+            return ("colors=" + (trim in0.value) + ";area=" + (trim in1.value) + ";outline=" + (trim in2.value) + ";titleSize=" + (trim in3.value))
+        }
+        if ((kind == "sheet.move") || (kind == "sheet.moveCopy")) {
+            return (s1.value + s0.value)
+        }
+        if (kind == "data.textToColumns") {
+            if (s0.value == "other") {
+                return in0.value
+            }
+            return s0.value
+        }
+        return (trim in0.value)
+    }
+
+    ; Sort runs as Custom Sort: the levels are what the form adds.
+    fn runs:string () {
+        if (kind == "data.sort") {
+            return "data.customSort"
+        }
+        if (kind == "sheet.move") {
+            return "sheet.moveCopy"
+        }
+        return kind
+    }
+
+    fn adopt:boolean (app:GridApp) {
+        return false
+    }
+
+    fn open:string (app:GridApp pageW:double pageH:double) {
+        if app.editing {
+            app.commitEdit()
+        }
+        win.title = (FormDialog.titleOf(kind))
+        statusEl.textContent = ""
+        this.plan(app)
+        this.openOn(pageW pageH)
+        UiTree.inline((unwrap win.frameEl) "width" "420px")
+        if ((array_length rows) == 0) {
+            return okBtn.tid
+        }
+        def first:string (this.rowTid((itemAt rows 0)))
+        if ((substring (itemAt rows 0) 0 1) == "i") {
+            in0.selectAll()
+        }
+        return first
+    }
+
+    fn closeOpenLists:void (focusId:string) {
+        def j:int 0
+        while (j < 6) {
+            def s:SelectCtl (this.selectAt(j))
+            if (s.open && ((s.owns(focusId)) == false)) {
+                def gone:string (s.closeList())
+            }
+            j = (j + 1)
+        }
+    }
+
+    fn act:boolean (target:string app:GridApp) {
+        if (target == cancelBtn.tid) {
+            this.close()
+            return true
+        }
+        if (target == okBtn.tid) {
+            def before:string app.view.status
+            app.view.status = ""
+            def arg:string (this.argument())
+            if (app.runCommand((this.runs()) arg)) {
+                this.close()
+                return true
+            }
+            ; Refused: the dialog stays on the same answers, saying why.
+            def why:string app.view.status
+            if ((strlen why) == 0) {
+                why = "That did not work. Check the values and try again."
+                app.view.status = before
+            }
+            statusEl.textContent = why
+            return true
+        }
+        return false
+    }
+
+    fn showFocus:void (focusId:string) {
+        if (win.open == false) {
+            return
+        }
+        this.closeOpenLists(focusId)
+        this.caretFor(in0 focusId)
+        this.caretFor(in1 focusId)
+        this.caretFor(in2 focusId)
+        this.caretFor(in3 focusId)
+        this.caretFor(in4 focusId)
+    }
+}

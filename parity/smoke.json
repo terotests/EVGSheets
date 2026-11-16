@@ -1,5 +1,5 @@
 {
- "passed": 118,
+ "passed": 148,
  "checks": [
   {
    "name": "a plain visit opens an empty workbook",
@@ -59,6 +59,22 @@
   },
   {
    "name": "the reader is told Bold is pressed",
+   "ok": true
+  },
+  {
+   "name": "Alt shows key tips on the ribbon tabs",
+   "ok": true
+  },
+  {
+   "name": "…H shows the Home tab's commands",
+   "ok": true
+  },
+  {
+   "name": "…and 1 is Bold",
+   "ok": true
+  },
+  {
+   "name": "…Escape steps back to the tabs, then closes the tips",
    "ok": true
   },
   {
@@ -254,6 +270,58 @@
    "ok": true
   },
   {
+   "name": "Goal Seek on the ribbon opens a form on the active cell",
+   "ok": true
+  },
+  {
+   "name": "…an incomplete form stays open and says why",
+   "ok": true
+  },
+  {
+   "name": "…and OK seeks the goal and closes",
+   "ok": true
+  },
+  {
+   "name": "Sort… opens a form with the region's columns",
+   "ok": true
+  },
+  {
+   "name": "…and sorts by the chosen column and order",
+   "ok": true
+  },
+  {
+   "name": "Define Name opens with the selection as Refers to",
+   "ok": true
+  },
+  {
+   "name": "…and OK defines it",
+   "ok": true
+  },
+  {
+   "name": "Use in Formula offers the defined names",
+   "ok": true
+  },
+  {
+   "name": "…and OK starts a formula with it",
+   "ok": true
+  },
+  {
+   "name": "Symbol opens a picker",
+   "ok": true
+  },
+  {
+   "name": "…and OK types the symbol",
+   "ok": true
+  },
+  {
+   "name": "typed functions: TEXTBEFORE, an array constant, SEQUENCE spilling, ROW",
+   "ok": true
+  },
+  {
+   "name": "Select Data without a chart says to select one",
+   "ok": true
+  },
+  {
    "name": "Fill colour opens as an EVGUI dialog",
    "ok": true
   },
@@ -358,6 +426,18 @@
    "ok": true
   },
   {
+   "name": "the Format pane moves the legend",
+   "ok": true
+  },
+  {
+   "name": "…and opens Format Axis as a form",
+   "ok": true
+  },
+  {
+   "name": "Format Axis sets the bounds and the number format",
+   "ok": true
+  },
+  {
    "name": "Escape leaves the chart on the sheet",
    "ok": true
   },
@@ -414,6 +494,14 @@
    "ok": true
   },
   {
+   "name": "Move or Copy… opens its dialog",
+   "ok": true
+  },
+  {
+   "name": "…and Create a copy puts one at the end",
+   "ok": true
+  },
+  {
    "name": "dragging a tab reorders the sheets",
    "ok": true
   },
@@ -459,6 +547,38 @@
   },
   {
    "name": "…so Underline is not there",
+   "ok": true
+  },
+  {
+   "name": "opens sales.xls",
+   "ok": true
+  },
+  {
+   "name": "opens sales.ods",
+   "ok": true
+  },
+  {
+   "name": "opens semicolons.csv",
+   "ok": true
+  },
+  {
+   "name": "opens values.xlsb",
+   "ok": true
+  },
+  {
+   "name": "opens units.tsv",
+   "ok": true
+  },
+  {
+   "name": "Download .ods gives an OpenDocument file",
+   "ok": true
+  },
+  {
+   "name": "Save writes back to the file it opened",
+   "ok": true
+  },
+  {
+   "name": "Save asks once for a new workbook, then saves in place",
    "ok": true
   },
   {

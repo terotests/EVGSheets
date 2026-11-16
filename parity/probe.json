@@ -72,7 +72,7 @@
   },
   "ui.homeControls": {
    "pass": true,
-   "value": "144 commands reachable from Home: 49 controls on show, the rest in their drop-downs (Excel: ~60); 43 buttons inside toolbars"
+   "value": "144 commands reachable from Home: 49 controls on show, the rest in their drop-downs (Excel: ~60); 45 buttons inside toolbars"
   },
   "ui.homeClarity": {
    "pass": true,
@@ -452,7 +452,7 @@
   },
   "cmd.formulas.insertFunction": {
    "pass": true,
-   "value": "89 → VLOOKUP → =VLOOKUP("
+   "value": "113 → VLOOKUP → =VLOOKUP("
   },
   "cmd.data.removeDuplicates": {
    "pass": true,
@@ -774,9 +774,25 @@
    "pass": true,
    "value": "300"
   },
+  "cmd.chart.formatElement": {
+   "pass": true,
+   "value": "true"
+  },
+  "cmd.chart.formatAxis": {
+   "pass": true,
+   "value": "true"
+  },
+  "cmd.chart.formatColors": {
+   "pass": true,
+   "value": "true"
+  },
+  "cmd.chart.kinds": {
+   "pass": true,
+   "value": "27 of 27 drawn"
+  },
   "cmd.formulas.defineName": {
    "pass": true,
-   "value": "30 Sheet11!$A$2:$A$3"
+   "value": "30 Sheet12!$A$2:$A$3"
   },
   "cmd.formulas.useInFormula": {
    "pass": true,
@@ -804,7 +820,7 @@
   },
   "cmd.formulas.watchWindow": {
    "pass": true,
-   "value": "Sheet11!C2 watch"
+   "value": "Sheet12!C2 watch"
   },
   "cmd.formulas.calculationOptions": {
    "pass": true,
@@ -812,7 +828,7 @@
   },
   "cmd.formulas.financial.list": {
    "pass": true,
-   "value": "6 listed, =PMT("
+   "value": "12 listed, =PMT("
   },
   "cmd.formulas.logical.list": {
    "pass": true,
@@ -824,19 +840,19 @@
   },
   "cmd.formulas.dateTime.list": {
    "pass": true,
-   "value": "9 listed, =DATE("
+   "value": "16 listed, =DATE("
   },
   "cmd.formulas.lookupReference.list": {
    "pass": true,
-   "value": "10 listed, =VLOOKUP("
+   "value": "17 listed, =VLOOKUP("
   },
   "cmd.formulas.mathTrig.list": {
    "pass": true,
-   "value": "16 listed, =ROUND("
+   "value": "18 listed, =ROUND("
   },
   "cmd.formulas.moreFunctions.list": {
    "pass": true,
-   "value": "18 listed, =AVERAGE("
+   "value": "20 listed, =AVERAGE("
   },
   "cmd.formulas.recentlyUsed.list": {
    "pass": true,
@@ -1140,7 +1156,7 @@
   },
   "cmd.sheet.move": {
    "pass": true,
-   "value": "Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Panes,DataTools,Sheet14,Descriptive Statistics,Sheet16,Forecast,Import,Import Query,Shapes,Sheet8,Sheet7,Sheet4 → Shapes,Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Panes,DataTools,Sheet14,Descriptive Statistics,Sheet16,Forecast,Import,Import Query,Sheet8,Sheet7,Sheet4"
+   "value": "Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Sheet12,Panes,DataTools,Sheet15,Descriptive Statistics,Sheet17,Forecast,Import,Import Query,Shapes,Sheet8,Sheet7,Sheet4 → Shapes,Sales,Sheet2,Sheet3,Sheet5,Data,Sheet9,Sheet10,Sheet11,Sheet12,Panes,DataTools,Sheet15,Descriptive Statistics,Sheet17,Forecast,Import,Import Query,Sheet8,Sheet7,Sheet4"
   },
   "cmd.home.addIns": {
    "pass": true,
@@ -1176,7 +1192,7 @@
   },
   "cmd.view.switchWindows": {
    "pass": true,
-   "value": "20 / 19"
+   "value": "21 / 20"
   },
   "cmd.view.arrangeAll": {
    "pass": true,
@@ -1248,7 +1264,7 @@
   },
   "ui.zoomSlider": {
    "pass": true,
-   "value": "slider true zoom 200 (menu false dlg false pane  ctx false at {\"x\":1527,\"y\":1015,\"w\":110,\"h\":4})"
+   "value": "slider true zoom 205 (menu false dlg false pane  ctx false at {\"x\":1528,\"y\":1010,\"w\":110,\"h\":4})"
   },
   "ui.formatCellsPane": {
    "pass": true,
@@ -1260,7 +1276,11 @@
   },
   "cmd.file.saveAs": {
    "pass": true,
-   "value": "86039 bytes"
+   "value": "229703 bytes"
+  },
+  "cmd.chart.saveXlsx": {
+   "pass": true,
+   "value": "45 chart parts"
   },
   "cmd.home.numberFormat.custom": {
    "pass": true,
@@ -1273,6 +1293,10 @@
   "cmd.file.close": {
    "pass": true,
    "value": "1 sheet(s), source ''"
+  },
+  "perf.openPaint": {
+   "pass": true,
+   "value": "39 ms median of 63, 39, 39, 39, 39"
   },
   "ui.noErrors": {
    "pass": true,
@@ -1292,6 +1316,9 @@
   "chart.addElement",
   "chart.changeColors",
   "chart.copy",
+  "chart.formatAxis",
+  "chart.formatColors",
+  "chart.formatElement",
   "chart.formatSelection",
   "chart.move",
   "chart.quickLayout",
@@ -1375,7 +1402,9 @@
   "file.close",
   "file.exportCsv",
   "file.exportHtml",
+  "file.exportOds",
   "file.exportPdf",
+  "file.exportTsv",
   "file.info",
   "file.new",
   "file.open",
@@ -1622,6 +1651,9 @@
   "automate.recordActions",
   "chart.addElement",
   "chart.changeColors",
+  "chart.formatAxis",
+  "chart.formatColors",
+  "chart.formatElement",
   "chart.formatSelection",
   "chart.move",
   "chart.quickLayout",
@@ -1684,8 +1716,11 @@
   "file.close",
   "file.exportCsv",
   "file.exportHtml",
+  "file.exportOds",
+  "file.exportTsv",
   "file.new",
   "file.open",
+  "file.save",
   "file.saveAs",
   "format.align",
   "format.autofit.column",

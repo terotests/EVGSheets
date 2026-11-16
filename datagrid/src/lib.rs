@@ -10,6 +10,7 @@ pub mod date_serial;
 pub mod formats;
 pub mod formula_engine;
 pub mod formula_functions;
+pub mod formula_more;
 pub mod formula_value;
 mod rgr;
 pub mod rich_text;

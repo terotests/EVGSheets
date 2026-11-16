@@ -86,7 +86,26 @@ const page = await browser.newPage({ viewport: { width: W, height: H }, colorSch
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("crash", () => console.log("  page crashed"));
 let commands = [];
+let excelKindsCount = 1;
 let actions = [];
+// P1: the target workbook opened from its bytes and drawn (controller.open
+// parses, lays out and paints before it resolves). Five runs; the median is
+// the value, the first (least warmed up) is shown beside it.
+async function perfCheck() {
+  const runs = await page.evaluate(async () => {
+    const raw = await (await fetch("/target.xlsx")).arrayBuffer();
+    const out = [];
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now();
+      await window.sheet.open(raw.slice(0), "quarterly-sales-dashboard.xlsx");
+      out.push(Math.round(performance.now() - t0));
+    }
+    return out;
+  });
+  const sorted = runs.slice().sort((a, b) => a - b);
+  const median = sorted[2];
+  ok("perf.openPaint", median > 0 && median <= 500, median + " ms median of " + runs.join(", "));
+}
 try {
   await page.goto(`http://localhost:${PORT}/?xlsx=target.xlsx&name=quarterly-sales-dashboard.xlsx&theme=light`);
   await page.waitForFunction(() => window.__sheetsReady || window.__sheetsError, null, { timeout: 60000 });
@@ -95,6 +114,10 @@ try {
   // What the editor can be asked to do: the core's command table and the
   // menu/ribbon/context actions of the app. report.mjs matches the catalog's
   // EVGSheets command ids against these.
+  if (process.env.PROBE_PERF) {
+    await perfCheck();
+    throw new Error("PROBE_PERF: only the timing ran");
+  }
   commands = await page.evaluate(() => window.sheet.app.grid.app.commands.commands.map((c) => c.id));
   actions = await page.evaluate(() => Object.values(window.sheet.app.actions).map((a) => a.command));
 
@@ -1588,6 +1611,29 @@ try {
   await check("chart.formatSelection", async () => [await M("G.paneKind === 'formatChart'")]);
   await run("chart.move", "300,200");
   await check("chart.move", async () => { const c = await chartState(); return [c.x === 300, c.x]; });
+  // Format pane elements, through the commands its rows and forms run.
+  await run("chart.set", "Column");
+  await run("chart.formatElement", "legend=bottom;lineWidth=3");
+  await check("chart.formatElement", async () => { const c = await chartState(); return [c.ok && /"orient":"bottom"/.test(c.spec), c.ok]; });
+  await run("chart.formatAxis", "min=0;max=40;format=0.0;yTitle=Euros");
+  await check("chart.formatAxis", async () => { const c = await chartState(); return [c.ok && /"domain":\[0,40\]/.test(c.spec) && /"format":".1f"/.test(c.spec) && /"title":"Euros"/.test(c.spec), c.ok]; });
+  await run("chart.formatColors", "colors=#112233,#445566;area=#fafafa;titleSize=16");
+  await check("chart.formatColors", async () => { const c = await chartState(); return [c.ok && (/"range":\["#112233","#445566"\]/.test(c.spec) || /"mark":\{"color":"#112233"\}/.test(c.spec)) && /"background":"#fafafa"/.test(c.spec), c.ok]; });
+  // Every Excel chart subtype the picker offers, drawn from a range it suits:
+  // three series (high, low, close) for most, one series for waterfall,
+  // funnel and Pareto.
+  await run("sheet.add");
+  for (const [ref, v] of [["A1", "Month"], ["B1", "High"], ["C1", "Low"], ["D1", "Close"], ["A2", "Jan"], ["B2", "12"], ["C2", "8"], ["D2", "10"], ["A3", "Feb"], ["B3", "15"], ["C3", "9"], ["D3", "13"], ["A4", "Mar"], ["B4", "11"], ["C4", "6"], ["D4", "7"], ["A5", "Apr"], ["B5", "17"], ["C5", "11"], ["D5", "16"], ["F1", "Step"], ["G1", "Amount"], ["F2", "Start"], ["G2", "12"], ["F3", "Sales"], ["G3", "8"], ["F4", "Costs"], ["G4", "-5"], ["F5", "Tax"], ["G5", "-2"]]) await put(ref, v);
+  const excelKinds = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+  const drawn = [];
+  for (const k of excelKinds) {
+    await at([16, 17, 26, 27, 28].includes(k) ? "F1" : "A1");
+    await run("insert.recommendedCharts", String(k));
+    const c = await chartState();
+    if (c.ok && c.kind === k) drawn.push(k);
+  }
+  await check("chart.kinds", async () => [drawn.length === excelKinds.length, drawn.length + " of " + excelKinds.length + " drawn"]);
+  excelKindsCount = drawn.length;
 
   // Names, auditing, evaluation, the watch window and manual calculation.
   await run("sheet.add");
@@ -1635,6 +1681,10 @@ try {
   const d = await dl;
   const bytes = d ? fs.readFileSync(await d.path()) : Buffer.alloc(0);
   ok("cmd.file.saveAs", bytes.length > 1000 && bytes[0] === 0x50 && bytes[1] === 0x4b, bytes.length + " bytes");
+  // Charts go into the saved file as DrawingML parts (xl/charts/evgchartN.xml);
+  // each name is in the zip twice (local header and central directory).
+  const chartParts = (bytes.toString("latin1").match(/xl\/charts\/evgchart\d+\.xml/g) || []).length / 2;
+  ok("cmd.chart.saveXlsx", chartParts >= excelKindsCount, chartParts + " chart parts");
 
   await put("A5", "45000");
   await at("A5");
@@ -1646,6 +1696,7 @@ try {
   const closed = await S();
   ok("cmd.file.close", closed.sheets.length === 1 && closed.source === "" && (await get(0, 0)) === "", closed.sheets.length + " sheet(s), source '" + closed.source + "'");
 
+  await perfCheck();
   ok("ui.noErrors", errors.length === 0, errors.slice(0, 2).join(" | "));
 } catch (e) {
   ok("probe.finished", false, e && e.stack ? e.stack.split("\n").slice(0, 2).join(" ") : String(e));
@@ -1661,6 +1712,6 @@ const out = {
   commands: [...new Set(commands)].sort(),
   actions: [...new Set(actions)].sort(),
 };
-if (!process.env.PROBE_NEW && !process.env.PROBE_NEW2 && !process.env.PROBE_UI && !process.env.PROBE_NF) fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
+if (!process.env.PROBE_NEW && !process.env.PROBE_NEW2 && !process.env.PROBE_UI && !process.env.PROBE_NF && !process.env.PROBE_PERF) fs.writeFileSync(path.join(REPO, "parity", "probe.json"), JSON.stringify(out, null, 1) + "\n");
 const passed = Object.values(results).filter((r) => r.pass).length;
 console.log(`\n${passed}/${Object.keys(results).length} probe checks pass (a failure is a measured gap, not a broken run)`);
