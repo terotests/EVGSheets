@@ -1276,7 +1276,11 @@
   },
   "cmd.file.saveAs": {
    "pass": true,
-   "value": "88319 bytes"
+   "value": "229703 bytes"
+  },
+  "cmd.chart.saveXlsx": {
+   "pass": true,
+   "value": "45 chart parts"
   },
   "cmd.home.numberFormat.custom": {
    "pass": true,

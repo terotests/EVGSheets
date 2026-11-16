@@ -53,6 +53,9 @@ pub struct XlsFormula {
     pub fnIndex: HashMap<i64,i64>,
     pub fnNames: Vec<String>,
     pub fnArgs: Vec<i64>,
+    /// BIFF12 (.xlsb): rows are 4 bytes, columns 2, strings carry no flag
+    /// byte, and the sheet is 1048576 by 16384.
+    pub wide: bool,
 }
 
 impl XlsFormula {
@@ -63,6 +66,7 @@ impl XlsFormula {
             fnIndex: HashMap::new(),
             fnNames: Vec::new(),
             fnArgs: Vec::new(),
+            wide: false,
         };
         let ids: Vec<i64> = XlsFunctionTable::ids();
         me.fnNames = XlsFunctionTable::names().iter().map(|s| s.to_string()).collect();
@@ -154,7 +158,27 @@ impl XlsFormula {
         let row_rel: bool = (col_field & 32768) != 0;
         let mut r: i64 = row;
         let mut c: i64 = col % 256;
-        if rel {
+        if self.wide {
+            c = col;
+            if rel {
+                if row_rel {
+                    r = (r + base_row) % 1048576;
+                    if r < 0 {
+                        r += 1048576;
+                    }
+                }
+                if col_rel {
+                    if c >= 8192 {
+                        c -= 16384;
+                    }
+                    c = (c + base_col) % 16384;
+                    if c < 0 {
+                        c += 16384;
+                    }
+                }
+            }
+        }
+        if rel && !self.wide {
             if row_rel {
                 if r >= 32768 {
                     r -= 65536;
@@ -186,12 +210,23 @@ impl XlsFormula {
     }
     pub fn area(&self, r0: i64, r1: i64, c0: i64, c1: i64, base_row: i64, base_col: i64, rel: bool) -> String {
         // Whole columns and whole rows are written the short way.
-        if r0 == 0 && r1 == 65535 {
+        let mut last_row: i64 = 65535;
+        if self.wide {
+            last_row = 1048575;
+        }
+        if self.wide {
+            if (c0 % 16384) == 0 && (c1 % 16384) == 16383 {
+                let a3: String = self.anchor(r0, c0, base_row, base_col, rel);
+                let b3: String = self.anchor(r1, c1, base_row, base_col, rel);
+                return format!("{}:{}", XlsFormula::rowPart(&a3), XlsFormula::rowPart(&b3));
+            }
+        }
+        if r0 == 0 && r1 == last_row {
             let a: String = self.anchor(0, c0, base_row, base_col, rel);
             let b: String = self.anchor(0, c1, base_row, base_col, rel);
             return format!("{}:{}", XlsFormula::colPart(&a), XlsFormula::colPart(&b));
         }
-        if c0 % 256 == 0 && c1 % 256 == 255 {
+        if !self.wide && c0 % 256 == 0 && c1 % 256 == 255 {
             let a2: String = self.anchor(r0, c0, base_row, base_col, rel);
             let b2: String = self.anchor(r1, c1, base_row, base_col, rel);
             return format!("{}:{}", XlsFormula::rowPart(&a2), XlsFormula::rowPart(&b2));
@@ -322,6 +357,69 @@ impl XlsFormula {
             }
             if id == 22 {
                 stack.push(String::new().to_string());
+                continue;
+            }
+            if id == 23 && self.wide {
+                let wch: i64 = SheetBytes::u16(rgce, t);
+                t += 2;
+                stack.push(XlsFormula::quoteText(&SheetBytes::utf16(rgce, t, wch, true)));
+                t += wch * 2;
+                continue;
+            }
+            if id == 32 && self.wide {
+                self.failure = "array constants in a binary workbook".to_string();
+                continue;
+            }
+            if self.wide && ((id >= 36 && id <= 45) || (id >= 58 && id <= 61)) {
+                // Rows are 4 bytes and columns 2: a cell is 6, an area 12.
+                let mut sheet_pre: String = String::new();
+                let mut wt: i64 = t;
+                if id >= 58 {
+                    let wx: i64 = SheetBytes::u16(rgce, wt);
+                    wt += 2;
+                    sheet_pre = self.sheetPrefix(wx);
+                }
+                let cell: bool = id == 36 || id == 42 || id == 44 || id == 58 || id == 60;
+                let area: bool = id == 37 || id == 43 || id == 45 || id == 59 || id == 61;
+                if id == 38 || id == 39 || id == 40 {
+                    t += 6;
+                    if id == 38 {
+                        let cnt4: i64 = SheetBytes::u16(rgcb, x);
+                        x = (x + 2) + cnt4 * 16;
+                    }
+                    continue;
+                }
+                if id == 41 {
+                    t += 2;
+                    continue;
+                }
+                let errs: bool = id == 42 || id == 43 || id == 60 || id == 61;
+                let relative: bool = id == 44 || id == 45;
+                let mut text: String = String::new();
+                if cell {
+                    let wr: i64 = SheetBytes::i32(rgce, wt);
+                    let wc: i64 = SheetBytes::u16(rgce, wt + 4);
+                    wt += 6;
+                    text = self.anchor(wr, wc, base_row, base_col, relative);
+                }
+                if area {
+                    let wr0: i64 = SheetBytes::i32(rgce, wt);
+                    let wr1: i64 = SheetBytes::i32(rgce, wt + 4);
+                    let wc0: i64 = SheetBytes::u16(rgce, wt + 8);
+                    let wc1: i64 = SheetBytes::u16(rgce, wt + 10);
+                    wt += 12;
+                    text = self.area(wr0, wr1, wc0, wc1, base_row, base_col, relative);
+                }
+                t = wt;
+                if errs || sheet_pre == "#REF" {
+                    stack.push("#REF!".to_string());
+                    continue;
+                }
+                if !sheet_pre.is_empty() {
+                    stack.push(format!("{}!{}", sheet_pre, text));
+                    continue;
+                }
+                stack.push(text);
                 continue;
             }
             if id == 23 {

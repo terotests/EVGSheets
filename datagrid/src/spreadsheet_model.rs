@@ -481,6 +481,9 @@ pub struct SpreadsheetModel {
     pub images: Vec<Rc<RefCell<SheetImage>>>,
     /// Charts the .xlsx carried (anchor + series refs); GridApp opens them.
     pub fileCharts: Vec<Rc<RefCell<SheetImage>>>,
+    /// The charts on this sheet as the next save writes them; filled by the
+    /// app just before a save (charts live in the app, not in the model).
+    pub outCharts: Vec<Rc<RefCell<SheetImage>>>,
     /// Tables (ListObjects) on this sheet. A table's NAME is workbook-wide, so
     /// the lookup that formulas use lives on WorkbookModel; this is only where
     /// the ones belonging to this sheet are kept.
@@ -630,6 +633,7 @@ impl SpreadsheetModel {
             spillKeys: Vec::new(),
             images: Vec::new(),
             fileCharts: Vec::new(),
+            outCharts: Vec::new(),
             tables: Vec::new(),
             richCells: HashMap::new(),
             richKeys: Vec::new(),

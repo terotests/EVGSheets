@@ -70,6 +70,20 @@ impl XlsxDrawing {
         let mut plot: String = String::new();
         let mut plots: String = String::new();
         let mut scatter_style: String = String::new();
+        let mut in_val_ax: bool = false;
+        let mut in_ser: bool = false;
+        let mut in_legend: bool = false;
+        let mut ser_colour: String = String::new();
+        let mut colours: Vec<String> = Vec::new();
+        let mut legend: String = "none".to_string();
+        let mut labels: bool = false;
+        let mut v_min: String = String::new();
+        let mut v_max: String = String::new();
+        let mut v_log: bool = false;
+        let mut v_fmt: String = String::new();
+        let mut v_grid: bool = false;
+        let mut in_tx: bool = false;
+        let mut in_cat_ax: bool = false;
         while p.borrow().pos < p.borrow().srcLen {
             let t: Rc<RefCell<XmlTag>> = p.borrow_mut().nextTag();
             if !t.borrow().valid {
@@ -77,18 +91,89 @@ impl XlsxDrawing {
             }
             let local: String = p.borrow().localName(&t.borrow().name.clone());
             let opening: bool = !t.borrow().isEnd;
-            if local == "title" {
+            if local == "catAx" || local == "dateAx" || local == "serAx" {
+                in_cat_ax = opening;
+            }
+            // Only the chart's own title: an axis title is not the chart's.
+            if local == "title" && !in_val_ax && !in_cat_ax {
                 in_title = opening;
             }
             if local == "cat" {
                 in_cat = opening;
             }
-            if local == "val" {
+            if local == "val" || local == "xVal" || local == "yVal" || local == "bubbleSize" {
                 in_val = opening;
+            }
+            if local == "valAx" {
+                in_val_ax = opening;
+            }
+            if local == "legend" {
+                in_legend = opening;
+                if opening {
+                    legend = "right".to_string();
+                }
+            }
+            if local == "tx" && in_ser {
+                in_tx = opening && !t.borrow().selfClose;
+            }
+            if local == "ser" {
+                if opening {
+                    in_ser = true;
+                    ser_colour = String::new();
+                } else {
+                    in_ser = false;
+                    // Excel's default colour for this position says nothing
+                    // the chart would not do by itself.
+                    let defaults: Vec<String> = vec!["#4472C4".to_string(), "#ED7D31".to_string(), "#A5A5A5".to_string(), "#FFC000".to_string(), "#5B9BD5".to_string(), "#70AD47".to_string()];
+                    let pos: i64 = (colours.len() as i64) % 6;
+                    if ser_colour.to_uppercase() == defaults[pos as usize] {
+                        ser_colour = String::new();
+                    }
+                    colours.push(ser_colour.clone());
+                }
             }
             if opening {
                 if DgNative::str_len(&local) > 5 && DgNative::index_of(&local, "Chart") == DgNative::str_len(&local) - 5 && local != "chart" {
                     plots = format!("{} {}", plots, local);
+                }
+                if local == "legendPos" && in_legend {
+                    let lp: String = t.borrow().attr("val");
+                    if lp == "t" {
+                        legend = "top".to_string();
+                    }
+                    if lp == "b" {
+                        legend = "bottom".to_string();
+                    }
+                    if lp == "l" {
+                        legend = "left".to_string();
+                    }
+                }
+                if local == "showVal" && t.borrow().attr("val") == "1" {
+                    labels = true;
+                }
+                if in_val_ax {
+                    if local == "min" {
+                        v_min = t.borrow().attr("val");
+                    }
+                    if local == "max" {
+                        v_max = t.borrow().attr("val");
+                    }
+                    if local == "logBase" {
+                        v_log = true;
+                    }
+                    if local == "majorGridlines" {
+                        v_grid = true;
+                    }
+                    if local == "numFmt" && t.borrow().attr("sourceLinked") == "0" {
+                        v_fmt = t.borrow().attr("formatCode");
+                    }
+                }
+                if local == "srgbClr" && in_ser && !in_val && !in_cat && ser_colour.is_empty() {
+                    ser_colour = format!("#{}", t.borrow().attr("val"));
+                }
+                if local == "f" && in_tx && !t.borrow().selfClose {
+                    let nref: String = p.borrow_mut().readTextUntilEnd(&t.borrow().name.clone());
+                    img.borrow_mut().nameRefs.push(nref.clone());
                 }
                 if local == "scatterStyle" {
                     scatter_style = t.borrow().attr("val");
@@ -110,7 +195,7 @@ impl XlsxDrawing {
                     img.borrow_mut().chartTitle = format!("{}{}", img.borrow().chartTitle, p.borrow_mut().readTextUntilEnd(&t.borrow().name.clone()));
                     in_title = true;
                 }
-                if local == "f" && !t.borrow().selfClose {
+                if local == "f" && !t.borrow().selfClose && !in_tx {
                     let fref: String = p.borrow_mut().readTextUntilEnd(&t.borrow().name.clone());
                     if in_cat {
                         img.borrow_mut().catRef = fref.clone();
@@ -121,6 +206,51 @@ impl XlsxDrawing {
                 }
             }
         }
+        let mut style: String = format!("legend={}", legend);
+        if labels {
+            style = format!("{};dataLabels=1", style);
+        }
+        if !v_min.is_empty() {
+            style = format!("{};min={}", style, v_min);
+        }
+        if !v_max.is_empty() {
+            style = format!("{};max={}", style, v_max);
+        }
+        if v_log {
+            style = format!("{};log=on", style);
+        }
+        if !v_fmt.is_empty() && DgNative::index_of(&v_fmt, ";") < 0 {
+            style = format!("{};format={}", style, v_fmt);
+        }
+        if !v_grid {
+            style = format!("{};gridlines=off", style);
+        }
+        let mut any_colour: bool = false;
+        let mut ci: i64 = 0;
+        while ci < (colours.len() as i64) {
+            if !colours[ci as usize].is_empty() {
+                any_colour = true;
+            }
+            ci += 1;
+        }
+        if any_colour {
+            let ncol: i64 = colours.len() as i64;
+            let mut last: i64 = ncol - 1;
+            while last > 0 {
+                if !colours[last as usize].is_empty() {
+                    break;
+                }
+                last -= 1;
+            }
+            let mut kept: Vec<String> = Vec::new();
+            let mut ki: i64 = 0;
+            while ki <= last {
+                kept.push(colours[ki as usize].clone());
+                ki += 1;
+            }
+            style = format!("{};colors={}", style, kept.join(","));
+        }
+        img.borrow_mut().chartStyle = style.clone();
         img.borrow_mut().chartKind = 1;
         if plot == "barChart" || plot == "bar3DChart" {
             let horizontal: bool = bar_dir == "bar";

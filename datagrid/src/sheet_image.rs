@@ -50,6 +50,12 @@ pub struct SheetImage {
     pub chartTitle: String,
     pub catRef: String,
     pub valRefs: Vec<String>,
+    /// Each series' name cell, when the chart has one ("" for none).
+    pub nameRefs: Vec<String>,
+    /// The chart's formatting as GridChart.formatText writes it, plus
+    /// dataLabels, gridlines and axisTitles: what a save writes into the
+    /// chart part and an open reads back.
+    pub chartStyle: String,
 }
 
 impl SheetImage {
@@ -75,6 +81,8 @@ impl SheetImage {
             chartTitle: String::new(),
             catRef: String::new(),
             valRefs: Vec::new(),
+            nameRefs: Vec::new(),
+            chartStyle: String::new(),
         }
     }
     pub fn emuToPx(emu: i64) -> i64 {
@@ -99,6 +107,8 @@ impl SheetImage {
         self.chartKind = o.borrow().chartKind;
         self.chartTitle = o.borrow().chartTitle.clone();
         self.catRef = o.borrow().catRef.clone();
+        self.chartStyle = o.borrow().chartStyle.clone();
+        self.nameRefs = o.borrow().nameRefs.clone();
         self.valRefs.clear();
         let mut vi: i64 = 0;
         while vi < (o.borrow().valRefs.len() as i64) {

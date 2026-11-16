@@ -578,6 +578,141 @@ class GridApp {
         return out
     }
 
+    ; A sheet name as a formula writes it: quoted when it has to be.
+    sfn refSheet:string (name:string) {
+        def plain:boolean true
+        def i:int 0
+        while (i < (strlen name)) {
+            def ch:int (charAt name i)
+            def ok:boolean (((ch >= 65) && (ch <= 90)) || (((ch >= 97) && (ch <= 122)) || (((ch >= 48) && (ch <= 57)) || (ch == 95))))
+            if (ok == false) {
+                plain = false
+            }
+            i = (i + 1)
+        }
+        if plain {
+            return name
+        }
+        def out:string "'"
+        def k:int 0
+        while (k < (strlen name)) {
+            def c:string (substring name k (k + 1))
+            if (c == "'") {
+                out = (out + "''")
+            } {
+                out = (out + c)
+            }
+            k = (k + 1)
+        }
+        return (out + "'")
+    }
+
+    sfn absCol:string (pre:string c:int r0:int r1:int) {
+        def letter:string (SpreadsheetModel.colLabel(c))
+        return (pre + "!$" + letter + "$" + (to_string (r0 + 1)) + ":$" + letter + "$" + (to_string (r1 + 1)))
+    }
+
+    ; The cell a page pixel falls in, and the offset into it, unscrolled.
+    fn cellAtPx:[int] (sh:SpreadsheetModel x:int y:int) {
+        def out:[int]
+        def rx:int (x - (grid.gridOriginX()))
+        def ry:int (y - (grid.gridOriginY()))
+        if (rx < 0) {
+            rx = 0
+        }
+        if (ry < 0) {
+            ry = 0
+        }
+        def c:int 0
+        while ((c < 16383) && ((grid.geoColToX(sh (c + 1))) <= rx)) {
+            c = (c + 1)
+        }
+        def r:int 0
+        while ((r < 1048575) && ((grid.geoRowToY(sh (r + 1))) <= ry)) {
+            r = (r + 1)
+        }
+        push out r
+        push out c
+        push out (rx - (grid.geoColToX(sh c)))
+        push out (ry - (grid.geoRowToY(sh r)))
+        return out
+    }
+
+    ; Every chart window, copied into its sheet's `outCharts` for the next
+    ; save: the kind, the title, where it sits and which cells it reads.
+    fn stageCharts:void () {
+        def si:int 0
+        while (si < (array_length book.sheets)) {
+            def sh0:SpreadsheetModel (itemAt book.sheets si)
+            clear sh0.outCharts
+            si = (si + 1)
+        }
+        def pi:int 0
+        while (pi < (view.chartLayer.count())) {
+            def p:ChartPanel (view.chartLayer.panelAt(pi))
+            def ch:GridChart p.chart
+            if ((ch.sheet >= 0) && (ch.sheet < (array_length book.sheets))) {
+                def sh:SpreadsheetModel (itemAt book.sheets ch.sheet)
+                def img:SheetImage (new SheetImage)
+                img.chartKind = ch.kind
+                img.chartTitle = ch.title
+                img.altText = ch.altText
+                img.chartStyle = ("dataLabels=" + (GridApp.oneZero(ch.dataLabels)) + ";gridlines=" + ch.gridlines + ";axisTitles=" + (GridApp.oneZero(ch.axisTitles)) + ";" + (ch.formatText()))
+                def pre:string (GridApp.refSheet(sh.name))
+                def cols:[int]
+                def k:int 0
+                while (k < (ch.sourceColCount())) {
+                    push cols (ch.sourceColAt(k))
+                    k = (k + 1)
+                }
+                def top:int ch.r0
+                if ch.useHeaderRow {
+                    top = (ch.r0 + 1)
+                }
+                def first:int 0
+                if (ch.useHeaderCol && ((array_length cols) > 1)) {
+                    img.catRef = (GridApp.absCol(pre (itemAt cols 0) top ch.r1))
+                    first = 1
+                }
+                def v:int first
+                while (v < (array_length cols)) {
+                    def vc:int (itemAt cols v)
+                    push img.valRefs (GridApp.absCol(pre vc top ch.r1))
+                    if ch.useHeaderRow {
+                        push img.nameRefs (pre + "!$" + (SpreadsheetModel.colLabel(vc)) + "$" + (to_string (ch.r0 + 1)))
+                    } {
+                        push img.nameRefs ""
+                    }
+                    v = (v + 1)
+                }
+                def a:[int] (this.cellAtPx(sh ch.x ch.y))
+                def b:[int] (this.cellAtPx(sh (ch.x + ch.w) (ch.y + ch.h)))
+                img.fromRow = (itemAt a 0)
+                img.fromCol = (itemAt a 1)
+                img.offX = (itemAt a 2)
+                img.offY = (itemAt a 3)
+                img.toRow = (itemAt b 0)
+                img.toCol = (itemAt b 1)
+                img.toOffX = (itemAt b 2)
+                img.toOffY = (itemAt b 3)
+                img.stretched = true
+                img.widthPx = ch.w
+                img.heightPx = ch.h
+                if ((array_length img.valRefs) > 0) {
+                    push sh.outCharts img
+                }
+            }
+            pi = (pi + 1)
+        }
+    }
+
+    sfn oneZero:string (on:boolean) {
+        if on {
+            return "1"
+        }
+        return "0"
+    }
+
     ; The charts the workbook carried, opened as chart windows over the same
     ; ranges where the file anchored them: categories in the first source
     ; column, each series' values after it, the row above as the names.
@@ -592,6 +727,10 @@ class GridApp {
                 spec.sheet = si
                 spec.kind = fc.chartKind
                 spec.title = fc.chartTitle
+                def styled:boolean false
+                if ((strlen fc.chartStyle) > 0) {
+                    styled = (spec.setFormats(fc.chartStyle))
+                }
                 def top:int -1
                 def bottom:int -1
                 def lo:int 100000
@@ -2418,6 +2557,7 @@ class GridApp {
             view.status = ("saved " + savedPath)
             return true
         }
+        this.stageCharts()
         def w:XlsxWriter (new XlsxWriter)
         def ok:boolean false
         if preserveOnSave {
@@ -2448,6 +2588,7 @@ class GridApp {
         if editing {
             this.commitEdit()
         }
+        this.stageCharts()
         def w:XlsxWriter (new XlsxWriter)
         def data:buffer (buffer_alloc 0)
         if preserveOnSave {

@@ -19,10 +19,10 @@ use crate::xlsx_number_format::XlsxNumberFormat;
 /// The relationships and content types are still XML, so the package is opened
 /// the same way and only the parts are different.
 ///
-/// Values only, as GridCraft's reader does (crates/xlsx/src/xlsb.rs,
-/// MIT/Apache-2.0): numbers, text, booleans, errors, the cached result of each
-/// formula, number formats (so dates read as dates), merges, column widths,
-/// sheet visibility. A formula's text is not rebuilt; the note on open says so.
+/// Numbers, text, booleans, errors, formulas, number formats (so dates read as
+/// dates), merges, column widths and sheet visibility. Formulas are BIFF12
+/// parsed tokens, turned back into text by XlsFormula in its wide mode; one it
+/// cannot read keeps its saved result, and the note on open says which kinds.
 #[derive(Clone)]
 pub struct XlsbLoader {
     pub lastError: String,
@@ -37,6 +37,15 @@ pub struct XlsbLoader {
     pub formats: HashMap<i64,String>,
     pub styles: Vec<Rc<RefCell<CellStyle>>>,
     pub sawFormula: bool,
+    pub formula: Rc<RefCell<XlsFormula>>,
+    pub failures: Vec<String>,
+    /// Shared formulas of the sheet being read: their ranges and tokens.
+    pub shRange: Vec<i64>,
+    pub shRgce: Vec<Vec<u8>>,
+    pub shRgcb: Vec<Vec<u8>>,
+    /// Cells that point at a shared formula, resolved when the sheet ends:
+    /// the BrtShrFmla record comes after the first cell that uses it.
+    pub expCells: Vec<i64>,
 }
 
 impl XlsbLoader {
@@ -54,7 +63,60 @@ impl XlsbLoader {
             formats: HashMap::new(),
             styles: Vec::new(),
             sawFormula: false,
+            formula: Rc::new(RefCell::new(XlsFormula::new())),
+            failures: Vec::new(),
+            shRange: Vec::new(),
+            shRgce: Vec::new(),
+            shRgcb: Vec::new(),
+            expCells: Vec::new(),
         }
+    }
+    pub fn failed(&mut self, why: &str) {
+        if why.is_empty() {
+            return;
+        }
+        let mut i: i64 = 0;
+        while i < (self.failures.len() as i64) {
+            if self.failures[i as usize].clone() == why {
+                return;
+            }
+            i += 1;
+        }
+        self.failures.push(why.to_string());
+    }
+    /// Bytes [from, from + n) of the record data, or empty when out of range.
+    pub fn slice(&self, from: i64, n: i64) -> Vec<u8> {
+        if n <= 0 || from < 0 || from + n > (self.data.len() as i64) {
+            return vec![0u8; 0];
+        }
+        self.data[(from) as usize..(from + n) as usize].to_vec()
+    }
+    /// One formula's text from tokens at `at` (cce, rgce, cb, rgcb), or "".
+    pub fn formulaAt(&mut self, at: i64, row: i64, col: i64) -> String {
+        let cce: i64 = SheetBytes::i32(&self.data.clone(), at);
+        if cce <= 0 || at + 4 + cce > self.recEnd {
+            return String::new();
+        }
+        let rgce: Vec<u8> = self.slice(at + 4, cce);
+        let mut rgcb: Vec<u8> = vec![0u8; 0];
+        let cb_at: i64 = at + 4 + cce;
+        if cb_at + 4 <= self.recEnd {
+            let cb: i64 = SheetBytes::i32(&self.data.clone(), cb_at);
+            if cb > 0 && cb_at + 4 + cb <= self.recEnd {
+                rgcb = self.slice(cb_at + 4, cb);
+            }
+        }
+        if (rgce[0] as i64) == 1 {
+            self.expCells.push(row);
+            self.expCells.push(col);
+            return String::new();
+        }
+        let text: String = self.formula.borrow_mut().decode(&rgce, &rgcb, row, col);
+        if text.is_empty() {
+            let why: String = self.formula.borrow().failure.clone();
+            self.failed(&why);
+        }
+        text
     }
     /// --- records ----------------------------------------------------------------
     pub fn next(&mut self) -> bool {
@@ -131,6 +193,36 @@ impl XlsbLoader {
                 let mut _tmp_1109 = self.data.clone();
                 self.date1904 = ((SheetBytes::u8(&_tmp_1109, self.recStart.clone())) & 1) != 0;
             }
+            if self.recId == 39 {
+                // BrtName: flags, chKey, itab, then the name.
+                let nm: String = self.wideAt(self.recStart + 9);
+                self.formula.borrow_mut().links.borrow_mut().names.push(nm.clone());
+            }
+            if self.recId == 357 || self.recId == 358 {
+                // BrtSupSelf / BrtSupSame: this workbook.
+                self.formula.borrow_mut().links.borrow_mut().bookInternal.push(true);
+                self.formula.borrow_mut().links.borrow_mut().bookNames.push(Vec::new());
+            }
+            if self.recId == 355 || self.recId == 667 {
+                // BrtSupBookSrc / BrtSupAddin: another workbook or an add-in.
+                self.formula.borrow_mut().links.borrow_mut().bookInternal.push(false);
+                self.formula.borrow_mut().links.borrow_mut().bookNames.push(Vec::new());
+            }
+            if self.recId == 362 {
+                // BrtExternSheet: count, then (book, first sheet, last sheet).
+                let cnt: i64 = SheetBytes::i32(&self.data.clone(), self.recStart);
+                let mut xi: i64 = 0;
+                while xi < cnt && self.recStart + 4 + (xi + 1) * 12 <= self.recEnd {
+                    let base: i64 = self.recStart + 4 + xi * 12;
+                    let bk: i64 = SheetBytes::i32(&self.data.clone(), base);
+                    let f1: i64 = SheetBytes::i32(&self.data.clone(), base + 4);
+                    let f2: i64 = SheetBytes::i32(&self.data.clone(), base + 8);
+                    self.formula.borrow_mut().links.borrow_mut().xtiBook.push(bk);
+                    self.formula.borrow_mut().links.borrow_mut().xtiFirst.push(f1);
+                    self.formula.borrow_mut().links.borrow_mut().xtiLast.push(f2);
+                    xi += 1;
+                }
+            }
             if self.recId == 156 {
                 // BrtBundleSh: state, id, relationship id, name.
                 let mut _tmp_1112 = self.data.clone();
@@ -161,6 +253,8 @@ impl XlsbLoader {
             self.styles.push(Rc::new(RefCell::new(CellStyle::new())));
         }
         book.borrow_mut().clear();
+        self.formula.borrow_mut().wide = true;
+        self.formula.borrow_mut().links.borrow_mut().sheets = names.clone();
         let mut i: i64 = 0;
         while i < (names.len() as i64) {
             let part: String = OpcPackage::resolve_relationship(
@@ -199,8 +293,8 @@ impl XlsbLoader {
             k += 1;
         }
         book.borrow_mut().setActive(first);
-        if self.sawFormula {
-            self.notes.push("formulas in a binary workbook are imported as their saved results".to_string().to_string());
+        if !self.failures.is_empty() {
+            self.notes.push(format!("some formulas use {}; their saved results were kept as values", self.failures.join(", ")));
         }
         true
     }
@@ -269,6 +363,12 @@ impl XlsbLoader {
     pub fn readSheet(&mut self, bytes: Vec<u8>, sheet: &Rc<RefCell<SpreadsheetModel>>) {
         self.data = bytes.clone();
         self.pos = 0;
+        self.shRange = Vec::new();
+        self.shRgce = Vec::new();
+        self.shRgcb = Vec::new();
+        self.expCells = Vec::new();
+        let mut formulas: Vec<i64> = Vec::new();
+        let mut formula_text: Vec<String> = Vec::new();
         let mut row: i64 = 0;
         while self.next() {
             let id: i64 = self.recId;
@@ -310,8 +410,18 @@ impl XlsbLoader {
                         text = self.sst[si as usize].clone();
                     }
                 }
+                let mut ftext: String = String::new();
                 if id >= 8 && id <= 11 {
                     self.sawFormula = true;
+                    // The value, then grbitFlags (2 bytes), then the tokens.
+                    let mut after: i64 = v + 1;
+                    if id == 8 {
+                        after = (v + 4) + SheetBytes::i32(&self.data.clone(), v) * 2;
+                    }
+                    if id == 9 {
+                        after = v + 8;
+                    }
+                    ftext = self.formulaAt(after + 2, row, col);
                 }
                 if ((row >= 0 && row < 1048576) && col >= 0) && col < 16384 {
                     if !text.is_empty() || xf > 0 {
@@ -320,9 +430,39 @@ impl XlsbLoader {
                     if !text.is_empty() {
                         sheet.borrow_mut().setCellRaw(row, col, &text);
                     }
+                    if !ftext.is_empty() {
+                        formulas.push(row);
+                        formulas.push(col);
+                        formula_text.push(ftext.clone());
+                    }
                     if xf > 0 && xf < (self.styles.len() as i64) {
                         sheet.borrow_mut().setCellStyleId(row, col, xf);
                     }
+                }
+                continue;
+            }
+            if id == 425 {
+                // BrtShrFmla: the range it covers, then the shared tokens.
+                let sr0: i64 = SheetBytes::i32(&self.data.clone(), at);
+                let sr1: i64 = SheetBytes::i32(&self.data.clone(), at + 4);
+                let sc0: i64 = SheetBytes::i32(&self.data.clone(), at + 8);
+                let sc1: i64 = SheetBytes::i32(&self.data.clone(), at + 12);
+                let scce: i64 = SheetBytes::i32(&self.data.clone(), at + 16);
+                if scce > 0 && at + 20 + scce <= self.recEnd {
+                    self.shRange.push(sr0);
+                    self.shRange.push(sr1);
+                    self.shRange.push(sc0);
+                    self.shRange.push(sc1);
+                    self.shRgce.push(self.slice(at + 20, scce));
+                    let mut srgcb: Vec<u8> = vec![0u8; 0];
+                    let scb_at: i64 = at + 20 + scce;
+                    if scb_at + 4 <= self.recEnd {
+                        let scb: i64 = SheetBytes::i32(&self.data.clone(), scb_at);
+                        if scb > 0 && scb_at + 4 + scb <= self.recEnd {
+                            srgcb = self.slice(scb_at + 4, scb);
+                        }
+                    }
+                    self.shRgcb.push(srgcb);
                 }
                 continue;
             }
@@ -363,6 +503,43 @@ impl XlsbLoader {
                 }
                 continue;
             }
+        }
+        // Cells that use a shared formula, now that every BrtShrFmla is read.
+        let mut ei: i64 = 0;
+        while ei + 1 < (self.expCells.len() as i64) {
+            let er: i64 = self.expCells[ei as usize];
+            let ec: i64 = self.expCells[(ei + 1) as usize];
+            let mut si: i64 = 0;
+            let mut found: bool = false;
+            while si < (self.shRgce.len() as i64) && !found {
+                let b: i64 = si * 4;
+                if er >= self.shRange[b as usize] && er <= self.shRange[(b + 1) as usize] && ec >= self.shRange[(b + 2) as usize] && ec <= self.shRange[(b + 3) as usize] {
+                    found = true;
+                    let rg: Vec<u8> = self.shRgce[si as usize].clone();
+                    let rb: Vec<u8> = self.shRgcb[si as usize].clone();
+                    let st: String = self.formula.borrow_mut().decode(&rg, &rb, er, ec);
+                    if st.is_empty() {
+                        let why: String = self.formula.borrow().failure.clone();
+                        self.failed(&why);
+                    } else {
+                        formulas.push(er);
+                        formulas.push(ec);
+                        formula_text.push(st.clone());
+                    }
+                }
+                si += 1;
+            }
+            if !found {
+                self.failed("a shared formula that is missing");
+            }
+            ei += 2;
+        }
+        let mut fi: i64 = 0;
+        while fi < (formula_text.len() as i64) {
+            let fr: i64 = formulas[(fi * 2) as usize];
+            let fc: i64 = formulas[(fi * 2 + 1) as usize];
+            sheet.borrow_mut().setFormula(fr, fc, &formula_text[fi as usize].clone());
+            fi += 1;
         }
     }
 }

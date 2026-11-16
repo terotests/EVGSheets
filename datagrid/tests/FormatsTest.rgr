@@ -232,8 +232,10 @@ class FormatsTest {
         c.ok("xlsb date format kept" ((d.getCellStyle(1 3)).numFmt == "m/d/yyyy"))
         c.eqStr("xlsb boolean" (d.getCell(1 4)) "TRUE")
         c.eqStr("xlsb error" (d.getCell(1 5)) "#DIV/0!")
-        c.eqStr("xlsb cached formula number" (d.getCell(1 6)) "1140")
-        c.eqStr("xlsb cached formula string" (d.getCell(1 7)) "done")
+        ; This fixture's two formulas are both "=1" with made-up cached
+        ; results (1140, "done"); read as formulas they compute to 1.
+        c.eqStr("xlsb formula number" (d.getCell(1 6)) "1")
+        c.eqStr("xlsb formula string" (d.getCell(1 7)) "1")
         c.eqStr("xlsb non-ASCII text" (d.getCell(2 0)) "Hämeenlinna")
         c.eqStr("xlsb double" (d.getCell(2 1)) "3.25")
         c.eqStr("xlsb custom format" (d.getDisplay(2 5)) "12.50%")
@@ -242,7 +244,70 @@ class FormatsTest {
         def hs:SpreadsheetModel (FormatsTest.sheetNamed(xb.book "Hidden"))
         c.ok("xlsb hidden sheet" hs.sheetHidden)
         c.eqStr("xlsb hidden sheet value" (hs.getCell(0 0)) "42")
-        c.ok("xlsb notes say formulas are values" ((array_length xb.importNotes) > 0))
+        c.eqStr("xlsb formula read back" (d.getFormula(1 6)) "1")
+
+        print "== .xlsb formulas =="
+        def xf:GridApp (FormatsTest.loadOther("formulas.xlsb"))
+        def fd:SpreadsheetModel (FormatsTest.sheetNamed(xf.book "Data"))
+        c.eqStr("xlsb area and SUM" (fd.getFormula(1 6)) "SUM(B2:C2)")
+        c.eqStr("xlsb IF with text" (fd.getFormula(1 7)) "IF(B2>100,\"done\",\"no\")")
+        c.eqStr("xlsb formula computes" (fd.getCell(1 6)) "129.5")
+        c.eqStr("xlsb text result" (fd.getCell(1 7)) "done")
+
+        print "== .ods notes, rules, freeze =="
+        def nr:GridApp (FormatsTest.loadOther("notes-rules.ods"))
+        def nd:SpreadsheetModel (FormatsTest.sheetNamed(nr.book "Data"))
+        c.eqStr("ods note A1" (nd.noteAt(0 0)) "Region name")
+        c.eqStr("ods note B3" (nd.noteAt(2 1)) "Checked twice")
+        c.eqStr("ods note not in the cell" (nd.getCell(0 0)) "Region")
+        c.eqInt("ods frozen rows" nd.freezeRows 1)
+        c.eqInt("ods frozen cols" nd.freezeCols 2)
+        c.eqInt("ods validations merged" (array_length nd.validations) 3)
+        def lv:DataValidation (nd.validationAt(3 0))
+        c.eqStr("ods list rule" lv.kind "list")
+        c.eqStr("ods list values" lv.f1 "\"north,south,east,west\"")
+        c.eqInt("ods list range" lv.r1 4)
+        c.ok("ods list refuses" ((lv.accepts("up")) == false))
+        def wv:DataValidation (nd.validationAt(1 1))
+        c.eqStr("ods whole rule" (wv.kind + " " + wv.op + " " + wv.f1 + " " + wv.f2) "whole between 1 100")
+        def tv:DataValidation (nd.validationAt(4 3))
+        c.eqStr("ods text length rule on empty cells" (tv.kind + " " + tv.op + " " + tv.f1) "textLength lessThanOrEqual 5")
+        c.eqInt("ods conditional formats" (array_length nd.cfRules) 3)
+        def kinds:string ""
+        for nd.cfRules rr:CfRule ri {
+            kinds = (kinds + (to_string rr.kind))
+            if (rr.kind == 1) {
+                c.eqStr("ods cell rule" (rr.op + " " + (to_string rr.v1) + " " + rr.fillRgb) "greaterThan 10 #FFC7CE")
+            }
+            if (rr.kind == 2) {
+                c.eqStr("ods data bar colour" rr.color0 "638EC6")
+            }
+            if (rr.kind == 0) {
+                c.eqStr("ods colour scale" (rr.color0 + rr.color1 + rr.color2) "F8696BFFEB8463BE7B")
+                c.eqInt("ods colour scale range" (rr.c0 * 10 + rr.r1) 24)
+            }
+        }
+        c.eqStr("ods rule kinds" kinds "120")
+
+        print "== .xls notes, rules =="
+        def xr:GridApp (FormatsTest.loadOther("notes-rules.xls"))
+        def xd:SpreadsheetModel (FormatsTest.sheetNamed(xr.book "Data"))
+        c.eqStr("xls note A1" (xd.noteAt(0 0)) "Region name")
+        c.eqStr("xls note B3" (xd.noteAt(2 1)) "Checked twice")
+        def xl:DataValidation (xd.validationAt(3 0))
+        c.eqStr("xls list rule" (xl.kind + " " + xl.f1) "list \"north,south,east,west\"")
+        c.ok("xls list refuses" ((xl.accepts("up")) == false))
+        def xw:DataValidation (xd.validationAt(4 1))
+        c.eqStr("xls whole rule" (xw.kind + " " + xw.op + " " + xw.f1 + " " + xw.f2) "whole between 1 100")
+        def xt:DataValidation (xd.validationAt(2 3))
+        c.eqStr("xls text length rule" (xt.kind + " " + xt.op + " " + xt.f1) "textLength lessThanOrEqual 5")
+        def xcell:string ""
+        for xd.cfRules xrr:CfRule xri {
+            if (xrr.kind == 1) {
+                xcell = (xrr.op + " " + (to_string xrr.v1) + " " + (to_string xrr.r0) + (to_string xrr.r1) + " " + (substring xrr.fillRgb 0 1))
+            }
+        }
+        c.eqStr("xls cell rule" xcell "greaterThan 10 14 #")
 
         print "== text =="
         def cs:GridApp (FormatsTest.loadOther("semicolons.csv"))

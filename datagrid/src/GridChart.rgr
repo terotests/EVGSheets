@@ -520,6 +520,21 @@ class GridChart {
             fillColor = v
             return true
         }
+        if (k == "datalabels") {
+            dataLabels = (v == "1")
+            return true
+        }
+        if (k == "gridlines") {
+            if ((v == "") || ((v == "on") || (v == "off"))) {
+                gridlines = v
+                return true
+            }
+            return false
+        }
+        if (k == "axistitles") {
+            axisTitles = (v != "0")
+            return true
+        }
         if (k == "outline") {
             outlineColor = v
             return true

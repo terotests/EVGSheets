@@ -1026,6 +1026,73 @@ class ChartTest {
         this.check("Excel number formats read as d3" (ChartData.d3Format("0%")) ".0%")
         this.check("currency" (ChartData.d3Format("$#,##0.00")) "$,.2f")
 
+        print "== charts saved into the .xlsx =="
+        def sv (new GridApp)
+        sv.init("gallery/pdf_writer/assets/fonts")
+        sv.model.growTo(8 4)
+        sv.model.setCell(0 0 "Month")
+        sv.model.setCell(0 1 "North")
+        sv.model.setCell(0 2 "South")
+        sv.model.setCell(1 0 "Jan")
+        sv.model.setCell(1 1 "120")
+        sv.model.setCell(1 2 "80")
+        sv.model.setCell(2 0 "Feb")
+        sv.model.setCell(2 1 "150")
+        sv.model.setCell(2 2 "95")
+        sv.model.setCell(3 0 "Mar")
+        sv.model.setCell(3 1 "90")
+        sv.model.setCell(3 2 "130")
+        sv.sel.active.row = 0
+        sv.sel.active.col = 0
+        this.checkTrue("a chart to save" (sv.runCommand("insert.recommendedCharts" "Stacked bar")))
+        this.checkTrue("titled" (sv.runCommand("chart.addElement" "title:Saved chart")))
+        this.checkTrue("and formatted" (sv.runCommand("chart.formatElement" "legend=bottom;min=0;max=300;colors=#112233,#445566")))
+        def saved:buffer (sv.saveXlsxBytes())
+        this.checkTrue("the workbook saves" ((buffer_length saved) > 0))
+        buffer_write_file "gallery/datagrid/harness/out/export" "saved-chart.xlsx" saved
+        def sh0:SpreadsheetModel (sv.book.sheetAt(0))
+        this.checkInt("the chart was staged" (array_length sh0.outCharts) 1)
+        def staged:SheetImage (itemAt sh0.outCharts 0)
+        this.checkTrue("its categories" (ChartTest.hasSub(staged.catRef "!$A$2:$A")))
+        def second:string (itemAt staged.valRefs 1)
+        this.checkTrue("its second series" (ChartTest.hasSub(second "!$C$2:$C")))
+        this.checkInt("a name for each series" (array_length staged.nameRefs) (array_length staged.valRefs))
+        def part:string (XlsxChartXml.chartXml(sh0 staged))
+        this.checkTrue("a horizontal stacked bar part" ((ChartTest.hasSub(part "<c:barDir val=\"bar\"/>")) && (ChartTest.hasSub(part "<c:grouping val=\"stacked\"/>"))))
+        this.checkTrue("the legend at the bottom" (ChartTest.hasSub(part "<c:legendPos val=\"b\"/>")))
+        this.checkTrue("the axis bounds" (ChartTest.hasSub(part "<c:max val=\"300\"/>")))
+        ; One of each family, for an outside reader to open (LibreOffice
+        ; renders saved-kinds.xlsx in the oracle check).
+        def kindNames:[string] ([] _:string ("Column + line" "Line + points" "100% stacked area" "Scatter + smooth lines" "Pie" "Stock (high-low-close)" "Donut" "Bubble"))
+        def kn:int 0
+        while (kn < (array_length kindNames)) {
+            sv.sel.active.row = 0
+            sv.sel.active.col = 0
+            def made:boolean (sv.runCommand("insert.recommendedCharts" (itemAt kindNames kn)))
+            def last:ChartPanel (sv.view.chartLayer.panelAt(((sv.view.chartLayer.count()) - 1)))
+            last.chart.x = (40 + ((kn - ((idiv kn 3) * 3)) * 400))
+            last.chart.y = (120 + ((idiv kn 3) * 280))
+            last.chart.title = (itemAt kindNames kn)
+            kn = (kn + 1)
+        }
+        def many:buffer (sv.saveXlsxBytes())
+        buffer_write_file "gallery/datagrid/harness/out/export" "saved-kinds.xlsx" many
+        this.checkInt("every chart staged" (array_length sh0.outCharts) ((array_length kindNames) + 1))
+
+        def back2 (new GridApp)
+        back2.init("gallery/pdf_writer/assets/fonts")
+        this.checkTrue("and opens again" (back2.loadXlsxBytes(saved "saved.xlsx")))
+        this.checkInt("with its chart" (back2.view.chartLayer.count()) 1)
+        if ((back2.view.chartLayer.count()) == 1) {
+            def bp:ChartPanel (back2.view.chartLayer.panelAt(0))
+            this.checkInt("the same kind" bp.chart.kind (ChartKind.stackedBar()))
+            this.check("the same title" bp.chart.title "Saved chart")
+            this.check("the legend where it was" bp.chart.legendPos "bottom")
+            this.check("the bounds" bp.chart.valueMax "300")
+            this.check("the colours" bp.chart.seriesColors "#112233,#445566")
+            this.checkInt("every series" (bp.chart.sourceColCount()) ((array_length staged.valRefs) + 1))
+        }
+
         ; It rides in the HTML flavour, so a paste can find it.
         def carriedHtml:string (clipApp.clipboardHtml)
         this.checkTrue("the clipboard html carries the document" (ChartTest.hasSub(carriedHtml (ChartDocCodec.attrName()))))

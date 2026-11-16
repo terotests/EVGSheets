@@ -10,7 +10,8 @@ use crate::cell_style::CellStyle;
 use crate::formats::cfb::Cfb;
 use crate::formats::sheet_bytes::SheetBytes;
 use crate::formats::xls_formula::XlsFormula;
-use crate::spreadsheet_model::SpreadsheetModel;
+use crate::spreadsheet_model::{CfRule, SpreadsheetModel};
+use crate::data_validation::DataValidation;
 use crate::workbook_model::WorkbookModel;
 use crate::xlsx_number_format::XlsxNumberFormat;
 /// XlsLoader: an Excel 97-2003 workbook (.xls, BIFF8) into a WorkbookModel.
@@ -30,8 +31,9 @@ use crate::xlsx_number_format::XlsxNumberFormat;
 /// decode keeps its cached value), shared and array formulas, number formats,
 /// fonts, fills, borders and alignment, merges, column widths, row heights,
 /// hidden rows, columns and sheets, freeze panes, defined names, the 1904 date
-/// system. Not read: charts, pictures, comments, conditional formats,
-/// validation, hyperlinks. What was skipped is listed in `notes`.
+/// system, comments (NOTE + TXO), validation (DV) and cell-value conditional
+/// formats (CFHEADER + CF). Not read: charts, pictures, hyperlinks, and the
+/// colour scales, data bars and icon sets of the CF12 extension records. What was skipped is listed in `notes`.
 ///
 /// The design follows GridCraft's clean-room reader (crates/xlsx/src/xls,
 /// MIT/Apache-2.0), itself written from [MS-CFB] and [MS-XLS].
@@ -269,6 +271,11 @@ pub struct XlsLoader {
     pub sharedCells: Vec<String>,
     pub sharedAnchors: Vec<String>,
     pub failures: Vec<String>,
+    /// The id of the last OBJ record, and the comment text TXO gave each id.
+    pub objId: i64,
+    pub objText: HashMap<i64,String>,
+    /// The ranges of the CFHEADER the next CF records belong to.
+    pub cfRanges: Vec<Vec<i64>>,
 }
 
 impl XlsLoader {
@@ -301,6 +308,9 @@ impl XlsLoader {
             sharedCells: Vec::new(),
             sharedAnchors: Vec::new(),
             failures: Vec::new(),
+            objId: -1,
+            objText: HashMap::new(),
+            cfRanges: Vec::new(),
         }
     }
     pub fn isXls(b: &[u8]) -> bool {
@@ -919,6 +929,10 @@ impl XlsLoader {
         self.sharedRgcb = no_b.clone();
         self.sharedCells.clear();
         self.sharedAnchors.clear();
+        self.objId = -1;
+        let no_text: HashMap<i64,String> = HashMap::new();
+        self.objText = no_text.clone();
+        self.cfRanges.clear();
         let mut depth: i64 = 1;
         let mut guard: i64 = 0;
         loop {
@@ -961,6 +975,10 @@ impl XlsLoader {
         let id: i64 = rec.borrow().id;
         if ((id != 519 && id != 1212) && id != 545) && id != 566 {
             self.pendingStringRow = -1;
+        }
+        if id == 93 || id == 438 || id == 28 || id == 446 || id == 432 || id == 433 {
+            self.ruleRecord(id, &c, sheet);
+            return;
         }
         if id == 515 {
             // NUMBER
@@ -1339,6 +1357,293 @@ impl XlsLoader {
             // An array formula's other cells point at its corner too; they
             // keep their values, and the corner already has the formula.
             i += 1;
+        }
+    }
+    /// --- comments, validation, conditional formats ---------------------------
+    pub fn ruleRecord(&mut self, id: i64, c: &Rc<RefCell<XlsCursor>>, sheet: &Rc<RefCell<SpreadsheetModel>>) {
+        if id == 93 {
+            // OBJ: the first subrecord, ftCmo, carries the object's type and id.
+            let ft: i64 = c.borrow_mut().u16();
+            c.borrow_mut().u16();
+            c.borrow_mut().u16();
+            if ft == 21 {
+                self.objId = c.borrow_mut().u16();
+            }
+            return;
+        }
+        if id == 438 {
+            // TXO: the text follows in CONTINUE pieces, each opening with a
+            // width flag (XlsCursor.chars reads it).
+            c.borrow_mut().skip(10);
+            let cch: i64 = c.borrow_mut().u16();
+            c.borrow_mut().skip(6);
+            if cch > 0 && self.objId >= 0 {
+                let txt: String = c.borrow_mut().chars(cch, false);
+                let crlf: String = (txt.split("\r\n").map(|s| s.to_string()).collect::<Vec<String>>()).join("\n");
+                self.objText.insert(self.objId, (crlf.split("\r").map(|s| s.to_string()).collect::<Vec<String>>()).join("\n"));
+            }
+            return;
+        }
+        if id == 28 {
+            // NOTE: row, col, flags, the OBJ id whose TXO holds the text.
+            let r: i64 = c.borrow_mut().u16();
+            let col: i64 = c.borrow_mut().u16();
+            let grbit: i64 = c.borrow_mut().u16();
+            let oid: i64 = c.borrow_mut().u16();
+            if self.objText.contains_key(&oid) {
+                self.ensureCell(sheet, r, col);
+                sheet.borrow_mut().setNote(r, col, &self.objText.get(&oid).cloned().unwrap());
+                if (grbit & 2) != 0 {
+                    sheet.borrow_mut().setNoteShown(r, col, true);
+                }
+            }
+            return;
+        }
+        if id == 446 {
+            self.readDv(c, sheet);
+            return;
+        }
+        if id == 432 {
+            // CFHEADER: count, flags, bounding box, then the ranges.
+            c.borrow_mut().skip(12);
+            self.cfRanges = XlsLoader::refList(c);
+            return;
+        }
+        if id == 433 {
+            self.readCf(c, sheet);
+        }
+    }
+    pub fn ensureCell(&self, sheet: &Rc<RefCell<SpreadsheetModel>>, row: i64, col: i64) {
+        if row + 1 > sheet.borrow().rowCount || col + 1 > sheet.borrow().colCount {
+            let mut nr: i64 = sheet.borrow().rowCount;
+            let mut nc: i64 = sheet.borrow().colCount;
+            if row + 1 > nr {
+                nr = row + 1;
+            }
+            if col + 1 > nc {
+                nc = col + 1;
+            }
+            sheet.borrow_mut().growTo(nr, nc);
+        }
+    }
+    /// A count and that many Ref8U (first row, last row, first col, last col)
+    /// as [r0, c0, r1, c1].
+    pub fn refList(c: &Rc<RefCell<XlsCursor>>) -> Vec<Vec<i64>> {
+        let mut out: Vec<Vec<i64>> = Vec::new();
+        let n: i64 = c.borrow_mut().u16();
+        let mut i: i64 = 0;
+        while i < n && !c.borrow_mut().atEnd() {
+            let r0: i64 = c.borrow_mut().u16();
+            let r1: i64 = c.borrow_mut().u16();
+            let c0: i64 = c.borrow_mut().u16();
+            let c1: i64 = c.borrow_mut().u16();
+            out.push(vec![r0, c0, r1, c1]);
+            i += 1;
+        }
+        out
+    }
+    /// A DV formula as validation text: an explicit list is one tStr with
+    /// the values split by NUL; anything else goes through XlsFormula.
+    pub fn dvFormula(&mut self, rgce: &[u8], base_row: i64, base_col: i64) -> String {
+        if rgce.is_empty() {
+            return String::new();
+        }
+        if rgce[0] == 23 && (rgce.len() as i64) >= 3 {
+            let cch: i64 = rgce[1] as i64;
+            let wide: bool = (rgce[2] & 1) != 0;
+            let mut units: Vec<i64> = Vec::new();
+            let mut k: i64 = 0;
+            let mut at: i64 = 3;
+            while k < cch && at < (rgce.len() as i64) {
+                if wide {
+                    if at + 1 >= (rgce.len() as i64) {
+                        break;
+                    }
+                    units.push((rgce[at as usize] as i64) + (rgce[(at + 1) as usize] as i64) * 256);
+                    at += 2;
+                } else {
+                    units.push(rgce[at as usize] as i64);
+                    at += 1;
+                }
+                k += 1;
+            }
+            let txt: String = SheetBytes::unitsToString(&units);
+            let vals: Vec<String> = txt.split("\u{0}").map(|s| s.to_string()).collect::<Vec<String>>();
+            return format!("\"{}\"", vals.join(","));
+        }
+        let empty: Vec<u8> = Vec::new();
+        self.formula.borrow_mut().decode(rgce, &empty, base_row, base_col)
+    }
+    /// DV: flags (type, operator, allow blank), four strings (prompt title,
+    /// error title, prompt, error), two formulas, then the ranges.
+    pub fn readDv(&mut self, c: &Rc<RefCell<XlsCursor>>, sheet: &Rc<RefCell<SpreadsheetModel>>) {
+        let lo: i64 = c.borrow_mut().u16();
+        let hi: i64 = c.borrow_mut().u16();
+        let typ: i64 = lo & 15;
+        let allow_blank: bool = (lo & 256) != 0;
+        let op_code: i64 = (hi / 16) & 15;
+        c.borrow_mut().string();
+        let err_title: String = c.borrow_mut().string();
+        c.borrow_mut().string();
+        let err_text: String = c.borrow_mut().string();
+        let cce1: i64 = c.borrow_mut().u16();
+        c.borrow_mut().u16();
+        let mut f1: Vec<u8> = vec![0u8; (cce1) as usize];
+        let mut i: i64 = 0;
+        while i < cce1 {
+            f1[i as usize] = (c.borrow_mut().u8()) as u8;
+            i += 1;
+        }
+        let cce2: i64 = c.borrow_mut().u16();
+        c.borrow_mut().u16();
+        let mut f2: Vec<u8> = vec![0u8; (cce2) as usize];
+        i = 0;
+        while i < cce2 {
+            f2[i as usize] = (c.borrow_mut().u8()) as u8;
+            i += 1;
+        }
+        let ranges: Vec<Vec<i64>> = XlsLoader::refList(c);
+        let kinds: Vec<String> = vec!["any".to_string(), "whole".to_string(), "decimal".to_string(), "list".to_string(), "date".to_string(), "time".to_string(), "textLength".to_string(), "custom".to_string()];
+        let ops: Vec<String> = vec!["between".to_string(), "notBetween".to_string(), "equal".to_string(), "notEqual".to_string(), "greaterThan".to_string(), "lessThan".to_string(), "greaterThanOrEqual".to_string(), "lessThanOrEqual".to_string()];
+        if typ == 0 || typ > 6 || typ == 4 || typ == 5 {
+            self.note("date, time and custom validation rules were not read");
+            return;
+        }
+        let mut g: i64 = 0;
+        while g < (ranges.len() as i64) {
+            let rg: Vec<i64> = ranges[g as usize].clone();
+            let dv: Rc<RefCell<DataValidation>> = Rc::new(RefCell::new(DataValidation::new()));
+            dv.borrow_mut().kind = kinds[typ as usize].clone();
+            if typ != 3 && op_code < 8 {
+                dv.borrow_mut().op = ops[op_code as usize].clone();
+            }
+            dv.borrow_mut().allowBlank = allow_blank;
+            dv.borrow_mut().r0 = rg[0];
+            dv.borrow_mut().c0 = rg[1];
+            dv.borrow_mut().r1 = rg[2];
+            dv.borrow_mut().c1 = rg[3];
+            dv.borrow_mut().f1 = self.dvFormula(&f1, rg[0], rg[1]);
+            dv.borrow_mut().f2 = self.dvFormula(&f2, rg[0], rg[1]);
+            if err_title != "\u{0}" {
+                dv.borrow_mut().errorTitle = err_title.clone();
+            }
+            if err_text != "\u{0}" {
+                dv.borrow_mut().errorText = err_text.clone();
+            }
+            self.ensureCell(sheet, rg[2], rg[3]);
+            sheet.borrow_mut().addValidation(dv.clone());
+            g += 1;
+        }
+    }
+    /// A CF operand: a number token, or the decoded formula when it reads as
+    /// a number. None for anything else.
+    pub fn cfNumber(&mut self, rgce: &[u8]) -> Option<f64> {
+        if rgce.is_empty() {
+            return None;
+        }
+        let empty: Vec<u8> = Vec::new();
+        let txt: String = self.formula.borrow_mut().decode(rgce, &empty, 0, 0);
+        txt.trim().parse::<f64>().ok()
+    }
+    /// CF: condition type and operator, the two formula lengths, the DXFN
+    /// formatting block (only its fill is kept), then the formulas.
+    pub fn readCf(&mut self, c: &Rc<RefCell<XlsCursor>>, sheet: &Rc<RefCell<SpreadsheetModel>>) {
+        let ct: i64 = c.borrow_mut().u8();
+        let cp: i64 = c.borrow_mut().u8();
+        let cce1: i64 = c.borrow_mut().u16();
+        let cce2: i64 = c.borrow_mut().u16();
+        c.borrow_mut().u16();
+        let fhi: i64 = c.borrow_mut().u16();
+        let flags2: i64 = c.borrow_mut().u16();
+        let mut fill: String = String::new();
+        if (fhi & 512) != 0 {
+            // DXFNum: a user format is a length-prefixed string.
+            if (flags2 & 1) != 0 {
+                let cb: i64 = c.borrow_mut().u16();
+                c.borrow_mut().skip(cb - 2);
+            } else {
+                c.borrow_mut().skip(2);
+            }
+        }
+        if (fhi & 1024) != 0 {
+            c.borrow_mut().skip(118);
+        }
+        if (fhi & 2048) != 0 {
+            c.borrow_mut().skip(8);
+        }
+        if (fhi & 4096) != 0 {
+            c.borrow_mut().skip(8);
+        }
+        if (fhi & 8192) != 0 {
+            let pat: i64 = c.borrow_mut().u16();
+            let icv: i64 = c.borrow_mut().u16();
+            let fls: i64 = (pat / 1024) & 63;
+            let fore: i64 = icv & 127;
+            let back: i64 = (icv / 128) & 127;
+            // A solid CF fill is drawn in the background colour; a writer that
+            // states the foreground with pattern 1 means the same.
+            let mut pick: i64 = back;
+            if fls == 1 && (fhi & 2) == 0 && (fhi & 4) != 0 {
+                pick = fore;
+            }
+            let rgb: String = self.colorOf(pick);
+            let rn: i64 = DgNative::str_len(&rgb);
+            if rn >= 6 {
+                let six: String = DgNative::substr(&rgb, rn - 6, rn);
+                fill = format!("#{}", six.to_uppercase());
+            }
+        }
+        if (fhi & 16384) != 0 {
+            c.borrow_mut().skip(2);
+        }
+        let all: Vec<u8> = c.borrow_mut().rest();
+        let mut t1: i64 = cce1;
+        if t1 > (all.len() as i64) {
+            t1 = all.len() as i64;
+        }
+        let mut t2: i64 = t1 + cce2;
+        if t2 > (all.len() as i64) {
+            t2 = all.len() as i64;
+        }
+        let rg1: Vec<u8> = all[0..(t1) as usize].to_vec();
+        let rg2: Vec<u8> = all[(t1) as usize..(t2) as usize].to_vec();
+        if ct != 1 {
+            self.note("conditional formats with formulas were not read");
+            return;
+        }
+        let ops: Vec<String> = vec![String::new(), "between".to_string(), "notBetween".to_string(), "equal".to_string(), "notEqual".to_string(), "greaterThan".to_string(), "lessThan".to_string(), "greaterThanOrEqual".to_string(), "lessThanOrEqual".to_string()];
+        let v1: Option<f64> = self.cfNumber(&rg1);
+        if cp < 1 || cp > 8 || v1.is_none() {
+            self.note("conditional formats comparing text or formulas were not read");
+            return;
+        }
+        let mut v2: f64 = 0.0;
+        if cp <= 2 {
+            let b: Option<f64> = self.cfNumber(&rg2);
+            if b.is_none() {
+                return;
+            }
+            v2 = b.unwrap();
+        }
+        if fill.is_empty() {
+            fill = "#C6EFCE".to_string();
+        }
+        let mut g: i64 = 0;
+        while g < (self.cfRanges.len() as i64) {
+            let rg: Vec<i64> = self.cfRanges[g as usize].clone();
+            let rule: Rc<RefCell<CfRule>> = Rc::new(RefCell::new(CfRule::new()));
+            rule.borrow_mut().kind = 1;
+            rule.borrow_mut().op = ops[cp as usize].clone();
+            rule.borrow_mut().v1 = v1.unwrap();
+            rule.borrow_mut().v2 = v2;
+            rule.borrow_mut().fillRgb = fill.clone();
+            rule.borrow_mut().r0 = rg[0];
+            rule.borrow_mut().c0 = rg[1];
+            rule.borrow_mut().r1 = rg[2];
+            rule.borrow_mut().c1 = rg[3];
+            self.ensureCell(sheet, rg[2], rg[3]);
+            sheet.borrow_mut().addCfRule(rule.clone());
+            g += 1;
         }
     }
 }

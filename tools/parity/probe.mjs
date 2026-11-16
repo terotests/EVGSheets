@@ -86,6 +86,7 @@ const page = await browser.newPage({ viewport: { width: W, height: H }, colorSch
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("crash", () => console.log("  page crashed"));
 let commands = [];
+let excelKindsCount = 1;
 let actions = [];
 try {
   await page.goto(`http://localhost:${PORT}/?xlsx=target.xlsx&name=quarterly-sales-dashboard.xlsx&theme=light`);
@@ -1610,6 +1611,7 @@ try {
     if (c.ok && c.kind === k) drawn.push(k);
   }
   await check("chart.kinds", async () => [drawn.length === excelKinds.length, drawn.length + " of " + excelKinds.length + " drawn"]);
+  excelKindsCount = drawn.length;
 
   // Names, auditing, evaluation, the watch window and manual calculation.
   await run("sheet.add");
@@ -1657,6 +1659,10 @@ try {
   const d = await dl;
   const bytes = d ? fs.readFileSync(await d.path()) : Buffer.alloc(0);
   ok("cmd.file.saveAs", bytes.length > 1000 && bytes[0] === 0x50 && bytes[1] === 0x4b, bytes.length + " bytes");
+  // Charts go into the saved file as DrawingML parts (xl/charts/evgchartN.xml);
+  // each name is in the zip twice (local header and central directory).
+  const chartParts = (bytes.toString("latin1").match(/xl\/charts\/evgchart\d+\.xml/g) || []).length / 2;
+  ok("cmd.chart.saveXlsx", chartParts >= excelKindsCount, chartParts + " chart parts");
 
   await put("A5", "45000");
   await at("A5");
