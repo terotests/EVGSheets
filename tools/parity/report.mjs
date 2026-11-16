@@ -101,8 +101,8 @@ const gaps = ui
   .sort((a, b) => b.lost - a.lost || value(b.gridcraft) - value(a.gridcraft) || a.id.localeCompare(b.id));
 
 // --- functions --------------------------------------------------------------------
-const ff = fs.readFileSync(P("datagrid", "src", "FormulaFunctions.rgr"), "utf8");
-const known = ff.slice(ff.indexOf("sfn isKnown"), ff.indexOf("\n    }\n", ff.indexOf("sfn isKnown")));
+const ff = fs.readFileSync(P("datagrid", "src", "formula_functions.rs"), "utf8");
+const known = ff.slice(ff.indexOf("pub fn isKnown"), ff.indexOf("\n    }\n", ff.indexOf("pub fn isKnown")));
 const functions = [...new Set([...known.matchAll(/"([A-Z][A-Z0-9.]*)"/g)].map((m) => m[1]))].sort();
 
 // --- metrics ----------------------------------------------------------------------
@@ -114,7 +114,13 @@ const computed = {
   W1: `${wbIds.filter((k) => probe.results[k].pass).length} of ${wbIds.length}`,
   F1: String(functions.length),
   // xlsx (read and written by every run) plus each export whose check passed.
-  X1: String(1 + ["cmd.file.exportCsv", "cmd.file.exportHtml"].filter((k) => probe?.results?.[k]?.pass).length),
+  // One per format with a passing check: xlsx (the target workbook), CSV, TSV,
+  // xls, xlsb and ods read (smoke, through the file picker), PDF and HTML out.
+  X1: String(
+    (probe?.results?.["wb.charts"]?.pass ? 1 : 0) +
+      ["cmd.file.exportPdf", "cmd.file.exportHtml"].filter((k) => probe?.results?.[k]?.pass).length +
+      ["opens semicolons.csv", "opens units.tsv", "opens sales.xls", "opens values.xlsb", "opens sales.ods"].filter((n) => smoke?.checks?.some((c) => c.name === n && c.ok)).length,
+  ),
   T1: `${smoke ? smoke.checks.length : "?"} smoke + ${Object.keys(probe?.results || {}).length} probe`,
 };
 function metricValue(m, col) {

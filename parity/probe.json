@@ -72,7 +72,7 @@
   },
   "ui.homeControls": {
    "pass": true,
-   "value": "144 commands reachable from Home: 49 controls on show, the rest in their drop-downs (Excel: ~60); 43 buttons inside toolbars"
+   "value": "144 commands reachable from Home: 49 controls on show, the rest in their drop-downs (Excel: ~60); 45 buttons inside toolbars"
   },
   "ui.homeClarity": {
    "pass": true,
@@ -1248,7 +1248,7 @@
   },
   "ui.zoomSlider": {
    "pass": true,
-   "value": "slider true zoom 200 (menu false dlg false pane  ctx false at {\"x\":1527,\"y\":1015,\"w\":110,\"h\":4})"
+   "value": "slider true zoom 205 (menu false dlg false pane  ctx false at {\"x\":1528,\"y\":1010,\"w\":110,\"h\":4})"
   },
   "ui.formatCellsPane": {
    "pass": true,
@@ -1375,7 +1375,9 @@
   "file.close",
   "file.exportCsv",
   "file.exportHtml",
+  "file.exportOds",
   "file.exportPdf",
+  "file.exportTsv",
   "file.info",
   "file.new",
   "file.open",
@@ -1684,6 +1686,8 @@
   "file.close",
   "file.exportCsv",
   "file.exportHtml",
+  "file.exportOds",
+  "file.exportTsv",
   "file.new",
   "file.open",
   "file.saveAs",

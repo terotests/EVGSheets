@@ -1,5 +1,5 @@
 {
- "passed": 118,
+ "passed": 136,
  "checks": [
   {
    "name": "a plain visit opens an empty workbook",
@@ -254,6 +254,54 @@
    "ok": true
   },
   {
+   "name": "Goal Seek on the ribbon opens a form on the active cell",
+   "ok": true
+  },
+  {
+   "name": "…an incomplete form stays open and says why",
+   "ok": true
+  },
+  {
+   "name": "…and OK seeks the goal and closes",
+   "ok": true
+  },
+  {
+   "name": "Sort… opens a form with the region's columns",
+   "ok": true
+  },
+  {
+   "name": "…and sorts by the chosen column and order",
+   "ok": true
+  },
+  {
+   "name": "Define Name opens with the selection as Refers to",
+   "ok": true
+  },
+  {
+   "name": "…and OK defines it",
+   "ok": true
+  },
+  {
+   "name": "Use in Formula offers the defined names",
+   "ok": true
+  },
+  {
+   "name": "…and OK starts a formula with it",
+   "ok": true
+  },
+  {
+   "name": "Symbol opens a picker",
+   "ok": true
+  },
+  {
+   "name": "…and OK types the symbol",
+   "ok": true
+  },
+  {
+   "name": "Select Data without a chart says to select one",
+   "ok": true
+  },
+  {
    "name": "Fill colour opens as an EVGUI dialog",
    "ok": true
   },
@@ -459,6 +507,30 @@
   },
   {
    "name": "…so Underline is not there",
+   "ok": true
+  },
+  {
+   "name": "opens sales.xls",
+   "ok": true
+  },
+  {
+   "name": "opens sales.ods",
+   "ok": true
+  },
+  {
+   "name": "opens semicolons.csv",
+   "ok": true
+  },
+  {
+   "name": "opens values.xlsb",
+   "ok": true
+  },
+  {
+   "name": "opens units.tsv",
+   "ok": true
+  },
+  {
+   "name": "Download .ods gives an OpenDocument file",
    "ok": true
   },
   {

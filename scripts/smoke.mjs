@@ -471,6 +471,82 @@ try {
   ok("Remove takes the link off", await page.evaluate(() => !window.sheet.app.link.win.open && window.sheet.app.grid.app.model.hyperlinkAt(11, 7) === ""));
   await page.evaluate(() => window.sheet.run("edit.undo", ""));
 
+  // Commands that need answers ask for them: a ribbon click with no argument
+  // opens one EVGUI form (FormDialog), which writes the core's argument.
+  const ribbon = (cmd) => page.evaluate((c) => { const app = window.sheet.app; const k = Object.keys(app.actions).find((x) => app.actions[x].command === c && app.actions[x].arg === ""); const r = app.runAction(k); app.sync(); return r; }, cmd);
+  const formOpen = () => page.evaluate(() => window.sheet.app.form.win.open);
+  // A value set from the test, then the form drawn again before its OK is clicked.
+  const formSet = async (fn) => { await page.evaluate(fn); await page.evaluate(() => { window.sheet.app.form.buildAll(); window.sheet.app.sync(); window.sheet.redraw(); }); await page.waitForTimeout(150); };
+  const cellAt = (r, c) => page.evaluate(([r, c]) => window.sheet.app.grid.app.model.getCell(r, c), [r, c]);
+  await page.evaluate(() => { const s = window.sheet; s.run("nav.goto", "R41"); });
+  for (const [ref, v] of [["R41", "5"], ["R40", "=R41*3"]]) {
+    await page.evaluate((r) => window.sheet.run("nav.goto", r), ref);
+    await page.keyboard.type(v);
+    await page.keyboard.press("Enter");
+  }
+  await page.evaluate(() => window.sheet.run("nav.goto", "R40"));
+  await ribbon("data.goalSeek");
+  await page.waitForTimeout(120);
+  ok("Goal Seek on the ribbon opens a form on the active cell", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.win.title === "Goal Seek" && f.in0.value === "R40" && window.sheet.app.ui.focusId === "sx-form-in0"; }));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("…an incomplete form stays open and says why", await page.evaluate(() => window.sheet.app.form.win.open && window.sheet.app.form.statusEl.textContent !== ""));
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("90");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("R41");
+  await shot(page, "08b_goal_seek");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  ok("…and OK seeks the goal and closes", !(await formOpen()) && Math.abs(Number(await cellAt(40, 17)) - 30) < 0.001, await cellAt(40, 17));
+
+  // Sort: levels chosen in the form, run as Custom Sort.
+  const rows = [["Name", "Score"], ["b", "2"], ["a", "3"], ["c", "1"]];
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = 0; j < 2; j++) {
+      await page.evaluate((r) => window.sheet.run("nav.goto", r), String.fromCharCode(84 + j) + (44 + i));
+      await page.keyboard.type(rows[i][j]);
+      await page.keyboard.press("Enter");
+    }
+  }
+  await page.evaluate(() => window.sheet.run("nav.goto", "U45"));
+  await ribbon("data.sort");
+  await page.waitForTimeout(120);
+  ok("Sort… opens a form with the region's columns", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.s0.value === "U" && f.s0.items.length === 2 && f.s2.items.length === 3; }));
+  await formSet(() => { window.sheet.app.form.s1.value = "desc"; });
+  await click(page, "sx-form-ok");
+  ok("…and sorts by the chosen column and order", [await cellAt(44, 20), await cellAt(46, 20)].join(",") === "3,1", [await cellAt(44, 19), await cellAt(44, 20)].join(","));
+
+  // Define Name, then Use in Formula offers it.
+  await page.evaluate(() => window.sheet.run("nav.goto", "T45:U47"));
+  await ribbon("formulas.defineName");
+  await page.waitForTimeout(100);
+  ok("Define Name opens with the selection as Refers to", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.in1.value.indexOf("$T$45") >= 0; }));
+  await page.keyboard.type("Scores");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("…and OK defines it", await page.evaluate(() => !window.sheet.app.form.win.open && window.sheet.app.grid.app.book.hasName("Scores")));
+  await page.evaluate(() => window.sheet.run("nav.goto", "W45"));
+  await ribbon("formulas.useInFormula");
+  await page.waitForTimeout(80);
+  ok("Use in Formula offers the defined names", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.s0.items.some((it) => it.value === "Scores"); }));
+  await formSet(() => { window.sheet.app.form.s0.value = "Scores"; });
+  await click(page, "sx-form-ok");
+  { const st = await page.evaluate(() => window.sheet.state()); ok("…and OK starts a formula with it", st.editing && st.editText === "=Scores", JSON.stringify([st.editing, st.editText, st.cell, st.status, await formOpen()])); }
+  await page.keyboard.press("Escape");
+
+  // Symbol: the picked character goes into the cell being edited.
+  await ribbon("insert.symbol");
+  await page.waitForTimeout(80);
+  ok("Symbol opens a picker", await formOpen());
+  await formSet(() => { window.sheet.app.form.s0.value = "€"; });
+  await click(page, "sx-form-ok");
+  { const st = await page.evaluate(() => window.sheet.state()); ok("…and OK types the symbol", st.editText === "€" || st.formula === "€", JSON.stringify([st.editing, st.editText, st.cell, st.status, await formOpen()])); }
+  await page.keyboard.press("Escape");
+
+  // Chart commands with no chart selected say so instead of opening.
+  ok("Select Data without a chart says to select one", !(await ribbon("chart.selectData")) && !(await formOpen()) && (await page.evaluate(() => window.sheet.state().status)).includes("chart"));
+
   // Fill colour: swatches in an EVGUI dialog, previewed on the sheet.
   await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
   await page.evaluate(() => window.sheet.run("format.fill", ""));
@@ -742,6 +818,8 @@ try {
     ["sales.xls", 0, [0, 0], /\S/],
     ["sales.ods", 0, [0, 0], /\S/],
     ["semicolons.csv", 0, [0, 0], /\S/],
+    ["values.xlsb", 0, [0, 0], /\S/],
+    ["units.tsv", 0, [0, 0], /\S/],
   ]) {
     const chooser = fmt.waitForEvent("filechooser", { timeout: 10000 });
     await fmt.evaluate(() => window.sheet.run("file.open", ""));

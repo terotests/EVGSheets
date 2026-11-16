@@ -727,6 +727,7 @@
 .sx-rule-on { border: 2px solid var(--accent); }
 .sx-gone { display: none; }
 .sx-dlg-label-mid { color: var(--text); font-size: 13px; line-height: 18px; width: 64px; flex-shrink: 0; }
+.sx-form-label { color: var(--text); font-size: 13px; line-height: 18px; width: 128px; flex-shrink: 0; }
 .sx-dlg-actions-split { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: space-between; gap: 8px; padding-top: 4px; }
 
 /* A drop-down (SelectCtl): a field-like trigger and a menu-like list. */

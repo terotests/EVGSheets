@@ -48,6 +48,7 @@ Import "SheetsEdits.rgr"
 Import "FindDialog.rgr"
 Import "PasteDialog.rgr"
 Import "RenameDialog.rgr"
+Import "FormDialog.rgr"
 Import "DeleteSheetDialog.rgr"
 Import "LinkDialog.rgr"
 Import "ColorDialog.rgr"
@@ -179,6 +180,7 @@ class SheetsApp {
     def find:FindDialog (new FindDialog)
     def paste:PasteDialog (new PasteDialog)
     def rename:RenameDialog (new RenameDialog)
+    def form:FormDialog (new FormDialog)
     def link:LinkDialog (new LinkDialog)
     def color:ColorDialog (new ColorDialog)
     def border:BorderDialog (new BorderDialog)
@@ -3123,6 +3125,7 @@ class SheetsApp {
         push a sql
         push a conn
         push a delSheet
+        push a form
         return a
     }
 
@@ -3182,6 +3185,22 @@ class SheetsApp {
             return false
         }
         return (this.shown((d.open(grid.app pageW pageH))))
+    }
+
+    fn openForm:boolean (cmd:string) {
+        def g:GridApp grid.app
+        if (((indexOf cmd "chart.") == 0) && ((g.activeChartPanel()) < 0)) {
+            g.view.status = "Select a chart first."
+            this.sync()
+            return false
+        }
+        if ((cmd == "formulas.useInFormula") && ((array_length g.book.nameOrder) == 0)) {
+            g.view.status = "No names defined yet. Use Define Name first."
+            this.sync()
+            return false
+        }
+        form.kind = cmd
+        return (this.openDlg(form))
     }
 
     fn openFind:boolean () {
@@ -3405,6 +3424,11 @@ class SheetsApp {
                 return false
             }
             return (this.openDlg(delSheet))
+        }
+        ; Commands whose answers the core takes as one argument: clicked
+        ; with none, they ask for them (FormDialog).
+        if ((FormDialog.asks(cmd)) && ((strlen a.arg) == 0)) {
+            return (this.openForm(cmd))
         }
         if ((cmd == "sheet.rename") && ((strlen a.arg) == 0)) {
             grid.app.renameIndex = grid.app.book.activeIndex
