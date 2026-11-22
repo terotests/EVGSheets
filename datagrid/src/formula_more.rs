@@ -1960,18 +1960,18 @@ impl FormulaMore {
                         return FormulaMore::numV((idx + 1) as f64);
                     }
                 } else {
-                    let cmp: i64 = v.borrow().compare(&key);
+                    let cmp: i64 = FormulaValue::excelCompare(&v, &key);
                     if cmp == 0 && !v.borrow().isBlank() {
                         return FormulaMore::numV((idx + 1) as f64);
                     }
                     if !v.borrow().isBlank() {
                         if mode == -1 && cmp < 0 {
-                            if best < 0 || list[best as usize].borrow().compare(&v) < 0 {
+                            if best < 0 || FormulaValue::excelCompare(&list[best as usize].clone(), &v) < 0 {
                                 best = idx;
                             }
                         }
                         if mode == 1 && cmp > 0 {
-                            if best < 0 || list[best as usize].borrow().compare(&v) > 0 {
+                            if best < 0 || FormulaValue::excelCompare(&list[best as usize].clone(), &v) > 0 {
                                 best = idx;
                             }
                         }

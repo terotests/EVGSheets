@@ -453,7 +453,35 @@ impl XlsxNumberFormat {
             }
             return iv.to_string();
         }
-        let s: String = XlsxNumberFormat::fixedN(v, 2);
+        // Excel's General keeps about ten significant digits in an 11-character
+        // cell and drops trailing zeros: 0.5, 1234.5678, 0.001234.
+        let mut s: String = String::new();
+        if v >= 1e11 || v < 1e-9 {
+            s = XlsxNumberFormat::formatScientific(v);
+        } else {
+            let mut int_digits: i64 = 0;
+            let mut t: f64 = v;
+            while t >= 1.0 {
+                t /= 10.0;
+                int_digits += 1;
+            }
+            let mut decimals: i64 = 10 - int_digits;
+            if int_digits == 0 {
+                decimals = 9;
+            }
+            if decimals < 0 {
+                decimals = 0;
+            }
+            s = XlsxNumberFormat::fixedN(v, decimals);
+            if DgNative::index_of(&s, ".") >= 0 {
+                while DgNative::str_len(&s) > 0 && DgNative::char_at(&s, DgNative::str_len(&s) - 1) == 48 {
+                    s = DgNative::substr(&s, 0, DgNative::str_len(&s) - 1);
+                }
+                if DgNative::str_len(&s) > 0 && DgNative::char_at(&s, DgNative::str_len(&s) - 1) == 46 {
+                    s = DgNative::substr(&s, 0, DgNative::str_len(&s) - 1);
+                }
+            }
+        }
         if force_minus {
             return format!("-{}", s);
         }

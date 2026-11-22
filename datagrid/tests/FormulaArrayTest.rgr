@@ -68,14 +68,14 @@ class FormulaArrayTest {
         FormulaArrayTest.put(app 2 2 "5")
 
         print "== lookups, which need the shape a range used to lose =="
-        FormulaArrayTest.formula(app 5 0 "VLOOKUP(\"south\",A1:C3,2)")
-        FormulaArrayTest.formula(app 5 1 "VLOOKUP(\"east\",A1:C3,3)")
-        FormulaArrayTest.formula(app 5 2 "VLOOKUP(\"west\",A1:C3,2)")
+        FormulaArrayTest.formula(app 5 0 "VLOOKUP(\"south\",A1:C3,2,FALSE)")
+        FormulaArrayTest.formula(app 5 1 "VLOOKUP(\"east\",A1:C3,3,FALSE)")
+        FormulaArrayTest.formula(app 5 2 "VLOOKUP(\"west\",A1:C3,2,FALSE)")
         FormulaArrayTest.formula(app 6 0 "INDEX(A1:C3,2,3)")
         FormulaArrayTest.formula(app 6 1 "INDEX(B1:B3,3)")
         FormulaArrayTest.formula(app 6 2 "MATCH(\"east\",A1:A3,0)")
         ; The first ROW is what HLOOKUP searches: B1=10, C1=3.
-        FormulaArrayTest.formula(app 7 0 "HLOOKUP(3,B1:C3,2)")
+        FormulaArrayTest.formula(app 7 0 "HLOOKUP(3,B1:C3,2,FALSE)")
         app.engine.rebuildAll()
         c.eqStr("VLOOKUP down a column" (FormulaArrayTest.cell(app 5 0)) "20")
         c.eqStr("VLOOKUP a third column" (FormulaArrayTest.cell(app 5 1)) "5")

@@ -198,7 +198,14 @@ class SheetView {
                     set_at sortKind row 1
                     set_at sortNum row dv
                 } {
+                    ; Excel order: numbers < text < logicals < errors.
                     set_at sortKind row 2
+                    if ((v == "TRUE") || (v == "FALSE")) {
+                        set_at sortKind row 3
+                    }
+                    if ((charAt v 0) == 35) {
+                        set_at sortKind row 4
+                    }
                 }
             }
             i = (i + 1)
@@ -221,6 +228,12 @@ class SheetView {
                 }
                 return 0
             }
+        }
+        if ((ka > 0) && (kb > 0) && (ka != kb)) {
+            if (ka < kb) {
+                return -1
+            }
+            return 1
         }
         def sa:string (itemAt sortText a)
         def sb:string (itemAt sortText b)
@@ -465,9 +478,16 @@ class SheetView {
         if (nb < n) {
             n = nb
         }
+        ; Case-insensitive like Excel's default sort.
         while (i < n) {
             def ca:int (charAt a i)
             def cb:int (charAt b i)
+            if ((ca >= 97) && (ca <= 122)) {
+                ca = (ca - 32)
+            }
+            if ((cb >= 97) && (cb <= 122)) {
+                cb = (cb - 32)
+            }
             if (ca < cb) {
                 return -1
             }
