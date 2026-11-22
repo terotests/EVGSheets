@@ -1822,6 +1822,10 @@ impl SpreadsheetModel {
     /// FortuneSheet-style display value: raw cell + number format engine.
     pub fn getDisplay(&self, row: i64, col: i64) -> String {
         let raw: String = self.getCell(row, col);
+        if DgNative::char_at(&raw, 0) == 39 && self.getFormula(row, col).is_empty() {
+            // the apostrophe only says "text"; it is not shown
+            return DgNative::substr(&raw, 1, DgNative::str_len(&raw));
+        }
         let st: Rc<RefCell<CellStyle>> = self.getCellStyle(row, col);
         let out: String = XlsxNumberFormat::format(&raw, &st.borrow().numFmt.clone());
         out
@@ -2441,6 +2445,14 @@ impl SpreadsheetModel {
         self.colHidden[col as usize] = hidden;
         self.colGeomDirty = true;
         self.version += 1;
+    }
+    /// Left out by the filter (not by hiding): SUBTOTAL 1-11 skips these.
+    pub fn isRowFilteredOut(&self, row: i64) -> bool {
+        row >= 0 && row < (self.rowSuppressed.len() as i64) && self.rowSuppressed[row as usize]
+    }
+    /// Hidden by hand; SUBTOTAL 101-111 skips these too.
+    pub fn rowHiddenFlag(&self, row: i64) -> bool {
+        row >= 0 && row < (self.rowHidden.len() as i64) && self.rowHidden[row as usize]
     }
     pub fn isRowHidden(&mut self, row: i64) -> bool {
         self.ensureGeometry();

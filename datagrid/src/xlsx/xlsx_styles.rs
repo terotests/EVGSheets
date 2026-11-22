@@ -100,6 +100,30 @@ impl XlsxStyles {
         if id == 2 {
             return "0.00".to_string();
         }
+        if id == 5 {
+            return "\"$\"#,##0_);\\(\"$\"#,##0\\)".to_string();
+        }
+        if id == 6 {
+            return "\"$\"#,##0_);[Red]\\(\"$\"#,##0\\)".to_string();
+        }
+        if id == 7 {
+            return "\"$\"#,##0.00_);\\(\"$\"#,##0.00\\)".to_string();
+        }
+        if id == 8 {
+            return "\"$\"#,##0.00_);[Red]\\(\"$\"#,##0.00\\)".to_string();
+        }
+        if id == 41 {
+            return "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"_);_(@_)".to_string();
+        }
+        if id == 42 {
+            return "_(\"$\"* #,##0_);_(\"$\"* \\(#,##0\\);_(\"$\"* \"-\"_);_(@_)".to_string();
+        }
+        if id == 43 {
+            return "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)".to_string();
+        }
+        if id == 44 {
+            return "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)".to_string();
+        }
         if id == 3 {
             return "#,##0".to_string();
         }
@@ -170,7 +194,7 @@ impl XlsxStyles {
             return "mm/dd/yyyy".to_string();
         }
         if id == 15 {
-            return "dd.mm.yyyy".to_string();
+            return "d-mmm-yy".to_string();
         }
         if id == 22 {
             return "hh:mm".to_string();

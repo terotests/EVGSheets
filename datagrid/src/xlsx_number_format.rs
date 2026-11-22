@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::rgr::DgNative;
+use crate::num_format_render::NumFormatRender;
 
 /// XlsxNumberFormat - reusable Spreadsheet number-format engine.
 ///
@@ -296,6 +297,13 @@ impl XlsxNumberFormat {
         if numeric {
             if d.is_some() {
                 let v: f64 = d.unwrap();
+                let code: String = c.borrow().rawCode.clone();
+                if NumFormatRender::handles(&code) {
+                    return NumFormatRender::renderNumber(v, &code);
+                }
+                if code != "General" && NumFormatRender::isDateSection(&c.borrow().pos.clone()) {
+                    return XlsxNumberFormat::formatDateTime(v, &c.borrow().pos.clone());
+                }
                 let mut pat: String = c.borrow().pos.clone();
                 if v < 0.0 && !c.borrow().neg.is_empty() {
                     pat = c.borrow().neg.clone();
@@ -326,6 +334,9 @@ impl XlsxNumberFormat {
             }
         }
         // non-numeric
+        if c.borrow().sectionCount >= 4 || (c.borrow().sectionCount == 1 && DgNative::index_of(&c.borrow().rawCode.clone(), "@") >= 0) {
+            return NumFormatRender::renderText(raw, &c.borrow().rawCode.clone());
+        }
         if !c.borrow().text.is_empty() {
             if c.borrow().text == "@" {
                 return raw.to_string();
@@ -609,32 +620,70 @@ impl XlsxNumberFormat {
     /// after an hour or before a second), d, h, s, AM/PM and A/P; anything
     /// else is literal.
     pub fn formatDateTime(serial: f64, pat: &str) -> String {
-        let mut day: i64 = serial.floor() as i64;
-        if day < 1 {
-            day = 1;
+        // Excel cannot draw a negative date or one past 9999-12-31.
+        if serial < 0.0 || serial >= 2958466.0 {
+            return "########".to_string();
         }
-        let z: i64 = day + 2415019;
-        let a: i64 = z + 32044;
-        let b: i64 = (4 * a + 3) / 146097;
-        let c: i64 = a - (b * 146097 / 4);
-        let d: i64 = (4 * c + 3) / 1461;
-        let e: i64 = c - (1461 * d / 4);
-        let m: i64 = (5 * e + 2) / 153;
-        let dd: i64 = (e - ((153 * m + 2) / 5)) + 1;
-        let mo: i64 = (m + 3) - 12 * (m / 10);
-        let yy: i64 = ((b * 100 + d) - 4800) + (m / 10);
-        // Serial 1 (1900-01-01) is a Sunday.
+        let lp0: String = XlsxNumberFormat::lower(pat);
+        let elapsed: bool = DgNative::index_of(&lp0, "[h") >= 0 || DgNative::index_of(&lp0, "[m") >= 0 || DgNative::index_of(&lp0, "[s") >= 0;
+        let subsec: bool = DgNative::index_of(&lp0, "s.0") >= 0;
+        // Milliseconds when the code shows them, else whole seconds, rounded.
+        let mut total_ms: i64 = (serial * 86400000.0 + 0.5).floor() as i64;
+        if subsec {
+            // round to the places shown: .0 tenths, .00 hundredths, .000 ms
+            let at: i64 = DgNative::index_of(&lp0, "s.0") + 2;
+            let mut places: i64 = 0;
+            while at + places < DgNative::str_len(&lp0) && DgNative::char_at(&lp0, at + places) == 48 && places < 3 {
+                places += 1;
+            }
+            let mut unit: f64 = 1000.0;
+            let mut u: i64 = 0;
+            while u < places {
+                unit /= 10.0;
+                u += 1;
+            }
+            total_ms = (((serial * 86400000.0 / unit) + 0.5).floor() * unit + 0.5).floor() as i64;
+        }
+        if !subsec {
+            total_ms = ((serial * 86400.0 + 0.5).floor() as i64) * 1000;
+        }
+        let day: i64 = total_ms / 86400000;
+        let mut yy: i64 = 1900;
+        let mut mo: i64 = 1;
+        let mut dd: i64 = 0;
+        if day == 60 {
+            // Excel's 1900-02-29, which never was.
+            mo = 2;
+            dd = 29;
+        } else {
+            if day > 0 {
+                let mut z: i64 = day + 2415019;
+                if day < 60 {
+                    z = day + 2415020;
+                }
+                let a: i64 = z + 32044;
+                let b: i64 = (4 * a + 3) / 146097;
+                let c: i64 = a - (b * 146097 / 4);
+                let d: i64 = (4 * c + 3) / 1461;
+                let e: i64 = c - (1461 * d / 4);
+                let m: i64 = (5 * e + 2) / 153;
+                dd = (e - ((153 * m + 2) / 5)) + 1;
+                mo = (m + 3) - 12 * (m / 10);
+                yy = ((b * 100 + d) - 4800) + (m / 10);
+            }
+        }
+        // Serial 1 (1900-01-01) is a Sunday; serial 0 a Saturday.
         let wd: i64 = (day + 6) % 7;
-        let mut frac: f64 = serial - ((serial.floor() as i64) as f64);
-        if frac < 0.0 {
-            frac = 0.0 - frac;
-        }
-        let total_sec: i64 = (frac * 86400.0 + 0.5).floor() as i64;
+        let day_ms: i64 = total_ms - day * 86400000;
+        let ms: i64 = day_ms % 1000;
+        let total_sec: i64 = day_ms / 1000;
         let mut hh: i64 = total_sec / 3600;
-        let mi: i64 = (total_sec - hh * 3600) / 60;
+        let mut mi: i64 = (total_sec - hh * 3600) / 60;
         let ss: i64 = (total_sec - hh * 3600) - mi * 60;
-        if hh >= 24 {
-            hh = hh % 24;
+        let all_sec: i64 = total_ms / 1000;
+        if elapsed {
+            hh = all_sec / 3600;
+            mi = (all_sec / 60) % 60;
         }
         let lp: String = XlsxNumberFormat::lower(pat);
         let ampm: bool = DgNative::index_of(&lp, "am/pm") >= 0 || DgNative::index_of(&lp, "a/p") >= 0;
@@ -671,7 +720,9 @@ impl XlsxNumberFormat {
                             out = format!("{}{}", out, mi);
                         }
                     } else {
-                        if run >= 4 {
+                        if run >= 5 {
+                            out = format!("{}{}", out, DgNative::substr(&XlsxNumberFormat::monthName(mo), 0, 1));
+                        } else if run >= 4 {
                             out = format!("{}{}", out, XlsxNumberFormat::monthName(mo));
                         } else {
                             if run == 3 {
@@ -746,12 +797,55 @@ impl XlsxNumberFormat {
                                         }
                                         i += 3;
                                     } else {
-                                        if ch != 91 {
-                                            if ch != 93 {
-                                                out = format!("{}{}", out, DgNative::substr(&pat, i, i + 1));
+                                        if ch == 91 {
+                                            // [h] [mm] [ss]: the elapsed total, not the clock.
+                                            let close: i64 = DgNative::index_of_from(&lp, "]", i);
+                                            let inner: String = DgNative::substr(&lp, i + 1, close);
+                                            let ic: i64 = DgNative::char_at(&inner, 0);
+                                            let mut tot: i64 = -1;
+                                            if ic == 104 {
+                                                tot = all_sec / 3600;
+                                                last_was_hour = true;
+                                            }
+                                            if ic == 109 {
+                                                tot = all_sec / 60;
+                                                last_was_hour = false;
+                                            }
+                                            if ic == 115 {
+                                                tot = all_sec;
+                                                last_was_hour = false;
+                                            }
+                                            if tot >= 0 && close > i {
+                                                let mut ts: String = tot.to_string();
+                                                while DgNative::str_len(&ts) < DgNative::str_len(&inner) {
+                                                    ts = format!("0{}", ts);
+                                                }
+                                                out = format!("{}{}", out, ts);
+                                                i = close + 1;
+                                            } else {
+                                                i += 1;
+                                            }
+                                        } else {
+                                            if ch == 46 && subsec && i > 0 && DgNative::char_at(&lp, i - 1) == 115 {
+                                                // .0 .00 .000 after seconds
+                                                let mut k: i64 = i + 1;
+                                                while k < n && DgNative::char_at(&lp, k) == 48 {
+                                                    k += 1;
+                                                }
+                                                let places: i64 = k - (i + 1);
+                                                let mut msd: String = ms.to_string();
+                                                while DgNative::str_len(&msd) < 3 {
+                                                    msd = format!("0{}", msd);
+                                                }
+                                                out = format!("{}.{}", out, DgNative::substr(&msd, 0, places));
+                                                i = k;
+                                            } else {
+                                                if ch != 93 {
+                                                    out = format!("{}{}", out, DgNative::substr(&pat, i, i + 1));
+                                                }
+                                                i += 1;
                                             }
                                         }
-                                        i += 1;
                                     }
                                 }
                             }

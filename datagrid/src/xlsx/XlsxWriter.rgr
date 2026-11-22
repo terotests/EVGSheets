@@ -802,6 +802,16 @@ class XlsxWriter {
                     if (sid >= 0) {
                         str_append tag (" s=\"" + (to_string (sid + 1)) + "\"")
                     }
+                    ; A leading apostrophe marks text that would otherwise read
+                    ; as a number or a logical ('123): written as that text.
+                    if ((charAt raw 0) == 39) {
+                        raw = (substring raw 1 (strlen raw))
+                        if ((strlen formula) == 0) {
+                            str_append cells (tag + " t=\"inlineStr\"><is><t xml:space=\"preserve\">" + (XlsxWriter.esc(raw)) + "</t></is></c>")
+                            cc = (cc + 1)
+                            continue
+                        }
+                    }
                     def numeric:boolean (XlsxNumberFormat.wholeNumber(raw))
                     ; TRUE/FALSE are booleans and #DIV/0! and its kind errors,
                     ; each with its own cell type, or a reader takes them for text.

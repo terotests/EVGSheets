@@ -30,7 +30,7 @@ impl FormulaMore {
     /// Every name answered here, space-separated, with a space at each end so
     /// a lookup is one search for " NAME ".
     pub fn names() -> String {
-        " LOG SQRTPI EVEN ODD ISEVEN ISODD FACT FACTDOUBLE COMBIN COMBINA PERMUT GCD LCM QUOTIENT MROUND CEILING.MATH FLOOR.MATH CEILING.PRECISE FLOOR.PRECISE ISO.CEILING SUMSQ SUMX2MY2 SUMX2PY2 SUMXMY2 RADIANS DEGREES SIN COS TAN ASIN ACOS ATAN ATAN2 SINH COSH TANH COT CSC SEC BASE DECIMAL DEC2BIN BIN2DEC DEC2HEX HEX2DEC DEC2OCT OCT2DEC ROMAN ARABIC MULTINOMIAL MAXIFS MINIFS RANK RANK.EQ RANK.AVG MODE MODE.SNGL PERCENTILE PERCENTILE.INC PERCENTILE.EXC QUARTILE QUARTILE.INC QUARTILE.EXC PERCENTRANK PERCENTRANK.INC GEOMEAN HARMEAN AVEDEV DEVSQ AVERAGEA MAXA MINA CORREL PEARSON COVAR COVARIANCE.P COVARIANCE.S SLOPE INTERCEPT RSQ FORECAST FORECAST.LINEAR STEYX STANDARDIZE TRIMMEAN COUNTUNIQUE TIME HOUR MINUTE SECOND TIMEVALUE WEEKNUM ISOWEEKNUM NETWORKDAYS WORKDAY NETWORKDAYS.INTL WORKDAY.INTL DATEDIF DAYS360 YEARFRAC TEXTBEFORE TEXTAFTER TEXTSPLIT VALUETOTEXT NUMBERVALUE FIXED DOLLAR CLEAN UNICHAR UNICODE ISLOGICAL ISNONTEXT ISNA TYPE ERROR.TYPE XMATCH CHOOSECOLS CHOOSEROWS TAKE DROP VSTACK HSTACK SEQUENCE SORTBY TOCOL TOROW WRAPROWS WRAPCOLS EXPAND ADDRESS HYPERLINK IPMT PPMT CUMIPMT CUMPRINC RATE IRR XNPV XIRR MIRR DB DDB SYD EFFECT NOMINAL PDURATION RRI ROW COLUMN ROWS COLUMNS OFFSET INDIRECT ISREF ISFORMULA FORMULATEXT RAND RANDBETWEEN ".to_string()
+        " LOG SQRTPI EVEN ODD ISEVEN ISODD FACT FACTDOUBLE COMBIN COMBINA PERMUT GCD LCM QUOTIENT MROUND CEILING.MATH FLOOR.MATH CEILING.PRECISE FLOOR.PRECISE ISO.CEILING SUMSQ SUMX2MY2 SUMX2PY2 SUMXMY2 RADIANS DEGREES SIN COS TAN ASIN ACOS ATAN ATAN2 SINH COSH TANH COT CSC SEC BASE DECIMAL DEC2BIN BIN2DEC DEC2HEX HEX2DEC DEC2OCT OCT2DEC ROMAN ARABIC MULTINOMIAL MAXIFS MINIFS RANK RANK.EQ RANK.AVG MODE MODE.SNGL PERCENTILE PERCENTILE.INC PERCENTILE.EXC QUARTILE QUARTILE.INC QUARTILE.EXC PERCENTRANK PERCENTRANK.INC GEOMEAN HARMEAN AVEDEV DEVSQ AVERAGEA MAXA MINA CORREL PEARSON COVAR COVARIANCE.P COVARIANCE.S SLOPE INTERCEPT RSQ FORECAST FORECAST.LINEAR STEYX STANDARDIZE TRIMMEAN COUNTUNIQUE TIME HOUR MINUTE SECOND TIMEVALUE WEEKNUM ISOWEEKNUM NETWORKDAYS WORKDAY NETWORKDAYS.INTL WORKDAY.INTL DATEDIF DAYS360 YEARFRAC TEXTBEFORE TEXTAFTER TEXTSPLIT VALUETOTEXT NUMBERVALUE FIXED DOLLAR CLEAN UNICHAR UNICODE ISLOGICAL ISNONTEXT ISNA TYPE ERROR.TYPE XMATCH CHOOSECOLS CHOOSEROWS TAKE DROP VSTACK HSTACK SEQUENCE SORTBY TOCOL TOROW WRAPROWS WRAPCOLS EXPAND ADDRESS HYPERLINK IPMT PPMT CUMIPMT CUMPRINC RATE IRR XNPV XIRR MIRR DB DDB SYD EFFECT NOMINAL PDURATION RRI ROW COLUMN ROWS COLUMNS OFFSET INDIRECT ISREF ISFORMULA FORMULATEXT RAND RANDBETWEEN MMULT AGGREGATE MDETERM MINVERSE MUNIT AREAS LET LAMBDA REDUCE MAP SCAN BYROW BYCOL MAKEARRAY ".to_string()
     }
     pub fn isKnown(n: &str) -> bool {
         let all: String = FormulaMore::names();
@@ -244,6 +244,10 @@ impl FormulaMore {
 
     pub fn invoke(n: &str, args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let nm: String = n.to_string();
+        let r0: Rc<RefCell<FormulaValue>> = FormulaMore::matrixFn(&nm, args);
+        if !r0.borrow().isBlank() {
+            return r0;
+        }
         let r1: Rc<RefCell<FormulaValue>> = FormulaMore::mathFn(&nm, args);
         if !r1.borrow().isBlank() {
             return r1;
@@ -266,6 +270,225 @@ impl FormulaMore {
         }
         let r6: Rc<RefCell<FormulaValue>> = FormulaMore::financeFn(&nm, args);
         r6
+    }
+
+    // --- matrices and AGGREGATE ------------------------------------------------------
+
+    pub fn matrixOf(v: &Rc<RefCell<FormulaValue>>) -> Rc<RefCell<FormulaValue>> {
+        if v.borrow().isArray() {
+            return v.clone();
+        }
+        let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        items.push(v.clone());
+        FormulaValue::fromArray(1, 1, &items)
+    }
+    pub fn cellNum(m: &Rc<RefCell<FormulaValue>>, r: i64, c: i64) -> f64 {
+        let x: Rc<RefCell<FormulaValue>> = m.borrow().at(r, c);
+        let k: i64 = x.borrow().kind;
+        if k == 1 {
+            return x.borrow().num;
+        }
+        0.0
+    }
+    pub fn cellIsNum(m: &Rc<RefCell<FormulaValue>>, r: i64, c: i64) -> bool {
+        m.borrow().at(r, c).borrow().kind == 1
+    }
+    pub fn matrixFn(n: &str, args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
+        if n == "MMULT" {
+            if (args.len() as i64) < 2 {
+                return FormulaMore::err("#VALUE!");
+            }
+            let a: Rc<RefCell<FormulaValue>> = FormulaMore::matrixOf(&args[0].clone());
+            let b: Rc<RefCell<FormulaValue>> = FormulaMore::matrixOf(&args[1].clone());
+            let ar: i64 = a.borrow().rows;
+            let ac: i64 = a.borrow().cols;
+            let br: i64 = b.borrow().rows;
+            let bc: i64 = b.borrow().cols;
+            if ac != br {
+                return FormulaMore::err("#VALUE!");
+            }
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut i: i64 = 0;
+            while i < ar {
+                let mut j: i64 = 0;
+                while j < bc {
+                    let mut s: f64 = 0.0;
+                    let mut k: i64 = 0;
+                    while k < ac {
+                        if !FormulaMore::cellIsNum(&a, i, k) || !FormulaMore::cellIsNum(&b, k, j) {
+                            return FormulaMore::err("#VALUE!");
+                        }
+                        let x: f64 = FormulaMore::cellNum(&a, i, k);
+                        let y: f64 = FormulaMore::cellNum(&b, k, j);
+                        s += x * y;
+                        k += 1;
+                    }
+                    items.push(FormulaValue::fromNumber(s));
+                    j += 1;
+                }
+                i += 1;
+            }
+            return FormulaValue::fromArray(ar, bc, &items);
+        }
+        if n == "MUNIT" {
+            if (args.len() as i64) < 1 {
+                return FormulaMore::err("#VALUE!");
+            }
+            let size: i64 = args[0].borrow().single().borrow().numberValue() as i64;
+            if size < 1 {
+                return FormulaMore::err("#VALUE!");
+            }
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut i: i64 = 0;
+            while i < size * size {
+                if i / size == i % size {
+                    items.push(FormulaValue::fromNumber(1.0));
+                } else {
+                    items.push(FormulaValue::fromNumber(0.0));
+                }
+                i += 1;
+            }
+            return FormulaValue::fromArray(size, size, &items);
+        }
+        if n == "MDETERM" || n == "MINVERSE" {
+            if (args.len() as i64) < 1 {
+                return FormulaMore::err("#VALUE!");
+            }
+            let a: Rc<RefCell<FormulaValue>> = FormulaMore::matrixOf(&args[0].clone());
+            let sz: i64 = a.borrow().rows;
+            if sz != a.borrow().cols {
+                return FormulaMore::err("#VALUE!");
+            }
+            // Gauss-Jordan on [A | I]
+            let w: i64 = sz * 2;
+            let mut m: Vec<f64> = Vec::new();
+            let mut r: i64 = 0;
+            while r < sz {
+                let mut c: i64 = 0;
+                while c < w {
+                    if c < sz {
+                        if !FormulaMore::cellIsNum(&a, r, c) {
+                            return FormulaMore::err("#VALUE!");
+                        }
+                        m.push(FormulaMore::cellNum(&a, r, c));
+                    } else {
+                        if c - sz == r {
+                            m.push(1.0);
+                        } else {
+                            m.push(0.0);
+                        }
+                    }
+                    c += 1;
+                }
+                r += 1;
+            }
+            let mut det: f64 = 1.0;
+            let mut col: i64 = 0;
+            while col < sz {
+                let mut piv: i64 = col;
+                let mut best: f64 = m[(col * w + col) as usize].abs();
+                let mut q: i64 = col + 1;
+                while q < sz {
+                    let v: f64 = m[(q * w + col) as usize].abs();
+                    if v > best {
+                        best = v;
+                        piv = q;
+                    }
+                    q += 1;
+                }
+                if best < 1e-300 {
+                    if n == "MDETERM" {
+                        return FormulaValue::fromNumber(0.0);
+                    }
+                    return FormulaMore::err("#NUM!");
+                }
+                if piv != col {
+                    let mut c2: i64 = 0;
+                    while c2 < w {
+                        let t: f64 = m[(col * w + c2) as usize];
+                        m[(col * w + c2) as usize] = m[(piv * w + c2) as usize];
+                        m[(piv * w + c2) as usize] = t;
+                        c2 += 1;
+                    }
+                    det = 0.0 - det;
+                }
+                let pv: f64 = m[(col * w + col) as usize];
+                det *= pv;
+                let mut c3: i64 = 0;
+                while c3 < w {
+                    m[(col * w + c3) as usize] = m[(col * w + c3) as usize] / pv;
+                    c3 += 1;
+                }
+                let mut r2: i64 = 0;
+                while r2 < sz {
+                    if r2 != col {
+                        let f: f64 = m[(r2 * w + col) as usize];
+                        let mut c4: i64 = 0;
+                        while c4 < w {
+                            m[(r2 * w + c4) as usize] = m[(r2 * w + c4) as usize] - f * m[(col * w + c4) as usize];
+                            c4 += 1;
+                        }
+                    }
+                    r2 += 1;
+                }
+                col += 1;
+            }
+            if n == "MDETERM" {
+                return FormulaValue::fromNumber(det);
+            }
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut r3: i64 = 0;
+            while r3 < sz {
+                let mut c5: i64 = 0;
+                while c5 < sz {
+                    items.push(FormulaValue::fromNumber(m[(r3 * w + sz + c5) as usize]));
+                    c5 += 1;
+                }
+                r3 += 1;
+            }
+            return FormulaValue::fromArray(sz, sz, &items);
+        }
+        if n == "AGGREGATE" {
+            // AGGREGATE(function, options, ref1, [k]): options 2, 3, 6 and 7
+            // leave out error values; hidden rows are not known here.
+            if (args.len() as i64) < 3 {
+                return FormulaMore::err("#VALUE!");
+            }
+            let f: i64 = args[0].borrow().single().borrow().numberValue() as i64;
+            let opt: i64 = args[1].borrow().single().borrow().numberValue() as i64;
+            let skip_err: bool = opt == 2 || opt == 3 || opt == 6 || opt == 7;
+            let names: Vec<&str> = vec!["", "AVERAGE", "COUNT", "COUNTA", "MAX", "MIN", "PRODUCT", "STDEV.S", "STDEV.P", "SUM", "VAR.S", "VAR.P", "MEDIAN", "MODE.SNGL", "LARGE", "SMALL", "PERCENTILE.INC", "QUARTILE.INC", "PERCENTILE.EXC", "QUARTILE.EXC"];
+            if f < 1 || f > 19 {
+                return FormulaMore::err("#VALUE!");
+            }
+            let mut vals: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let last: i64 = if f >= 14 { 3 } else { args.len() as i64 };
+            let mut ai: i64 = 2;
+            while ai < last && ai < (args.len() as i64) {
+                for x in FormulaMore::flatOf(&args[ai as usize].clone()).iter() {
+                    if x.borrow().isError() {
+                        if skip_err {
+                            continue;
+                        }
+                        return x.clone();
+                    }
+                    vals.push(x.clone());
+                }
+                ai += 1;
+            }
+            let count: i64 = vals.len() as i64;
+            let arr: Rc<RefCell<FormulaValue>> = FormulaValue::fromArray(count, 1, &vals);
+            let mut call: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            call.push(arr);
+            if f >= 14 {
+                if (args.len() as i64) < 4 {
+                    return FormulaMore::err("#VALUE!");
+                }
+                call.push(args[3].clone());
+            }
+            return FormulaFunctions::invoke(names[f as usize], &call);
+        }
+        FormulaValue::blank()
     }
 
     // --- math and trigonometry -------------------------------------------------------

@@ -10,6 +10,7 @@ use crate::cell_style::CellStyle;
 use crate::data_validation::DataValidation;
 use crate::formula_engine::FormulaParser;
 use crate::rich_text::RichText;
+use crate::xlsx_number_format::XlsxNumberFormat;
 use crate::spreadsheet_model::{CfRule, SheetOpaque, Sparkline, SpreadsheetModel};
 use crate::xlsx::xlsx_shared_strings::XlsxSharedStrings;
 use crate::xlsx::xml_lite::{XmlLite, XmlTag};
@@ -1341,6 +1342,14 @@ impl XlsxWorksheet {
                         display = value.clone();
                     }
                 }
+            }
+        }
+        // Text that would read back as a number, a logical or an error keeps a
+        // leading apostrophe, the editor's mark for "this is text" ('123).
+        if (cell_type == "s" || cell_type == "inlineStr") && !display.is_empty() {
+            let first: i64 = DgNative::char_at(&display, 0);
+            if XlsxNumberFormat::wholeNumber(&display) || display == "TRUE" || display == "FALSE" || first == 39 || first == 35 {
+                display = format!("'{}", display);
             }
         }
         model.borrow_mut().setCellRaw(row, col, &display);
