@@ -187,6 +187,7 @@ class GridApp {
     def clipboardSeq:int 0
     def clipper:ChartClipboard (new ChartClipboard)
     def clipR0:int 0
+    def clipSheetName:string ""
     def clipC0:int 0
     def clipRows:int 0
     def clipCols:int 0
@@ -196,6 +197,8 @@ class GridApp {
     ; 0 = everything (default), 1 = values only, 2 = formats only,
     ; 3 = values + formulas but no formatting.
     def pasteMode:int 0
+    ; Paste Special › Transpose: rows of the copied block become columns.
+    def pasteTranspose:boolean false
     ; Shared EVG dialog layer — the same windows the DOCX / PPTX hosts can use.
     def windows:EVGWindowManager (new EVGWindowManager)
     ; PivotTables: their descriptions; the results are cells on their sheets.
@@ -3942,8 +3945,54 @@ class GridApp {
         model.version = (model.version + 1)
     }
 
+    ; Cut and paste moved the block: every formula that pointed into it now
+    ; points at where the cells went, as in Excel. On this sheet the edits go
+    ; through the transaction so one undo puts them back; other sheets only
+    ; change their `ThisSheet!A1` references.
+    fn moveRefsAfterCut:void (startR:int startC:int) {
+        def r0:int clipR0
+        def c0:int clipC0
+        def r1:int ((clipR0 + clipRows) - 1)
+        def c1:int ((clipC0 + clipCols) - 1)
+        def dy:int (startR - clipR0)
+        def dx:int (startC - clipC0)
+        if ((dy == 0) && (dx == 0)) {
+            return
+        }
+        def sheetName:string model.name
+        def si:int 0
+        def sn:int (book.sheetCount())
+        while (si < sn) {
+            def sheet:SpreadsheetModel (book.sheetAt(si))
+            def sameSheet:boolean (si == book.activeIndex)
+            def keys:[string] (sheet.formulaSnapshotKeys())
+            def texts:[string] (sheet.formulaSnapshotTexts())
+            def fi:int 0
+            while (fi < (array_length keys)) {
+                def key:string (itemAt keys fi)
+                def expr:string (itemAt texts fi)
+                def rewritten:string (FormulaParser.moveBlock(expr sheetName sameSheet r0 c0 r1 c1 dy dx))
+                if (((strlen rewritten) > 0) && (rewritten != expr)) {
+                    if sameSheet {
+                        def parts:[string] (strsplit key ",")
+                        def rr:int (SpreadsheetModel.parseInt0((itemAt parts 0)))
+                        def cc:int (SpreadsheetModel.parseInt0((itemAt parts 1)))
+                        model.applyEditStyled(rr cc "" rewritten (model.getCellStyle(rr cc)))
+                        engine.syncCell(book.activeIndex rr cc)
+                    } {
+                        set sheet.formulas key rewritten
+                    }
+                }
+                fi = (fi + 1)
+            }
+            si = (si + 1)
+        }
+    }
+
     fn applyFilter:void (col:int values:[string]) {
         model.setFilter(col true values)
+        ; SUBTOTAL leaves out filtered rows, so it has to see the new filter.
+        engine.recalcAll()
         sheetView.markDirty()
         sheetView.rebuild()
         grid.updateVisible(model)
@@ -3957,6 +4006,8 @@ class GridApp {
         }
         def empty:[string]
         model.setFilter(-1 false empty)
+        ; SUBTOTAL leaves out filtered rows, so it has to see the new filter.
+        engine.recalcAll()
         sheetView.markDirty()
         sheetView.rebuild()
         grid.updateVisible(model)
@@ -4267,6 +4318,7 @@ class GridApp {
         pasteDialog.addRadio(2 "Values only" 1 false)
         pasteDialog.addRadio(3 "Formats only" 1 false)
         pasteDialog.addRadio(4 "Values and formulas, no formats" 1 false)
+        pasteDialog.addCheckbox(5 "Transpose" false)
         pasteDialog.addSeparator()
         def ids:[int]
         push ids 11
@@ -10586,17 +10638,23 @@ class GridApp {
                 ; The header row stays, as Excel's does over an unfrozen sheet.
                 push vals (model.getCell(0 (itemAt cell 1)))
                 model.setFilter((itemAt cell 1) true vals)
+                ; SUBTOTAL leaves out filtered rows, so it has to see the new filter.
+                engine.recalcAll()
                 this.afterCellMutation()
                 return true
             }
             if model.filterEnabled {
                 def none:[string]
                 model.setFilter(model.filterCol false none)
+                ; SUBTOTAL leaves out filtered rows, so it has to see the new filter.
+                engine.recalcAll()
             } {
                 def one:[string]
                 push one (model.getCell(sel.active.row sel.active.col))
                 push one (model.getCell(0 sel.active.col))
                 model.setFilter(sel.active.col true one)
+                ; SUBTOTAL leaves out filtered rows, so it has to see the new filter.
+                engine.recalcAll()
             }
             this.afterCellMutation()
             return true
@@ -10611,6 +10669,8 @@ class GridApp {
                     fi = (fi + 1)
                 }
                 model.setFilter(model.filterCol true keep)
+                ; SUBTOTAL leaves out filtered rows, so it has to see the new filter.
+                engine.recalcAll()
             }
             if ((strlen lastAdvanced) > 0) {
                 def again:boolean (this.runDataCommand("data.advancedFilter" lastAdvanced))
@@ -15207,11 +15267,13 @@ class GridApp {
             if (chosen == 4) {
                 mode = 3
             }
+            pasteTranspose = (pasteDialog.isChecked(5))
             pasteDialog.close()
             def prev:int pasteMode
             pasteMode = mode
             this.pasteClipboard()
             pasteMode = prev
+            pasteTranspose = false
         }
         if (pasteDialog.activated == 11) {
             pasteDialog.close()
@@ -17548,6 +17610,7 @@ class GridApp {
         sel.normalized(a b)
         clipR0 = a.row
         clipC0 = a.col
+        clipSheetName = model.name
         clipRows = ((b.row - a.row) + 1)
         clipCols = ((b.col - a.col) + 1)
         clipCut = false
@@ -17595,7 +17658,7 @@ class GridApp {
 
     ; Ctrl+X: copy, then clear the source range as one undoable action. A cut
     ; block pastes without ref translation (Excel moves formulas as written).
-    ; Formulas elsewhere that pointed at the moved cells are not rewritten.
+    ; Formulas that pointed at the moved cells follow them on paste.
     fn cutSelection:void () {
         if readOnly {
             return
@@ -17653,7 +17716,7 @@ class GridApp {
         ; multiple of its size (e.g. one cell pasted onto a range).
         def tilesR:int 1
         def tilesC:int 1
-        if (clipCut == false) {
+        if ((clipCut == false) && (pasteTranspose == false)) {
             def selH:int ((b.row - a.row) + 1)
             def selW:int ((b.col - a.col) + 1)
             if ((selH > clipRows) && ((selH % clipRows) == 0) && ((selW % clipCols) == 0)) {
@@ -17667,7 +17730,11 @@ class GridApp {
         }
         def baseDy:int dy
         def baseDx:int dx
-        this.ensureExtent(((startR + (clipRows * tilesR)) - 1) ((startC + (clipCols * tilesC)) - 1))
+        if pasteTranspose {
+            this.ensureExtent(((startR + clipCols) - 1) ((startC + clipRows) - 1))
+        } {
+            this.ensureExtent(((startR + (clipRows * tilesR)) - 1) ((startC + (clipCols * tilesC)) - 1))
+        }
         def maxR:int startR
         def maxC:int startC
         model.beginTx()
@@ -17685,6 +17752,12 @@ class GridApp {
             while (ci < clipCols) {
                 def tr:int ((startR + offR) + ri)
                 def tc:int ((startC + offC) + ci)
+                if pasteTranspose {
+                    tr = (startR + ci)
+                    tc = (startC + ri)
+                    dy = (tr - (clipR0 + ri))
+                    dx = (tc - (clipC0 + ci))
+                }
                 if ((tr < model.rowCount) && (tc < model.colCount)) {
                     def f:string (itemAt clipFormulas idx)
                     def srcStyle:CellStyle (itemAt clipStyles idx)
@@ -17727,6 +17800,9 @@ class GridApp {
             ri = (ri + 1)
         }
         tile = (tile + 1)
+        }
+        if (clipCut && (clipSheetName == model.name)) {
+            this.moveRefsAfterCut(startR startC)
         }
         model.endTx()
         engine.recalcDirty()

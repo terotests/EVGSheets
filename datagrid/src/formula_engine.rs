@@ -441,6 +441,19 @@ impl FormulaParser {
                     n.borrow_mut().col2 = n.borrow().col2 + dx;
                 }
             }
+            // Copied past the edge of the sheet: Excel writes #REF!.
+            let mut off: bool = n.borrow().row < 0 || n.borrow().col < 0;
+            if n.borrow().kind == 4 && (n.borrow().row2 < 0 || n.borrow().col2 < 0) {
+                off = true;
+            }
+            if n.borrow().row >= 1048576 || n.borrow().col >= 16384 {
+                off = true;
+            }
+            if off {
+                n.borrow_mut().kind = 8;
+                n.borrow_mut().text = "#REF!".to_string();
+                n.borrow_mut().sheet = String::new();
+            }
         }
         let mut i: i64 = 0;
         let kn: i64 = n.borrow().kids.len() as i64;
@@ -642,6 +655,63 @@ impl FormulaParser {
             i += 1;
         }
         touched
+    }
+    /// Cut and paste: references to cells inside the moved block [r0..r1] x
+    /// [c0..c1] follow the cells by (dy, dx), absolute or not. A range moves
+    /// when it lies wholly inside the block.
+    pub fn moveBlockNode(n: &Rc<RefCell<FormulaNode>>, sheet_name: &str, allow_unprefixed: bool, r0: i64, c0: i64, r1: i64, c1: i64, dy: i64, dx: i64) -> bool {
+        let mut touched: bool = false;
+        let k: i64 = n.borrow().kind;
+        if k == 3 || k == 4 {
+            let mut applies: bool = false;
+            if n.borrow().sheet.is_empty() {
+                applies = allow_unprefixed;
+            } else {
+                if SheetTable::fold(&n.borrow().sheet.clone()) == SheetTable::fold(sheet_name) {
+                    applies = true;
+                }
+            }
+            if applies {
+                let rr: i64 = n.borrow().row;
+                let cc: i64 = n.borrow().col;
+                let mut inside: bool = rr >= r0 && rr <= r1 && cc >= c0 && cc <= c1;
+                if k == 4 {
+                    let rr2: i64 = n.borrow().row2;
+                    let cc2: i64 = n.borrow().col2;
+                    inside = inside && rr2 >= r0 && rr2 <= r1 && cc2 >= c0 && cc2 <= c1;
+                }
+                if inside {
+                    n.borrow_mut().row = rr + dy;
+                    n.borrow_mut().col = cc + dx;
+                    if k == 4 {
+                        n.borrow_mut().row2 = n.borrow().row2 + dy;
+                        n.borrow_mut().col2 = n.borrow().col2 + dx;
+                    }
+                    touched = true;
+                }
+            }
+        }
+        let mut i: i64 = 0;
+        let kn: i64 = n.borrow().kids.len() as i64;
+        while i < kn {
+            if FormulaParser::moveBlockNode(&n.borrow().kids[i as usize].clone(), sheet_name, allow_unprefixed, r0, c0, r1, c1, dy, dx) {
+                touched = true;
+            }
+            i += 1;
+        }
+        touched
+    }
+    /// The rewritten formula, or "" when nothing pointed into the block.
+    pub fn moveBlock(expr: &str, sheet_name: &str, allow_unprefixed: bool, r0: i64, c0: i64, r1: i64, c1: i64, dy: i64, dx: i64) -> String {
+        let p: Rc<RefCell<FormulaParser>> = Rc::new(RefCell::new(FormulaParser::new()));
+        let ast: Rc<RefCell<FormulaNode>> = p.borrow_mut().parse(expr);
+        if !p.borrow().ok {
+            return String::new();
+        }
+        if !FormulaParser::moveBlockNode(&ast, sheet_name, allow_unprefixed, r0, c0, r1, c1, dy, dx) {
+            return String::new();
+        }
+        FormulaParser::serializeNode(&ast)
     }
     /// The rewritten formula, or "" when it did not need rewriting or could not
     /// be parsed — either way the caller leaves that cell alone.
@@ -934,6 +1004,13 @@ impl FormulaParser {
         }
         if n.borrow().kind == 11 {
             return String::new();
+        }
+        if n.borrow().kind == 12 {
+            let mut parts: Vec<String> = Vec::new();
+            for k in n.borrow().kids.iter() {
+                parts.push(FormulaParser::serializeNode(k));
+            }
+            return format!("({})", parts.join(","));
         }
         if n.borrow().kind == 0 {
             let iv: i64 = n.borrow().num.floor() as i64;
@@ -1547,13 +1624,27 @@ impl FormulaParser {
         }
         // quoted sheet name: 'My Sheet'!A1
         if ch == 39 {
-            return self.parseQuotedSheetRef();
+            let q: Rc<RefCell<FormulaNode>> = self.parseQuotedSheetRef();
+            return self.maybeIntersect(q);
         }
         // paren
         if ch == 40 {
             self.next();
-            let inner: Rc<RefCell<FormulaNode>> = self.parseExpr();
+            let mut inner: Rc<RefCell<FormulaNode>> = self.parseExpr();
             self.skipWs();
+            if self.peek() == 44 {
+                // (A1:A2,C1): a union of references (kind 12)
+                let un: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+                un.borrow_mut().kind = 12;
+                un.borrow_mut().kids.push(inner.clone());
+                while self.peek() == 44 {
+                    self.next();
+                    let part: Rc<RefCell<FormulaNode>> = self.parseExpr();
+                    un.borrow_mut().kids.push(part.clone());
+                    self.skipWs();
+                }
+                inner = un;
+            }
             if self.peek() == 41 {
                 self.next();
             } else {
@@ -1573,7 +1664,8 @@ impl FormulaParser {
         }
         // name / sheet / cell / function
         if (((ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122)) || ch == 95) || ch == 36 {
-            return self.parseNameOrRef();
+            let r: Rc<RefCell<FormulaNode>> = self.parseNameOrRef();
+            return self.maybeIntersect(r);
         }
         self.ok = false;
         self.err = "#VALUE!".to_string();
@@ -1581,6 +1673,80 @@ impl FormulaParser {
         e2.borrow_mut().kind = 8;
         e2.borrow_mut().text = "#VALUE!".to_string();
         e2
+    }
+    /// A1:C5 B2:D3: a space between two references is their intersection.
+    /// It is worked out here, as a plain reference (or #NULL! when the two do
+    /// not meet).
+    pub fn maybeIntersect(&mut self, left: Rc<RefCell<FormulaNode>>) -> Rc<RefCell<FormulaNode>> {
+        let lk: i64 = left.borrow().kind;
+        if lk != 3 && lk != 4 {
+            return left;
+        }
+        let save: i64 = self.pos;
+        if self.peek() != 32 {
+            return left;
+        }
+        self.skipWs();
+        let ch: i64 = self.peek();
+        let starts: bool = (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 36 || ch == 39;
+        if !starts {
+            self.pos = save;
+            return left;
+        }
+        let ok_before: bool = self.ok;
+        let right: Rc<RefCell<FormulaNode>> = if ch == 39 { self.parseQuotedSheetRef() } else { self.parseNameOrRef() };
+        let rk: i64 = right.borrow().kind;
+        if !self.ok || (rk != 3 && rk != 4) {
+            self.pos = save;
+            self.ok = ok_before;
+            return left;
+        }
+        let mut lr0: i64 = left.borrow().row;
+        let mut lc0: i64 = left.borrow().col;
+        let mut lr1: i64 = lr0;
+        let mut lc1: i64 = lc0;
+        if lk == 4 {
+            lr1 = left.borrow().row2;
+            lc1 = left.borrow().col2;
+        }
+        let mut rr0: i64 = right.borrow().row;
+        let mut rc0: i64 = right.borrow().col;
+        let mut rr1: i64 = rr0;
+        let mut rc1: i64 = rc0;
+        if rk == 4 {
+            rr1 = right.borrow().row2;
+            rc1 = right.borrow().col2;
+        }
+        if rr0 > lr0 {
+            lr0 = rr0;
+        }
+        if rc0 > lc0 {
+            lc0 = rc0;
+        }
+        if rr1 < lr1 {
+            lr1 = rr1;
+        }
+        if rc1 < lc1 {
+            lc1 = rc1;
+        }
+        let out: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+        if lr0 > lr1 || lc0 > lc1 {
+            out.borrow_mut().kind = 8;
+            out.borrow_mut().text = "#NULL!".to_string();
+            return out;
+        }
+        out.borrow_mut().sheet = left.borrow().sheet.clone();
+        out.borrow_mut().row = lr0;
+        out.borrow_mut().col = lc0;
+        if lr0 == lr1 && lc0 == lc1 {
+            out.borrow_mut().kind = 3;
+        } else {
+            out.borrow_mut().kind = 4;
+            out.borrow_mut().row2 = lr1;
+            out.borrow_mut().col2 = lc1;
+        }
+        // a second intersection may follow
+        self.maybeIntersect(out)
     }
     pub fn parseArrayConstant(&mut self) -> Rc<RefCell<FormulaNode>> {
         self.next();
@@ -2027,6 +2193,12 @@ pub struct FormulaEngine {
     /// than one that admits it does not know.
     pub todaySerial: f64,
     pub subtotalDepth: i64,
+    pub subtotalHidden: bool,
+    /// LET and LAMBDA bindings, innermost last.
+    pub localNames: Vec<String>,
+    pub localVals: Vec<Rc<RefCell<FormulaValue>>>,
+    pub localFns: Vec<Rc<RefCell<FormulaNode>>>,
+    pub localIsFn: Vec<bool>,
     /// Instrumentation for workbook-scale recalc demos / benches.
     pub dirtyMarked: i64,
     pub recalculated: i64,
@@ -2060,6 +2232,11 @@ impl FormulaEngine {
             lastError: String::new(),
             todaySerial: 0.0,
             subtotalDepth: 0,
+            subtotalHidden: false,
+            localNames: Vec::new(),
+            localVals: Vec::new(),
+            localFns: Vec::new(),
+            localIsFn: Vec::new(),
             dirtyMarked: 0,
             recalculated: 0,
             curRow: 0,
@@ -2246,7 +2423,9 @@ impl FormulaEngine {
                     if up == "TRUE" || up == "FALSE" {
                         out = format!("{}{}", out, word);
                     } else {
-                        out = format!("{}NAME.ERROR()", out);
+                        // Maybe a LET or LAMBDA name: looked up when evaluated,
+                        // #NAME? when nothing binds it.
+                        out = format!("{}LOCAL.NAME(\"{}\")", out, word.to_uppercase());
                     }
                 } else {
                     out = format!("{}{}", out, word);
@@ -2778,7 +2957,8 @@ impl FormulaEngine {
             return;
         }
         // Store raw calculated value; XlsxNumberFormat formats on display.
-        sheet.borrow_mut().setCellRaw(row, col, &v.borrow().asRaw());
+        let raw_out: String = v.borrow().asRaw();
+        sheet.borrow_mut().setCellRaw(row, col, &raw_out);
     }
     /// Lay an array out from its anchor. Cells that already hold something of
     /// their own are not overwritten — the spill stops rather than eating a
@@ -2963,6 +3143,25 @@ impl FormulaEngine {
             let sheet: String = n.borrow().sheet.clone();
             return self.readCell(&sheet, sheet_idx, n.borrow().row.clone(), n.borrow().col.clone());
         }
+        if n.borrow().kind == 12 {
+            // a union reads as one row of all its cells
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut j: i64 = 0;
+            let kn: i64 = n.borrow().kids.len() as i64;
+            while j < kn {
+                let v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[j as usize].clone(), sheet_idx);
+                if v.borrow().isArray() {
+                    for x in v.borrow().items.iter() {
+                        items.push(x.clone());
+                    }
+                } else {
+                    items.push(v.clone());
+                }
+                j += 1;
+            }
+            let cnt: i64 = items.len() as i64;
+            return FormulaValue::fromArray(1, cnt, &items);
+        }
         if n.borrow().kind == 10 {
             let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
             let mut j: i64 = 0;
@@ -3064,6 +3263,10 @@ impl FormulaEngine {
         let raw: String = sheet.borrow().getCell(row, col);
         if raw.is_empty() {
             return FormulaValue::blank();
+        }
+        if DgNative::char_at(&raw, 0) == 39 && sheet.borrow().getFormula(row, col).is_empty() {
+            // a typed or loaded '123 is the text "123"
+            return FormulaValue::fromString(DgNative::substr(&raw, 1, DgNative::str_len(&raw)));
         }
         if raw == "TRUE" {
             return FormulaValue::fromBool(true);
@@ -3236,22 +3439,36 @@ impl FormulaEngine {
         if !by_ref.borrow().isBlank() {
             return by_ref;
         }
+        let lup: String = FormulaFunctions::upper(&name);
+        let fam: bool = lup == "LOCAL.NAME" || lup == "LET" || lup == "LAMBDA" || lup == "REDUCE" || lup == "SCAN" || lup == "MAP" || lup == "BYROW" || lup == "BYCOL" || lup == "MAKEARRAY";
+        let li: i64 = self.localIndex(&lup);
+        if fam || (li >= 0 && self.localIsFn[li as usize]) {
+            return self.evalLambdaCall(n, sheet_idx);
+        }
         let mut args: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
         let mut i: i64 = 0;
         let kn: i64 = n.borrow().kids.len() as i64;
         // SUBTOTAL leaves out the SUBTOTALs inside its ranges, as Excel's
         // does, so a grand total over grouped subtotals counts each row once.
         let is_sub: bool = FormulaFunctions::upper(&name) == "SUBTOTAL";
+        let was_hidden: bool = self.subtotalHidden;
         if is_sub {
             self.subtotalDepth += 1;
         }
         while i < kn {
             let arg: Rc<RefCell<FormulaNode>> = n.borrow().kids[i as usize].clone();
-            args.push(self.evalNode(&arg, sheet_idx));
+            let av: Rc<RefCell<FormulaValue>> = self.evalNode(&arg, sheet_idx);
+            if is_sub && i == 0 {
+                // 101-111 also leave out rows hidden by hand
+                let fnum: f64 = av.borrow().single().borrow().numberValue();
+                self.subtotalHidden = fnum >= 100.0;
+            }
+            args.push(av);
             i += 1;
         }
         if is_sub {
             self.subtotalDepth -= 1;
+            self.subtotalHidden = was_hidden;
         }
         // TODAY and NOW are not pure functions: they read a clock, and this
         // layer has none. The HOST sets one — `setToday` — which also makes
@@ -3277,6 +3494,378 @@ impl FormulaEngine {
         }
         FormulaFunctions::invoke(&name, &args)
     }
+    /// R3C1, R[1]C[-1], Sheet!R1C1:R2C2 → A1 style; "" when it is not R1C1.
+    pub fn r1c1ToA1(text: &str, cur_row: i64, cur_col: i64) -> String {
+        let bang: i64 = DgNative::last_index_of(text, "!");
+        let mut prefix: String = String::new();
+        let mut body: String = text.to_string();
+        if bang >= 0 {
+            prefix = DgNative::substr(text, 0, bang + 1);
+            body = DgNative::substr(text, bang + 1, DgNative::str_len(text));
+        }
+        let parts: Vec<String> = body.split(":").map(|s| s.to_string()).collect::<Vec<String>>();
+        let mut out: Vec<String> = Vec::new();
+        for p in parts.iter() {
+            let up: String = p.to_uppercase();
+            let n: i64 = DgNative::str_len(&up);
+            if n < 2 || DgNative::char_at(&up, 0) != 82 {
+                return String::new();
+            }
+            let mut i: i64 = 1;
+            let mut row: i64 = cur_row;
+            let mut col: i64 = cur_col;
+            // row part
+            if DgNative::char_at(&up, i) == 91 {
+                let close: i64 = DgNative::index_of_from(&up, "]", i);
+                if close < 0 {
+                    return String::new();
+                }
+                row = cur_row + SpreadsheetModel::parseInt0(&DgNative::substr(&up, i + 1, close));
+                i = close + 1;
+            } else {
+                let st: i64 = i;
+                while i < n && DgNative::char_at(&up, i) >= 48 && DgNative::char_at(&up, i) <= 57 {
+                    i += 1;
+                }
+                if i > st {
+                    row = SpreadsheetModel::parseInt0(&DgNative::substr(&up, st, i)) - 1;
+                }
+            }
+            if i >= n || DgNative::char_at(&up, i) != 67 {
+                return String::new();
+            }
+            i += 1;
+            if i < n && DgNative::char_at(&up, i) == 91 {
+                let close2: i64 = DgNative::index_of_from(&up, "]", i);
+                if close2 < 0 {
+                    return String::new();
+                }
+                col = cur_col + SpreadsheetModel::parseInt0(&DgNative::substr(&up, i + 1, close2));
+                i = close2 + 1;
+            } else {
+                let st2: i64 = i;
+                while i < n && DgNative::char_at(&up, i) >= 48 && DgNative::char_at(&up, i) <= 57 {
+                    i += 1;
+                }
+                if i > st2 {
+                    col = SpreadsheetModel::parseInt0(&DgNative::substr(&up, st2, i)) - 1;
+                }
+            }
+            if i != n || row < 0 || col < 0 {
+                return String::new();
+            }
+            out.push(format!("{}{}", FormulaEngine::colName(col), row + 1));
+        }
+        format!("{}{}", prefix, out.join(":"))
+    }
+    pub fn colName(c0: i64) -> String {
+        let mut c: i64 = c0 + 1;
+        let mut s: String = String::new();
+        while c > 0 {
+            let m: i64 = (c - 1) % 26;
+            s = format!("{}{}", DgNative::from_code(65 + m), s);
+            c = (c - 1) / 26;
+        }
+        s
+    }
+    // --- LET, LAMBDA and the functions that take a LAMBDA ---------------------------
+
+    pub fn localIndex(&self, name: &str) -> i64 {
+        let mut i: i64 = (self.localNames.len() as i64) - 1;
+        while i >= 0 {
+            if self.localNames[i as usize] == name {
+                return i;
+            }
+            i -= 1;
+        }
+        -1
+    }
+    pub fn pushLocal(&mut self, name: &str, v: &Rc<RefCell<FormulaValue>>, f: &Rc<RefCell<FormulaNode>>, is_fn: bool) {
+        self.localNames.push(name.to_string());
+        self.localVals.push(v.clone());
+        self.localFns.push(f.clone());
+        self.localIsFn.push(is_fn);
+    }
+    pub fn popLocals(&mut self, count: i64) {
+        let mut k: i64 = 0;
+        while k < count {
+            self.localNames.pop();
+            self.localVals.pop();
+            self.localFns.pop();
+            self.localIsFn.pop();
+            k += 1;
+        }
+    }
+    /// The name a LOCAL.NAME("X") node stands for, or "".
+    pub fn localNameOf(n: &Rc<RefCell<FormulaNode>>) -> String {
+        if n.borrow().kind != 7 {
+            return String::new();
+        }
+        if FormulaFunctions::upper(&n.borrow().fnName.clone()) != "LOCAL.NAME" {
+            return String::new();
+        }
+        if n.borrow().kids.is_empty() {
+            return String::new();
+        }
+        n.borrow().kids[0].borrow().text.clone()
+    }
+    pub fn isLambdaNode(n: &Rc<RefCell<FormulaNode>>) -> bool {
+        n.borrow().kind == 7 && FormulaFunctions::upper(&n.borrow().fnName.clone()) == "LAMBDA"
+    }
+    /// The LAMBDA a node stands for: written in place, or a LET name bound to one.
+    pub fn lambdaOf(&self, n: &Rc<RefCell<FormulaNode>>) -> Option<Rc<RefCell<FormulaNode>>> {
+        if FormulaEngine::isLambdaNode(n) {
+            return Some(n.clone());
+        }
+        let nm: String = FormulaEngine::localNameOf(n);
+        if !nm.is_empty() {
+            let at: i64 = self.localIndex(&nm);
+            if at >= 0 && self.localIsFn[at as usize] {
+                return Some(self.localFns[at as usize].clone());
+            }
+        }
+        None
+    }
+    /// Call a LAMBDA with values for its parameters.
+    pub fn applyLambda(&mut self, lam: &Rc<RefCell<FormulaNode>>, vals: &Vec<Rc<RefCell<FormulaValue>>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
+        let kn: i64 = lam.borrow().kids.len() as i64;
+        if kn < 1 {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        let params: i64 = kn - 1;
+        if (vals.len() as i64) > params {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        let mut k: i64 = 0;
+        let dummy: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+        while k < params {
+            let p: Rc<RefCell<FormulaNode>> = lam.borrow().kids[k as usize].clone();
+            let nm: String = FormulaEngine::localNameOf(&p);
+            if nm.is_empty() {
+                self.popLocals(k);
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let mut v: Rc<RefCell<FormulaValue>> = FormulaValue::blank();
+            if k < (vals.len() as i64) {
+                v = vals[k as usize].clone();
+            }
+            self.pushLocal(&nm, &v, &dummy, false);
+            k += 1;
+        }
+        let body: Rc<RefCell<FormulaNode>> = lam.borrow().kids[(kn - 1) as usize].clone();
+        let out: Rc<RefCell<FormulaValue>> = self.evalNode(&body, sheet_idx);
+        self.popLocals(params);
+        out
+    }
+    pub fn arrayItems(v: &Rc<RefCell<FormulaValue>>) -> Vec<Rc<RefCell<FormulaValue>>> {
+        let mut out: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        if v.borrow().isArray() {
+            for x in v.borrow().items.iter() {
+                out.push(x.clone());
+            }
+        } else {
+            out.push(v.clone());
+        }
+        out
+    }
+    /// LOCAL.NAME, LET, LAMBDA, REDUCE, SCAN, MAP, BYROW, BYCOL, MAKEARRAY and
+    /// calls to a LET-bound LAMBDA. Blank when the call is none of them.
+    pub fn evalLambdaCall(&mut self, n: &Rc<RefCell<FormulaNode>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
+        let name: String = FormulaFunctions::upper(&n.borrow().fnName.clone());
+        let kn: i64 = n.borrow().kids.len() as i64;
+        if name == "LOCAL.NAME" {
+            let nm: String = FormulaEngine::localNameOf(n);
+            let at: i64 = self.localIndex(&nm);
+            if at < 0 || self.localIsFn[at as usize] {
+                return FormulaValue::fromError("#NAME?".to_string());
+            }
+            let lv: Rc<RefCell<FormulaValue>> = self.localVals[at as usize].clone();
+            if lv.borrow().isBlank() {
+                return FormulaValue::fromNumber(0.0);
+            }
+            return lv;
+        }
+        if name == "LET" {
+            if kn < 3 || kn % 2 == 0 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let mut pushed: i64 = 0;
+            let mut k: i64 = 0;
+            let dummy: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+            while k + 1 < kn {
+                let nm: String = FormulaEngine::localNameOf(&n.borrow().kids[k as usize].clone());
+                if nm.is_empty() {
+                    self.popLocals(pushed);
+                    return FormulaValue::fromError("#VALUE!".to_string());
+                }
+                let vn: Rc<RefCell<FormulaNode>> = n.borrow().kids[(k + 1) as usize].clone();
+                if FormulaEngine::isLambdaNode(&vn) {
+                    self.pushLocal(&nm, &FormulaValue::blank(), &vn, true);
+                } else {
+                    let v: Rc<RefCell<FormulaValue>> = self.evalNode(&vn, sheet_idx);
+                    self.pushLocal(&nm, &v, &dummy, false);
+                }
+                pushed += 1;
+                k += 2;
+            }
+            let body: Rc<RefCell<FormulaNode>> = n.borrow().kids[(kn - 1) as usize].clone();
+            let out: Rc<RefCell<FormulaValue>> = self.evalNode(&body, sheet_idx);
+            self.popLocals(pushed);
+            return out;
+        }
+        if name == "LAMBDA" {
+            // A LAMBDA that is never called.
+            return FormulaValue::fromError("#CALC!".to_string());
+        }
+        if name == "REDUCE" || name == "SCAN" {
+            if kn < 3 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam_opt: Option<Rc<RefCell<FormulaNode>>> = self.lambdaOf(&n.borrow().kids[2].clone());
+            if lam_opt.is_none() {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam: Rc<RefCell<FormulaNode>> = lam_opt.unwrap();
+            let mut acc: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[0].clone(), sheet_idx);
+            let arr: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[1].clone(), sheet_idx);
+            let mut steps: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            for x in FormulaEngine::arrayItems(&arr).iter() {
+                let mut call: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                call.push(acc.clone());
+                call.push(x.clone());
+                acc = self.applyLambda(&lam, &call, sheet_idx).borrow().single();
+                steps.push(acc.clone());
+            }
+            if name == "REDUCE" {
+                return acc;
+            }
+            let mut rows: i64 = 1;
+            let mut cols: i64 = steps.len() as i64;
+            if arr.borrow().isArray() {
+                rows = arr.borrow().rows;
+                cols = arr.borrow().cols;
+            }
+            return FormulaValue::fromArray(rows, cols, &steps);
+        }
+        if name == "MAP" {
+            if kn < 2 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam_opt: Option<Rc<RefCell<FormulaNode>>> = self.lambdaOf(&n.borrow().kids[(kn - 1) as usize].clone());
+            if lam_opt.is_none() {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam: Rc<RefCell<FormulaNode>> = lam_opt.unwrap();
+            let mut arrays: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut k: i64 = 0;
+            while k < kn - 1 {
+                arrays.push(self.evalNode(&n.borrow().kids[k as usize].clone(), sheet_idx));
+                k += 1;
+            }
+            let first: Rc<RefCell<FormulaValue>> = arrays[0].clone();
+            let mut rows: i64 = 1;
+            let mut cols: i64 = 1;
+            if first.borrow().isArray() {
+                rows = first.borrow().rows;
+                cols = first.borrow().cols;
+            }
+            let mut out: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut r: i64 = 0;
+            while r < rows {
+                let mut c: i64 = 0;
+                while c < cols {
+                    let mut call: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                    for a in arrays.iter() {
+                        call.push(a.borrow().at(r, c));
+                    }
+                    out.push(self.applyLambda(&lam, &call, sheet_idx).borrow().single());
+                    c += 1;
+                }
+                r += 1;
+            }
+            return FormulaValue::fromArray(rows, cols, &out);
+        }
+        if name == "BYROW" || name == "BYCOL" {
+            if kn < 2 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam_opt: Option<Rc<RefCell<FormulaNode>>> = self.lambdaOf(&n.borrow().kids[1].clone());
+            if lam_opt.is_none() {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam: Rc<RefCell<FormulaNode>> = lam_opt.unwrap();
+            let arr: Rc<RefCell<FormulaValue>> = FormulaMore::matrixOf(&self.evalNode(&n.borrow().kids[0].clone(), sheet_idx));
+            let rows: i64 = arr.borrow().rows;
+            let cols: i64 = arr.borrow().cols;
+            let mut out: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let outer: i64 = if name == "BYROW" { rows } else { cols };
+            let inner: i64 = if name == "BYROW" { cols } else { rows };
+            let mut i: i64 = 0;
+            while i < outer {
+                let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                let mut j: i64 = 0;
+                while j < inner {
+                    if name == "BYROW" {
+                        items.push(arr.borrow().at(i, j));
+                    } else {
+                        items.push(arr.borrow().at(j, i));
+                    }
+                    j += 1;
+                }
+                let slice: Rc<RefCell<FormulaValue>> = if name == "BYROW" { FormulaValue::fromArray(1, inner, &items) } else { FormulaValue::fromArray(inner, 1, &items) };
+                let mut call: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                call.push(slice);
+                out.push(self.applyLambda(&lam, &call, sheet_idx).borrow().single());
+                i += 1;
+            }
+            if name == "BYROW" {
+                return FormulaValue::fromArray(outer, 1, &out);
+            }
+            return FormulaValue::fromArray(1, outer, &out);
+        }
+        if name == "MAKEARRAY" {
+            if kn < 3 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam_opt: Option<Rc<RefCell<FormulaNode>>> = self.lambdaOf(&n.borrow().kids[2].clone());
+            if lam_opt.is_none() {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let lam: Rc<RefCell<FormulaNode>> = lam_opt.unwrap();
+            let rows: i64 = self.evalNode(&n.borrow().kids[0].clone(), sheet_idx).borrow().single().borrow().numberValue() as i64;
+            let cols: i64 = self.evalNode(&n.borrow().kids[1].clone(), sheet_idx).borrow().single().borrow().numberValue() as i64;
+            if rows < 1 || cols < 1 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            let mut out: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut r: i64 = 0;
+            while r < rows {
+                let mut c: i64 = 0;
+                while c < cols {
+                    let mut call: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                    call.push(FormulaValue::fromNumber((r + 1) as f64));
+                    call.push(FormulaValue::fromNumber((c + 1) as f64));
+                    out.push(self.applyLambda(&lam, &call, sheet_idx).borrow().single());
+                    c += 1;
+                }
+                r += 1;
+            }
+            return FormulaValue::fromArray(rows, cols, &out);
+        }
+        // A LET name bound to a LAMBDA, called like a function.
+        let at: i64 = self.localIndex(&name);
+        if at >= 0 && self.localIsFn[at as usize] {
+            let lam: Rc<RefCell<FormulaNode>> = self.localFns[at as usize].clone();
+            let mut call: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut k: i64 = 0;
+            while k < kn {
+                call.push(self.evalNode(&n.borrow().kids[k as usize].clone(), sheet_idx));
+                k += 1;
+            }
+            return self.applyLambda(&lam, &call, sheet_idx);
+        }
+        FormulaValue::blank()
+    }
     /// The functions that need a reference rather than its values, and RAND.
     /// Blank when the call is none of them.
     pub fn evalRefCall(&mut self, n: &Rc<RefCell<FormulaNode>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
@@ -3291,6 +3880,15 @@ impl FormulaEngine {
             ref_kind = f.borrow().kind;
         }
         let is_ref: bool = ref_kind == 3 || ref_kind == 4;
+        if name == "AREAS" {
+            if ref_kind == 12 {
+                return FormulaValue::fromNumber(first.clone().unwrap().borrow().kids.len() as f64);
+            }
+            if is_ref {
+                return FormulaValue::fromNumber(1.0);
+            }
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
         if name == "ROW" || name == "COLUMN" {
             if kn == 0 {
                 if name == "ROW" {
@@ -3446,7 +4044,19 @@ impl FormulaEngine {
             if tv.borrow().isError() {
                 return tv;
             }
-            let text: String = tv.borrow().single().borrow().asDisplay();
+            let mut text: String = tv.borrow().single().borrow().asDisplay();
+            if kn >= 2 {
+                // INDIRECT(text, FALSE): the text is R1C1 style
+                let a1v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[1].clone(), sheet_idx);
+                let a1s: Rc<RefCell<FormulaValue>> = a1v.borrow().single();
+                let is_false: bool = (a1s.borrow().kind == 3 && !a1s.borrow().flag) || (a1s.borrow().kind == 1 && a1s.borrow().num == 0.0);
+                if is_false {
+                    text = FormulaEngine::r1c1ToA1(&text, self.curRow, self.curCol);
+                    if text.is_empty() {
+                        return FormulaValue::fromError("#REF!".to_string());
+                    }
+                }
+            }
             let expanded: String = self.expandNames(&text);
             let node2: Rc<RefCell<FormulaNode>> = self.parser.borrow_mut().parse(&expanded);
             let ok: bool = self.parser.borrow().ok;
@@ -3487,10 +4097,22 @@ impl FormulaEngine {
         }
         let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
         let mut r: i64 = r0;
+        let sheet_m: Rc<RefCell<SpreadsheetModel>> = (self.book.as_ref().unwrap()).borrow().sheetAt(si);
         while r <= r1 {
             let mut c: i64 = c0;
+            // SUBTOTAL skips rows the filter left out, and with 101-111 the
+            // hidden ones as well.
+            let mut skip_row: bool = false;
+            if self.subtotalDepth > 0 {
+                if sheet_m.borrow().isRowFilteredOut(r) {
+                    skip_row = true;
+                }
+                if self.subtotalHidden && sheet_m.borrow().rowHiddenFlag(r) {
+                    skip_row = true;
+                }
+            }
             while c <= c1 {
-                if self.subtotalDepth > 0 && self.isSubtotalCell(si, r, c) {
+                if skip_row || (self.subtotalDepth > 0 && self.isSubtotalCell(si, r, c)) {
                     items.push(FormulaValue::blank());
                 } else {
                     items.push(self.readCell("", si, r, c));
