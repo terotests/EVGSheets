@@ -183,6 +183,17 @@ class XlsxWriter {
     ; where a string is code units. Where it is bytes, strfromcode encodes
     ; each byte as a character and the file comes out with every accent
     ; doubled — so the untouched stretches move with `substring`.
+    ; The seven error values a cell can hold.
+    sfn isErrorValue:boolean (s:string) {
+        if ((strlen s) < 4) {
+            return false
+        }
+        if ((charAt s 0) != 35) {
+            return false
+        }
+        return ((s == "#NULL!") || (s == "#DIV/0!") || (s == "#VALUE!") || (s == "#REF!") || (s == "#NAME?") || (s == "#NUM!") || (s == "#N/A") || (s == "#SPILL!") || (s == "#CALC!"))
+    }
+
     sfn esc:string (s:string) {
         def n:int (strlen s)
         def out:string ""
@@ -792,22 +803,47 @@ class XlsxWriter {
                         str_append tag (" s=\"" + (to_string (sid + 1)) + "\"")
                     }
                     def numeric:boolean (XlsxNumberFormat.wholeNumber(raw))
+                    ; TRUE/FALSE are booleans and #DIV/0! and its kind errors,
+                    ; each with its own cell type, or a reader takes them for text.
+                    def logical:boolean ((raw == "TRUE") || (raw == "FALSE"))
+                    def isErr:boolean (XlsxWriter.isErrorValue(raw))
+                    def boolV:string "0"
+                    if (raw == "TRUE") {
+                        boolV = "1"
+                    }
                     if ((strlen formula) > 0) {
                         ; A formula cell carries the expression and the cached
                         ; value, which is what lets a reader show something
                         ; before it has an engine.
-                        if (numeric == false) {
-                            str_append tag " t=\"str\""
+                        def cached:string (XlsxWriter.esc(raw))
+                        if logical {
+                            str_append tag " t=\"b\""
+                            cached = boolV
+                        } {
+                            if isErr {
+                                str_append tag " t=\"e\""
+                            } {
+                                if (numeric == false) {
+                                    str_append tag " t=\"str\""
+                                }
+                            }
                         }
-                        str_append tag ("><f>" + (XlsxWriter.esc(formula)) + "</f>")
+                        str_append tag ("><f>" + (XlsxWriter.esc((FormulaParser.addFilePrefixes(formula)))) + "</f>")
                         if ((strlen raw) > 0) {
-                            str_append tag ("<v>" + (XlsxWriter.esc(raw)) + "</v>")
+                            str_append tag ("<v>" + cached + "</v>")
                         }
                         str_append tag "</c>"
                     } {
                         if ((strlen raw) == 0) {
                             str_append tag "/>"
                         } {
+                            if (logical || isErr) {
+                                if logical {
+                                    str_append tag (" t=\"b\"><v>" + boolV + "</v></c>")
+                                } {
+                                    str_append tag (" t=\"e\"><v>" + (XlsxWriter.esc(raw)) + "</v></c>")
+                                }
+                            } {
                             if numeric {
                                 str_append tag ("><v>" + raw + "</v></c>")
                             } {
@@ -820,6 +856,7 @@ class XlsxWriter {
                                 } {
                                     str_append tag (" t=\"inlineStr\"><is><t xml:space=\"preserve\">" + (XlsxWriter.esc(raw)) + "</t></is></c>")
                                 }
+                            }
                             }
                         }
                     }

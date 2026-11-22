@@ -100,6 +100,63 @@ impl XlsxStyles {
         if id == 2 {
             return "0.00".to_string();
         }
+        if id == 3 {
+            return "#,##0".to_string();
+        }
+        if id == 4 {
+            return "#,##0.00".to_string();
+        }
+        if id == 11 {
+            return "0.00E+00".to_string();
+        }
+        if id == 12 {
+            return "# ?/?".to_string();
+        }
+        if id == 13 {
+            return "# ??/??".to_string();
+        }
+        if id == 16 {
+            return "d-mmm".to_string();
+        }
+        if id == 17 {
+            return "mmm-yy".to_string();
+        }
+        if id == 18 {
+            return "h:mm AM/PM".to_string();
+        }
+        if id == 19 {
+            return "h:mm:ss AM/PM".to_string();
+        }
+        if id == 20 {
+            return "h:mm".to_string();
+        }
+        if id == 21 {
+            return "h:mm:ss".to_string();
+        }
+        if id == 37 {
+            return "#,##0 ;(#,##0)".to_string();
+        }
+        if id == 38 {
+            return "#,##0 ;[Red](#,##0)".to_string();
+        }
+        if id == 39 {
+            return "#,##0.00;(#,##0.00)".to_string();
+        }
+        if id == 40 {
+            return "#,##0.00;[Red](#,##0.00)".to_string();
+        }
+        if id == 45 {
+            return "mm:ss".to_string();
+        }
+        if id == 46 {
+            return "[h]:mm:ss".to_string();
+        }
+        if id == 47 {
+            return "mm:ss.0".to_string();
+        }
+        if id == 48 {
+            return "##0.0E+0".to_string();
+        }
         if id == 9 {
             return "0%".to_string();
         }

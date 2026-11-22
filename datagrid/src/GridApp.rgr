@@ -15531,7 +15531,7 @@ class GridApp {
         model.beginTx()
         if ((strlen editBuf) > 0) {
             if ((charAt editBuf 0) == 61) {
-                def expr:string (substring editBuf 1 (strlen editBuf))
+                def expr:string (FormulaParser.normalizeCase((substring editBuf 1 (strlen editBuf))))
                 model.applyEditPlain(r c "" expr)
             } {
                 ; A typed date becomes what a spreadsheet stores for one: the
@@ -15545,9 +15545,7 @@ class GridApp {
                     model.clearRichText(r c)
                     model.applyEditStyled(r c (to_string (to_int serial)) "" st)
                 } {
-                    ; Plain value overwrites any prior formula — and the pieces
-                    ; the old text was drawn in, which new text cannot belong to.
-                    model.applyEditPlain(r c editBuf "")
+                    this.storeTyped(r c editBuf)
                 }
             }
         } {
@@ -15576,6 +15574,38 @@ class GridApp {
             engine.recalcDirty()
             grid.updateVisible(model)
         }
+    }
+
+    ; A typed value the way Excel stores it: "12%", "$5.50", "1,234", "(42)",
+    ; "18:30" and "1 1/2" are numbers, and a General cell takes the format
+    ; that draws them back as typed; "true" is the logical TRUE. Anything
+    ; else is the text it is. Plain value overwrites any prior formula — and
+    ; the pieces the old text was drawn in, which new text cannot belong to.
+    fn storeTyped:void (r:int c:int text:string) {
+        def up:string (to_uppercase (trim text))
+        if ((up == "TRUE") || (up == "FALSE")) {
+            model.applyEditPlain(r c up "")
+            return
+        }
+        def fmt:string (FormulaValue.typedFormat(text))
+        if ((strlen fmt) > 0) {
+            def v@(optional):double (FormulaValue.parseNumberText(text))
+            if (!null? v) {
+                def x:double (unwrap v)
+                def raw:string (to_string x)
+                if ((to_double (to_int x)) == x) {
+                    raw = (to_string (to_int x))
+                }
+                def st:CellStyle ((model.getCellStyle(r c)).copy())
+                if ((st.numFmt == "General") || ((strlen st.numFmt) == 0)) {
+                    st.numFmt = fmt
+                }
+                model.clearRichText(r c)
+                model.applyEditStyled(r c raw "" st)
+                return
+            }
+        }
+        model.applyEditPlain(r c text "")
     }
 
     fn cancelEdit:void () {
@@ -17619,18 +17649,42 @@ class GridApp {
             dy = 0
             dx = 0
         }
-        this.ensureExtent(((startR + clipRows) - 1) ((startC + clipCols) - 1))
+        ; Excel tiles the clipboard block when the selection is an exact
+        ; multiple of its size (e.g. one cell pasted onto a range).
+        def tilesR:int 1
+        def tilesC:int 1
+        if (clipCut == false) {
+            def selH:int ((b.row - a.row) + 1)
+            def selW:int ((b.col - a.col) + 1)
+            if ((selH > clipRows) && ((selH % clipRows) == 0) && ((selW % clipCols) == 0)) {
+                tilesR = (idiv selH clipRows)
+                tilesC = (idiv selW clipCols)
+            }
+            if ((selW > clipCols) && ((selW % clipCols) == 0) && ((selH % clipRows) == 0)) {
+                tilesR = (idiv selH clipRows)
+                tilesC = (idiv selW clipCols)
+            }
+        }
+        def baseDy:int dy
+        def baseDx:int dx
+        this.ensureExtent(((startR + (clipRows * tilesR)) - 1) ((startC + (clipCols * tilesC)) - 1))
         def maxR:int startR
         def maxC:int startC
         model.beginTx()
         engine.resetStats()
+        def tile:int 0
+        while (tile < (tilesR * tilesC)) {
+        def offR:int ((idiv tile tilesC) * clipRows)
+        def offC:int ((tile % tilesC) * clipCols)
+        dy = (baseDy + offR)
+        dx = (baseDx + offC)
         def idx:int 0
         def ri:int 0
         while (ri < clipRows) {
             def ci:int 0
             while (ci < clipCols) {
-                def tr:int (startR + ri)
-                def tc:int (startC + ci)
+                def tr:int ((startR + offR) + ri)
+                def tc:int ((startC + offC) + ci)
                 if ((tr < model.rowCount) && (tc < model.colCount)) {
                     def f:string (itemAt clipFormulas idx)
                     def srcStyle:CellStyle (itemAt clipStyles idx)
@@ -17671,6 +17725,8 @@ class GridApp {
                 ci = (ci + 1)
             }
             ri = (ri + 1)
+        }
+        tile = (tile + 1)
         }
         model.endTx()
         engine.recalcDirty()
@@ -17818,6 +17874,49 @@ class GridApp {
         return (GridApp.numText((first + (step * (to_double at)))))
     }
 
+    ; The fill handle on text and single dates: FillSeries for names and
+    ; numbered text, a day per step for a lone date. "" when the source is
+    ; simply copied.
+    fn fillTextAt:string (r:int c:int sr:int sc:int) {
+        def vertical:boolean ((r < fillR0) || (r > fillR1))
+        def n:int ((fillR1 - fillR0) + 1)
+        def at:int (r - fillR0)
+        if (vertical == false) {
+            n = ((fillC1 - fillC0) + 1)
+            at = (c - fillC0)
+        }
+        def vals:[string]
+        def k:int 0
+        while (k < n) {
+            def rr:int r
+            def cc:int c
+            if vertical {
+                rr = (fillR0 + k)
+            } {
+                cc = (fillC0 + k)
+            }
+            if ((strlen (model.getFormula(rr cc))) > 0) {
+                return ""
+            }
+            push vals (model.getCell(rr cc))
+            k = (k + 1)
+        }
+        if (n == 1) {
+            def raw:string (trim (model.getCell(sr sc)))
+            def v@(optional):double (to_double raw)
+            if (!null? v) {
+                if (XlsxNumberFormat.wholeNumber(raw)) {
+                    def nf:string ((model.getCellStyle(sr sc)).numFmt)
+                    if (XlsxNumberFormat.isDatePattern(nf)) {
+                        return (GridApp.numText(((unwrap v) + (to_double at))))
+                    }
+                    return ""
+                }
+            }
+        }
+        return (FillSeries.next(vals at))
+    }
+
     ; FortuneSheet fill handle: tile source rect; translate relative formula refs.
     fn fillFromSource:void () {
         def a:CellPos (CellPos.new_())
@@ -17848,23 +17947,31 @@ class GridApp {
                     def sc:int (fillC0 + (dc - ((to_int (dc / srcW)) * srcW)))
                     def srcF:string (model.getFormula(sr sc))
                     def wrote:boolean false
+                    ; The source cell's format goes along, as in Excel.
+                    def srcSt:CellStyle (model.getCellStyle(sr sc))
                     if ((strlen srcF) > 0) {
                         def dx:int (c - sc)
                         def dy:int (r - sr)
                         def translated:string (FormulaParser.translateFormula(srcF dx dy))
                         if ((strlen translated) > 0) {
-                            model.applyEdit(r c "" translated)
+                            model.applyEditStyled(r c "" translated srcSt)
                             wrote = true
                         }
                     }
                     if (wrote == false) {
                         ; Two or more numbers dragged on make a series, as in
-                        ; Excel: 1, 2 continues 3, 4; one number is copied.
+                        ; Excel: 1, 2 continues 3, 4; one number is copied —
+                        ; unless it is a date, which counts on by days. Month
+                        ; and weekday names and text ending in a number
+                        ; continue too.
                         def series:string (this.fillSeriesAt(r c))
+                        if ((strlen series) == 0) {
+                            series = (this.fillTextAt(r c sr sc))
+                        }
                         if ((strlen series) > 0) {
-                            model.applyEdit(r c series "")
+                            model.applyEditStyled(r c series "" srcSt)
                         } {
-                            model.applyEdit(r c (model.getCell(sr sc)) "")
+                            model.applyEditStyled(r c (model.getCell(sr sc)) "" srcSt)
                         }
                     }
                     engine.syncCell(book.activeIndex r c)

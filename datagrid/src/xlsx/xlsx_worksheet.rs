@@ -1345,7 +1345,7 @@ impl XlsxWorksheet {
         }
         model.borrow_mut().setCellRaw(row, col, &display);
         if !formula.is_empty() {
-            model.borrow_mut().setFormula(row, col, &formula);
+            model.borrow_mut().setFormula(row, col, &FormulaParser::stripFilePrefixes(&formula));
         }
         if !style_attr.is_empty() {
             model.borrow_mut().setCellStyleId(row, col, XlsxWorksheet::parseInt0(&style_attr));

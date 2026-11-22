@@ -471,6 +471,9 @@ impl FormulaParser {
             return FormulaParser::opPrec(&n.borrow().op.clone());
         }
         if n.borrow().kind == 5 {
+            if n.borrow().op == "%" {
+                return 7;
+            }
             return 6;
         }
         100
@@ -929,6 +932,9 @@ impl FormulaParser {
         if n.borrow().kind == 8 {
             return n.borrow().text.clone();
         }
+        if n.borrow().kind == 11 {
+            return String::new();
+        }
         if n.borrow().kind == 0 {
             let iv: i64 = n.borrow().num.floor() as i64;
             if (iv as f64) == n.borrow().num {
@@ -937,7 +943,7 @@ impl FormulaParser {
             return n.borrow().num.to_string();
         }
         if n.borrow().kind == 1 {
-            return format!("\"{}\"", n.borrow().text);
+            return format!("\"{}\"", n.borrow().text.replace("\"", "\"\""));
         }
         if n.borrow().kind == 2 {
             let bf: bool = n.borrow().flag;
@@ -964,6 +970,14 @@ impl FormulaParser {
                 ));
             }
             return s;
+        }
+        if n.borrow().kind == 5 && n.borrow().op == "%" {
+            let kp: Rc<RefCell<FormulaNode>> = n.borrow().kids[0].clone();
+            let mut sp: String = FormulaParser::serializeNode(&kp);
+            if FormulaParser::nodePrec(&kp) < 7 {
+                sp = format!("({})", sp);
+            }
+            return format!("{}%", sp);
         }
         if n.borrow().kind == 5 {
             let k0: Rc<RefCell<FormulaNode>> = n.borrow().kids[0].clone();
@@ -1123,6 +1137,142 @@ impl FormulaParser {
         }
         FormulaParser::translateNode(&ast, dx, dy);
         FormulaParser::serializeNode(&ast)
+    }
+    /// Functions newer than Excel 2007 are stored in a file as `_xlfn.NAME(`
+    /// (FILTER and SORT as `_xlfn._xlws.`), LAMBDA parameters as `_xlpm.x`.
+    /// The editor works with the names a person types: the prefixes come off
+    /// when a file is read and go back on when one is written. Text inside
+    /// quotes is left alone.
+    pub fn stripFilePrefixes(expr: &str) -> String {
+        if DgNative::index_of(&FormulaParser::upper(expr), "_XL") < 0 {
+            return expr.to_string();
+        }
+        let n: i64 = DgNative::str_len(expr);
+        let mut out: String = String::new();
+        let mut i: i64 = 0;
+        let mut in_str: bool = false;
+        let mut in_sheet: bool = false;
+        while i < n {
+            let ch: i64 = DgNative::char_at(expr, i);
+            if !in_sheet && ch == 34 {
+                in_str = !in_str;
+            }
+            if !in_str && ch == 39 {
+                in_sheet = !in_sheet;
+            }
+            if !in_str && !in_sheet && ch == 95 && (i == 0 || !FormulaParser::identChar(DgNative::char_at(expr, i - 1))) {
+                let mut skipped: bool = false;
+                loop {
+                    let rest: String = FormulaParser::upper(&DgNative::substr(expr, i, i + 6));
+                    if rest == "_XLFN." || rest == "_XLWS." || rest == "_XLPM." {
+                        i += 6;
+                        skipped = true;
+                    } else {
+                        break;
+                    }
+                }
+                if skipped {
+                    continue;
+                }
+            }
+            out = format!("{}{}", out, DgNative::substr(expr, i, i + 1));
+            i += 1;
+        }
+        out
+    }
+    /// A typed formula as Excel keeps it: function names, cell references and
+    /// TRUE/FALSE in capitals (=sum(a1) becomes =SUM(A1)); text in quotes,
+    /// sheet names and defined names as they were written.
+    pub fn normalizeCase(expr: &str) -> String {
+        let n: i64 = DgNative::str_len(expr);
+        let mut out: String = String::new();
+        let mut i: i64 = 0;
+        let mut in_str: bool = false;
+        let mut in_sheet: bool = false;
+        while i < n {
+            let ch: i64 = DgNative::char_at(expr, i);
+            if !in_sheet && ch == 34 {
+                in_str = !in_str;
+            }
+            if !in_str && ch == 39 {
+                in_sheet = !in_sheet;
+            }
+            let starts: bool = (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95 || ch == 36;
+            if !in_str && !in_sheet && starts && (i == 0 || !FormulaParser::identChar(DgNative::char_at(expr, i - 1))) {
+                let mut j: i64 = i;
+                while j < n && (FormulaParser::identChar(DgNative::char_at(expr, j)) || DgNative::char_at(expr, j) == 36) {
+                    j += 1;
+                }
+                let word: String = DgNative::substr(expr, i, j);
+                let next: i64 = if j < n { DgNative::char_at(expr, j) } else { 0 };
+                let up: String = FormulaParser::upper(&word);
+                if next == 40 || (next != 33 && next != 91 && (FormulaEngine::looksLikeCell(&word) || up == "TRUE" || up == "FALSE")) {
+                    out = format!("{}{}", out, up);
+                } else {
+                    out = format!("{}{}", out, word);
+                }
+                i = j;
+                continue;
+            }
+            out = format!("{}{}", out, DgNative::substr(expr, i, i + 1));
+            i += 1;
+        }
+        out
+    }
+    pub fn identChar(ch: i64) -> bool {
+        (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57) || ch == 95 || ch == 46
+    }
+    /// The `_xlfn.` name a function is stored under, or "" for one Excel 2007
+    /// already had. The list is the file format's (GridCraft's
+    /// FUTURE_FUNCTIONS, MIT/Apache-2.0).
+    pub fn fileFunctionName(name: &str) -> String {
+        let u: String = FormulaParser::upper(name);
+        if u == "FILTER" || u == "SORT" {
+            return format!("_xlfn._xlws.{}", u);
+        }
+        let list: String = " ACOT ACOTH AGGREGATE ARABIC ARRAYTOTEXT BASE BETA.DIST BETA.INV BINOM.DIST BINOM.DIST.RANGE BINOM.INV BITAND BITLSHIFT BITOR BITRSHIFT BITXOR BYCOL BYROW CEILING.MATH CEILING.PRECISE CHISQ.DIST CHISQ.DIST.RT CHISQ.INV CHISQ.INV.RT CHISQ.TEST CHOOSECOLS CHOOSEROWS COMBINA CONCAT CONFIDENCE.NORM CONFIDENCE.T COT COTH COVARIANCE.P COVARIANCE.S CSC CSCH DAYS DECIMAL DROP ENCODEURL ERF.PRECISE ERFC.PRECISE EXPAND EXPON.DIST F.DIST F.DIST.RT F.INV F.INV.RT F.TEST FILTERXML FLOOR.MATH FLOOR.PRECISE FORECAST.ETS FORECAST.ETS.CONFINT FORECAST.ETS.SEASONALITY FORECAST.ETS.STAT FORECAST.LINEAR FORMULATEXT GAMMA GAMMA.DIST GAMMA.INV GAMMALN.PRECISE GAUSS GROUPBY HSTACK HYPGEOM.DIST IFNA IFS IMAGE IMCOSH IMCOT IMCSC IMCSCH IMSEC IMSECH IMSINH IMTAN ISFORMULA ISOMITTED ISOWEEKNUM LAMBDA LET LOGNORM.DIST LOGNORM.INV MAKEARRAY MAP MAXIFS MINIFS MODE.MULT MODE.SNGL MUNIT NEGBINOM.DIST NORM.DIST NORM.INV NORM.S.DIST NORM.S.INV NUMBERVALUE PDURATION PERCENTILE.EXC PERCENTILE.INC PERCENTOF PERCENTRANK.EXC PERCENTRANK.INC PERMUTATIONA PHI PIVOTBY POISSON.DIST QUARTILE.EXC QUARTILE.INC RANDARRAY RANK.AVG RANK.EQ REDUCE REGEXEXTRACT REGEXREPLACE REGEXTEST RRI SCAN SEC SECH SEQUENCE SHEET SHEETS SINGLE SKEW.P SORTBY STDEV.P STDEV.S STOCKHISTORY SWITCH T.DIST T.DIST.2T T.DIST.RT T.INV T.INV.2T T.TEST TAKE TEXTAFTER TEXTBEFORE TEXTJOIN TEXTSPLIT TOCOL TOROW TRANSLATE TRIMRANGE UNICHAR UNICODE UNIQUE VALUETOTEXT VAR.P VAR.S VSTACK WEBSERVICE WEIBULL.DIST WRAPCOLS WRAPROWS XLOOKUP XMATCH XOR Z.TEST ".to_string();
+        if DgNative::index_of(&list, &format!(" {} ", u)) >= 0 {
+            return format!("_xlfn.{}", u);
+        }
+        String::new()
+    }
+    pub fn addFilePrefixes(expr: &str) -> String {
+        let n: i64 = DgNative::str_len(expr);
+        let mut out: String = String::new();
+        let mut i: i64 = 0;
+        let mut in_str: bool = false;
+        let mut in_sheet: bool = false;
+        while i < n {
+            let ch: i64 = DgNative::char_at(expr, i);
+            if !in_sheet && ch == 34 {
+                in_str = !in_str;
+            }
+            if !in_str && ch == 39 {
+                in_sheet = !in_sheet;
+            }
+            let starts: bool = (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95;
+            if !in_str && !in_sheet && starts && (i == 0 || !FormulaParser::identChar(DgNative::char_at(expr, i - 1))) {
+                let mut j: i64 = i;
+                while j < n && FormulaParser::identChar(DgNative::char_at(expr, j)) {
+                    j += 1;
+                }
+                let word: String = DgNative::substr(expr, i, j);
+                let mut stored: String = String::new();
+                if j < n && DgNative::char_at(expr, j) == 40 {
+                    stored = FormulaParser::fileFunctionName(&word);
+                }
+                if stored.is_empty() {
+                    out = format!("{}{}", out, word);
+                } else {
+                    out = format!("{}{}", out, stored);
+                }
+                i = j;
+                continue;
+            }
+            out = format!("{}{}", out, DgNative::substr(expr, i, i + 1));
+            i += 1;
+        }
+        out
     }
     pub fn reset(&mut self, s: String) {
         self.src = s.clone();
@@ -1307,10 +1457,11 @@ impl FormulaParser {
         }
         left
     }
+    /// `^` is left-associative in Excel: 2^3^2 is (2^3)^2 = 64.
     pub fn parsePow(&mut self) -> Rc<RefCell<FormulaNode>> {
-        let left: Rc<RefCell<FormulaNode>> = self.parseUnary();
+        let mut left: Rc<RefCell<FormulaNode>> = self.parseUnary();
         self.skipWs();
-        if self.peek() == 94 {
+        while self.peek() == 94 {
             self.next();
             let right: Rc<RefCell<FormulaNode>> = self.parseUnary();
             let b: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
@@ -1318,9 +1469,27 @@ impl FormulaParser {
             b.borrow_mut().op = "^".to_string();
             b.borrow_mut().kids.push(left.clone());
             b.borrow_mut().kids.push(right.clone());
-            return b;
+            left = b.clone();
+            self.skipWs();
         }
         left
+    }
+    /// A trailing `%` divides by 100 and binds tighter than `^`: 5% is 0.05,
+    /// 50%*200 is 100. It is kept as its own node (kind 5, op "%") so the
+    /// formula reads back as it was written.
+    pub fn parsePercent(&mut self) -> Rc<RefCell<FormulaNode>> {
+        let mut inner: Rc<RefCell<FormulaNode>> = self.parsePrimary();
+        self.skipWs();
+        while self.peek() == 37 {
+            self.next();
+            let u: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+            u.borrow_mut().kind = 5;
+            u.borrow_mut().op = "%".to_string();
+            u.borrow_mut().kids.push(inner.clone());
+            inner = u.clone();
+            self.skipWs();
+        }
+        inner
     }
     pub fn parseUnary(&mut self) -> Rc<RefCell<FormulaNode>> {
         self.skipWs();
@@ -1338,7 +1507,7 @@ impl FormulaParser {
             u.borrow_mut().kids.push(kid.clone());
             return u;
         }
-        self.parsePrimary()
+        self.parsePercent()
     }
     pub fn parsePrimary(&mut self) -> Rc<RefCell<FormulaNode>> {
         self.skipWs();
@@ -1354,6 +1523,23 @@ impl FormulaParser {
         // number
         if (ch >= 48 && ch <= 57) || ch == 46 {
             return self.parseNumber();
+        }
+        // an error written as a value: #REF!, #N/A, #DIV/0! …
+        if ch == 35 {
+            let rest: String = FormulaParser::upper(&DgNative::substr(&self.src, self.pos, self.srcLen));
+            let errs: Vec<&str> = vec!["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#SPILL!", "#CALC!", "#GETTING_DATA"];
+            let mut k: usize = 0;
+            while k < errs.len() {
+                let e: String = errs[k].to_string();
+                if DgNative::substr(&rest, 0, DgNative::str_len(&e)) == e {
+                    self.pos += DgNative::str_len(&e);
+                    let en: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+                    en.borrow_mut().kind = 8;
+                    en.borrow_mut().text = e.clone();
+                    return en;
+                }
+                k += 1;
+            }
         }
         // string
         if ch == 34 {
@@ -1456,6 +1642,31 @@ impl FormulaParser {
                 self.pos += 1;
             } else {
                 break;
+            }
+        }
+        // 1E+308, 2.5e-3: an exponent only when digits follow it.
+        if self.pos < self.srcLen {
+            let e: i64 = DgNative::char_at(&self.src, self.pos);
+            if e == 69 || e == 101 {
+                let mut q: i64 = self.pos + 1;
+                if q < self.srcLen {
+                    let sg: i64 = DgNative::char_at(&self.src, q);
+                    if sg == 43 || sg == 45 {
+                        q += 1;
+                    }
+                }
+                let digits_at: i64 = q;
+                while q < self.srcLen {
+                    let d: i64 = DgNative::char_at(&self.src, q);
+                    if d >= 48 && d <= 57 {
+                        q += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if q > digits_at {
+                    self.pos = q;
+                }
             }
         }
         let s: String = DgNative::substr(&self.src, start, self.pos);
@@ -1638,7 +1849,16 @@ impl FormulaParser {
             self.skipWs();
             if self.peek() != 41 {
                 loop {
-                    let arg: Rc<RefCell<FormulaNode>> = self.parseExpr();
+                    // An argument left out — XLOOKUP(a,b,c,,-1) — is a node of
+                    // its own (kind 11) that evaluates to nothing.
+                    let pk: i64 = self.peek();
+                    let arg: Rc<RefCell<FormulaNode>> = if pk == 44 || pk == 41 {
+                        let m: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+                        m.borrow_mut().kind = 11;
+                        m
+                    } else {
+                        self.parseExpr()
+                    };
                     call.borrow_mut().kids.push(arg.clone());
                     self.skipWs();
                     if self.peek() == 44 {
@@ -1980,7 +2200,14 @@ impl FormulaEngine {
                 i += 1;
                 continue;
             }
-            let starts_word: bool = (ch >= 65 && ch <= 90) || ((ch >= 97 && ch <= 122) || ch == 95);
+            let mut starts_word: bool = (ch >= 65 && ch <= 90) || ((ch >= 97 && ch <= 122) || ch == 95);
+            // The E of 1E+3 belongs to the number before it.
+            if (ch == 69 || ch == 101) && i > 0 {
+                let pc: i64 = DgNative::char_at(&expr, i - 1);
+                if (pc >= 48 && pc <= 57) || pc == 46 {
+                    starts_word = false;
+                }
+            }
             if in_str || !starts_word {
                 out = format!("{}{}", out, DgNative::substr(&expr, i, i + 1));
                 i += 1;
@@ -2508,7 +2735,12 @@ impl FormulaEngine {
         self.curRow = row;
         self.curCol = col;
         self.curSheet = si;
-        let v: Rc<RefCell<FormulaValue>> = self.evalNode(&ast, si);
+        let mut v: Rc<RefCell<FormulaValue>> = self.evalNode(&ast, si);
+        // A formula whose result is an empty cell shows 0, as in Excel (=A1 on a blank A1).
+        let _blank_v: bool = v.borrow().kind == 0;
+        if _blank_v {
+            v = FormulaValue::fromNumber(0.0);
+        }
         self.recalculated += 1;
         let _e_v: bool = v.borrow().isError();
         if _e_v {
@@ -2715,6 +2947,9 @@ impl FormulaEngine {
         if n.borrow().kind == 8 {
             return FormulaValue::fromError(n.borrow().text.clone());
         }
+        if n.borrow().kind == 11 {
+            return FormulaValue::blank();
+        }
         if n.borrow().kind == 0 {
             return FormulaValue::fromNumber(n.borrow().num.clone());
         }
@@ -2754,13 +2989,27 @@ impl FormulaEngine {
             if _e_a {
                 return a;
             }
-            if n.borrow().op == "-" {
+            if n.borrow().op == "-" || n.borrow().op == "%" {
+                if a.borrow().isArray() {
+                    let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                    let mut ai: i64 = 0;
+                    while ai < a.borrow().count() {
+                        let ca: Rc<RefCell<FormulaValue>> = a.borrow().items[ai as usize].borrow().coerceNumber();
+                        if ca.borrow().isError() {
+                            items.push(ca.clone());
+                        } else {
+                            items.push(FormulaEngine::unaryNumber(&n.borrow().op.clone(), ca.borrow().num));
+                        }
+                        ai += 1;
+                    }
+                    return FormulaValue::fromArray(a.borrow().rows, a.borrow().cols, &items);
+                }
                 let ca: Rc<RefCell<FormulaValue>> = a.borrow().coerceNumber();
                 let ce: bool = ca.borrow().isError();
                 if ce {
                     return ca;
                 }
-                return FormulaValue::fromNumber(0.0 - ca.borrow().num);
+                return FormulaEngine::unaryNumber(&n.borrow().op.clone(), ca.borrow().num);
             }
             return a;
         }
@@ -2782,6 +3031,12 @@ impl FormulaEngine {
             return self.rangeArray(&rn, tr.borrow().sheetIdx.clone());
         }
         FormulaValue::blank()
+    }
+    pub fn unaryNumber(op: &str, v: f64) -> Rc<RefCell<FormulaValue>> {
+        if op == "%" {
+            return FormulaValue::fromNumber(v / 100.0);
+        }
+        FormulaValue::fromNumber(0.0 - v)
     }
     pub fn isSubtotalCell(&self, si: i64, row: i64, col: i64) -> bool {
         if si < 0 || si >= (self.book.as_ref().unwrap()).borrow().sheetCount() {
@@ -2842,79 +3097,7 @@ impl FormulaEngine {
         if R.borrow().isArray() {
             return self.binaryOverArrays(n, &L, &R, sheet_idx);
         }
-        let _e_l: bool = L.borrow().isError();
-        if _e_l {
-            return L;
-        }
-        let _e_r: bool = R.borrow().isError();
-        if _e_r {
-            return R;
-        }
-        if n.borrow().op == "&" {
-            let _ls: String = L.borrow().toText();
-            let _rs: String = R.borrow().toText();
-            return FormulaValue::fromString(format!("{}{}", _ls, _rs));
-        }
-        if n.borrow().op == "=" {
-            return FormulaValue::fromBool(FormulaValue::valuesEqual(&L, &R));
-        }
-        if n.borrow().op == "<>" {
-            let eq: bool = FormulaValue::valuesEqual(&L, &R);
-            if eq {
-                return FormulaValue::fromBool(false);
-            }
-            return FormulaValue::fromBool(true);
-        }
-        // Arithmetic + ordered compare: shared coerceNumber semantics.
-        let a_v: Rc<RefCell<FormulaValue>> = L.borrow().coerceNumber();
-        let ae: bool = a_v.borrow().isError();
-        if ae {
-            return a_v;
-        }
-        let b_v: Rc<RefCell<FormulaValue>> = R.borrow().coerceNumber();
-        let be: bool = b_v.borrow().isError();
-        if be {
-            return b_v;
-        }
-        let a: f64 = a_v.borrow().num;
-        let b: f64 = b_v.borrow().num;
-        if n.borrow().op == "+" {
-            return FormulaValue::fromNumber(a + b);
-        }
-        if n.borrow().op == "-" {
-            return FormulaValue::fromNumber(a - b);
-        }
-        if n.borrow().op == "*" {
-            return FormulaValue::fromNumber(a * b);
-        }
-        if n.borrow().op == "/" {
-            if b == 0.0 {
-                return FormulaValue::fromError("#DIV/0!".to_string());
-            }
-            return FormulaValue::fromNumber(a / b);
-        }
-        if n.borrow().op == "^" {
-            if a < 0.0 && b.floor() != b {
-                return FormulaValue::fromError("#NUM!".to_string());
-            }
-            if a == 0.0 && b < 0.0 {
-                return FormulaValue::fromError("#DIV/0!".to_string());
-            }
-            return FormulaValue::fromNumber(FormulaMore::powD(a, b));
-        }
-        if n.borrow().op == "<" {
-            return FormulaValue::fromBool(a < b);
-        }
-        if n.borrow().op == ">" {
-            return FormulaValue::fromBool(a > b);
-        }
-        if n.borrow().op == "<=" {
-            return FormulaValue::fromBool(a <= b);
-        }
-        if n.borrow().op == ">=" {
-            return FormulaValue::fromBool(a >= b);
-        }
-        FormulaValue::fromError("#VALUE!".to_string())
+        self.binaryOfValues(&n.borrow().op.clone(), &L, &R)
     }
     /// Element by element, broadcasting a single value against a rectangle the
     /// way every spreadsheet does: A1:A3*2 multiplies each of the three.
@@ -2968,6 +3151,17 @@ impl FormulaEngine {
     /// One operation on two scalars. Split out of evalBinary so the array walk
     /// can reuse exactly the semantics a plain formula gets.
     pub fn binaryOfValues(&self, op: &str, l: &Rc<RefCell<FormulaValue>>, r: &Rc<RefCell<FormulaValue>>) -> Rc<RefCell<FormulaValue>> {
+        let v: Rc<RefCell<FormulaValue>> = self.binaryRaw(op, l, r);
+        // A result too big for a double is #NUM!, as in Excel (1E+308*10).
+        if v.borrow().kind == 1 {
+            let x: f64 = v.borrow().num;
+            if x != x || x > 1.7976931348623157e308 || x < -1.7976931348623157e308 {
+                return FormulaValue::fromError("#NUM!".to_string());
+            }
+        }
+        v
+    }
+    pub fn binaryRaw(&self, op: &str, l: &Rc<RefCell<FormulaValue>>, r: &Rc<RefCell<FormulaValue>>) -> Rc<RefCell<FormulaValue>> {
         let _e_l: bool = l.borrow().isError();
         if _e_l {
             return l.clone();
@@ -2979,15 +3173,10 @@ impl FormulaEngine {
         if op == "&" {
             return FormulaValue::fromString(format!("{}{}", l.borrow().toText(), r.borrow().toText()));
         }
-        if op == "=" {
-            return FormulaValue::fromBool(FormulaValue::valuesEqual(l, r));
-        }
-        if op == "<>" {
-            let eq: bool = FormulaValue::valuesEqual(l, r);
-            if eq {
-                return FormulaValue::fromBool(false);
-            }
-            return FormulaValue::fromBool(true);
+        if op == "=" || op == "<>" || op == "<" || op == ">" || op == "<=" || op == ">=" {
+            let c: i64 = FormulaValue::excelCompare(l, r);
+            let res: bool = if op == "=" { c == 0 } else if op == "<>" { c != 0 } else if op == "<" { c < 0 } else if op == ">" { c > 0 } else if op == "<=" { c <= 0 } else { c >= 0 };
+            return FormulaValue::fromBool(res);
         }
         let a_v: Rc<RefCell<FormulaValue>> = l.borrow().coerceNumber();
         let ae: bool = a_v.borrow().isError();
