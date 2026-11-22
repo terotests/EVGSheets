@@ -203,6 +203,9 @@ class GridApp {
     ; The task pane the chrome shows at the right ("" for none): "pivotFields",
     ; "comments", "watch", "selection", "formatChart", "functions".
     def paneKind:string ""
+    ; A pane row that wants a form filled in names its command here; the host
+    ; opens the form and clears it.
+    def paneForm:string ""
     ; Insert Function's category ("insert" for all) and search text, and the
     ; PivotTable the field list was opened on.
     def paneCategory:string ""
@@ -575,6 +578,141 @@ class GridApp {
         return out
     }
 
+    ; A sheet name as a formula writes it: quoted when it has to be.
+    sfn refSheet:string (name:string) {
+        def plain:boolean true
+        def i:int 0
+        while (i < (strlen name)) {
+            def ch:int (charAt name i)
+            def ok:boolean (((ch >= 65) && (ch <= 90)) || (((ch >= 97) && (ch <= 122)) || (((ch >= 48) && (ch <= 57)) || (ch == 95))))
+            if (ok == false) {
+                plain = false
+            }
+            i = (i + 1)
+        }
+        if plain {
+            return name
+        }
+        def out:string "'"
+        def k:int 0
+        while (k < (strlen name)) {
+            def c:string (substring name k (k + 1))
+            if (c == "'") {
+                out = (out + "''")
+            } {
+                out = (out + c)
+            }
+            k = (k + 1)
+        }
+        return (out + "'")
+    }
+
+    sfn absCol:string (pre:string c:int r0:int r1:int) {
+        def letter:string (SpreadsheetModel.colLabel(c))
+        return (pre + "!$" + letter + "$" + (to_string (r0 + 1)) + ":$" + letter + "$" + (to_string (r1 + 1)))
+    }
+
+    ; The cell a page pixel falls in, and the offset into it, unscrolled.
+    fn cellAtPx:[int] (sh:SpreadsheetModel x:int y:int) {
+        def out:[int]
+        def rx:int (x - (grid.gridOriginX()))
+        def ry:int (y - (grid.gridOriginY()))
+        if (rx < 0) {
+            rx = 0
+        }
+        if (ry < 0) {
+            ry = 0
+        }
+        def c:int 0
+        while ((c < 16383) && ((grid.geoColToX(sh (c + 1))) <= rx)) {
+            c = (c + 1)
+        }
+        def r:int 0
+        while ((r < 1048575) && ((grid.geoRowToY(sh (r + 1))) <= ry)) {
+            r = (r + 1)
+        }
+        push out r
+        push out c
+        push out (rx - (grid.geoColToX(sh c)))
+        push out (ry - (grid.geoRowToY(sh r)))
+        return out
+    }
+
+    ; Every chart window, copied into its sheet's `outCharts` for the next
+    ; save: the kind, the title, where it sits and which cells it reads.
+    fn stageCharts:void () {
+        def si:int 0
+        while (si < (array_length book.sheets)) {
+            def sh0:SpreadsheetModel (itemAt book.sheets si)
+            clear sh0.outCharts
+            si = (si + 1)
+        }
+        def pi:int 0
+        while (pi < (view.chartLayer.count())) {
+            def p:ChartPanel (view.chartLayer.panelAt(pi))
+            def ch:GridChart p.chart
+            if ((ch.sheet >= 0) && (ch.sheet < (array_length book.sheets))) {
+                def sh:SpreadsheetModel (itemAt book.sheets ch.sheet)
+                def img:SheetImage (new SheetImage)
+                img.chartKind = ch.kind
+                img.chartTitle = ch.title
+                img.altText = ch.altText
+                img.chartStyle = ("dataLabels=" + (GridApp.oneZero(ch.dataLabels)) + ";gridlines=" + ch.gridlines + ";axisTitles=" + (GridApp.oneZero(ch.axisTitles)) + ";" + (ch.formatText()))
+                def pre:string (GridApp.refSheet(sh.name))
+                def cols:[int]
+                def k:int 0
+                while (k < (ch.sourceColCount())) {
+                    push cols (ch.sourceColAt(k))
+                    k = (k + 1)
+                }
+                def top:int ch.r0
+                if ch.useHeaderRow {
+                    top = (ch.r0 + 1)
+                }
+                def first:int 0
+                if (ch.useHeaderCol && ((array_length cols) > 1)) {
+                    img.catRef = (GridApp.absCol(pre (itemAt cols 0) top ch.r1))
+                    first = 1
+                }
+                def v:int first
+                while (v < (array_length cols)) {
+                    def vc:int (itemAt cols v)
+                    push img.valRefs (GridApp.absCol(pre vc top ch.r1))
+                    if ch.useHeaderRow {
+                        push img.nameRefs (pre + "!$" + (SpreadsheetModel.colLabel(vc)) + "$" + (to_string (ch.r0 + 1)))
+                    } {
+                        push img.nameRefs ""
+                    }
+                    v = (v + 1)
+                }
+                def a:[int] (this.cellAtPx(sh ch.x ch.y))
+                def b:[int] (this.cellAtPx(sh (ch.x + ch.w) (ch.y + ch.h)))
+                img.fromRow = (itemAt a 0)
+                img.fromCol = (itemAt a 1)
+                img.offX = (itemAt a 2)
+                img.offY = (itemAt a 3)
+                img.toRow = (itemAt b 0)
+                img.toCol = (itemAt b 1)
+                img.toOffX = (itemAt b 2)
+                img.toOffY = (itemAt b 3)
+                img.stretched = true
+                img.widthPx = ch.w
+                img.heightPx = ch.h
+                if ((array_length img.valRefs) > 0) {
+                    push sh.outCharts img
+                }
+            }
+            pi = (pi + 1)
+        }
+    }
+
+    sfn oneZero:string (on:boolean) {
+        if on {
+            return "1"
+        }
+        return "0"
+    }
+
     ; The charts the workbook carried, opened as chart windows over the same
     ; ranges where the file anchored them: categories in the first source
     ; column, each series' values after it, the row above as the names.
@@ -589,6 +727,10 @@ class GridApp {
                 spec.sheet = si
                 spec.kind = fc.chartKind
                 spec.title = fc.chartTitle
+                def styled:boolean false
+                if ((strlen fc.chartStyle) > 0) {
+                    styled = (spec.setFormats(fc.chartStyle))
+                }
                 def top:int -1
                 def bottom:int -1
                 def lo:int 100000
@@ -1322,7 +1464,7 @@ class GridApp {
         commandsReady = true
         commands.add("file.new" "New workbook" "File" "Ctrl+N")
         commands.add("file.open" "Open a workbook…" "File" "Ctrl+O")
-        commands.add("file.save" "Save as .xlsx" "File" "Ctrl+S")
+        commands.add("file.save" "Save" "File" "Ctrl+S")
         commands.add("file.saveAs" "Save a copy as…" "File" "Ctrl+Shift+S")
         commands.add("edit.undo" "Undo" "Edit" "Ctrl+Z")
         commands.add("edit.redo" "Redo" "Edit" "Ctrl+Y")
@@ -2415,6 +2557,7 @@ class GridApp {
             view.status = ("saved " + savedPath)
             return true
         }
+        this.stageCharts()
         def w:XlsxWriter (new XlsxWriter)
         def ok:boolean false
         if preserveOnSave {
@@ -2445,6 +2588,7 @@ class GridApp {
         if editing {
             this.commitEdit()
         }
+        this.stageCharts()
         def w:XlsxWriter (new XlsxWriter)
         def data:buffer (buffer_alloc 0)
         if preserveOnSave {
@@ -2574,6 +2718,13 @@ class GridApp {
     ; ask the host for a path (Save As). Headless `--save` uses
     ; `saveXlsxDefaultSilent` so it never blocks on a dialog.
     fn saveXlsxDefault:boolean () {
+        ; In a browser the page writes the file: back over the one it opened
+        ; when it holds a handle to it, otherwise wherever the person picks.
+        if hostWritesFiles {
+            fileRequest = "save"
+            view.status = "saving…"
+            return true
+        }
         def src:string book.sourcePath
         if ((strlen src) == 0) {
             fileRequest = "saveAs"
@@ -6016,6 +6167,9 @@ class GridApp {
         commands.add("chart.formatSelection" "Format Selection" "Chart" "")
         commands.addArg("chart.shapeFill" "Shape Fill" "Chart" "")
         commands.addArg("chart.shapeOutline" "Shape Outline" "Chart" "")
+        commands.addArg("chart.formatElement" "Format Chart Element" "Chart" "")
+        commands.addArg("chart.formatAxis" "Format Axis" "Chart" "")
+        commands.addArg("chart.formatColors" "Format Colours" "Chart" "")
         commands.addArg("insert.recommendedPivotTables" "Recommended PivotTables" "Insert" "")
         commands.addArg("insert.pivotChart" "PivotChart" "Insert" "")
         commands.addArg("table.summarizePivot" "Summarize with PivotTable" "Table" "")
@@ -11906,6 +12060,28 @@ class GridApp {
             push rows ("Axis titles: " + (GridApp.onOff(ch.axisTitles)))
             push rows "Switch Row/Column"
             push rows "Next colour style"
+            def lp:string ch.legendPos
+            if ((strlen lp) == 0) {
+                lp = "right"
+            }
+            push rows ("Legend position: " + lp)
+            def dp:string ch.labelPos
+            if ((strlen dp) == 0) {
+                dp = "outside end"
+            }
+            push rows ("Data label position: " + dp)
+            push rows ("Logarithmic scale: " + (GridApp.onOff(ch.logScale)))
+            def lw:string "automatic"
+            if (ch.lineWidth > 0) {
+                lw = ((to_string ch.lineWidth) + " px")
+            }
+            push rows ("Line width: " + lw)
+            def bounds:string "automatic"
+            if (((strlen ch.valueMin) > 0) || ((strlen ch.valueMax) > 0)) {
+                bounds = (ch.valueMin + " to " + ch.valueMax)
+            }
+            push rows ("Axis bounds and number format: " + bounds + "…")
+            push rows "Colours, chart area and title size…"
             return rows
         }
         return rows
@@ -12215,7 +12391,62 @@ class GridApp {
             if (idx == 5) {
                 return (this.runChartCommand("chart.switchRowColumn" ""))
             }
-            return (this.runChartCommand("chart.changeColors" ""))
+            if (idx == 6) {
+                return (this.runChartCommand("chart.changeColors" ""))
+            }
+            def fk:int (this.paneChartIndex())
+            if (fk < 0) {
+                return false
+            }
+            def fp:ChartPanel (view.chartLayer.panelAt(fk))
+            def fc:GridChart fp.chart
+            if (idx == 7) {
+                def order:[string] ([] _:string ("right" "bottom" "top" "left"))
+                def cur:string fc.legendPos
+                if ((strlen cur) == 0) {
+                    cur = "right"
+                }
+                def ni:int 0
+                def oi:int 0
+                while (oi < 4) {
+                    if ((itemAt order oi) == cur) {
+                        ni = (oi + 1)
+                        if (ni >= 4) {
+                            ni = 0
+                        }
+                    }
+                    oi = (oi + 1)
+                }
+                return (this.runChartCommand("chart.formatElement" ("legend=" + (itemAt order ni))))
+            }
+            if (idx == 8) {
+                if (fc.labelPos == "inside") {
+                    return (this.runChartCommand("chart.formatElement" "labels=outside"))
+                }
+                return (this.runChartCommand("chart.formatElement" "labels=inside"))
+            }
+            if (idx == 9) {
+                if fc.logScale {
+                    return (this.runChartCommand("chart.formatElement" "log=off"))
+                }
+                return (this.runChartCommand("chart.formatElement" "log=on"))
+            }
+            if (idx == 10) {
+                def nw:int (fc.lineWidth + 1)
+                if (nw > 5) {
+                    nw = 0
+                }
+                return (this.runChartCommand("chart.formatElement" ("lineWidth=" + (to_string nw))))
+            }
+            if (idx == 11) {
+                paneForm = "chart.formatAxis"
+                return true
+            }
+            if (idx == 12) {
+                paneForm = "chart.formatColors"
+                return true
+            }
+            return false
         }
         return false
     }
@@ -12727,6 +12958,21 @@ class GridApp {
         }
         if (id == "chart.shapeOutline") {
             ch.outlineColor = arg
+            this.chartChanged(p)
+            return true
+        }
+        if ((id == "chart.formatElement") || ((id == "chart.formatAxis") || (id == "chart.formatColors"))) {
+            ; "key=value;key=value": legend, min, max, log, format, labels,
+            ; lineWidth, titleSize, colors, area, xTitle, yTitle, fill, outline.
+            if ((strlen arg) == 0) {
+                view.status = "Say what to format, for example legend=bottom."
+                return false
+            }
+            if ((ch.setFormats(arg)) == false) {
+                view.status = ("Could not format: " + arg)
+                this.chartChanged(p)
+                return false
+            }
             this.chartChanged(p)
             return true
         }
@@ -15285,7 +15531,7 @@ class GridApp {
         model.beginTx()
         if ((strlen editBuf) > 0) {
             if ((charAt editBuf 0) == 61) {
-                def expr:string (substring editBuf 1 (strlen editBuf))
+                def expr:string (FormulaParser.normalizeCase((substring editBuf 1 (strlen editBuf))))
                 model.applyEditPlain(r c "" expr)
             } {
                 ; A typed date becomes what a spreadsheet stores for one: the
@@ -15299,9 +15545,7 @@ class GridApp {
                     model.clearRichText(r c)
                     model.applyEditStyled(r c (to_string (to_int serial)) "" st)
                 } {
-                    ; Plain value overwrites any prior formula — and the pieces
-                    ; the old text was drawn in, which new text cannot belong to.
-                    model.applyEditPlain(r c editBuf "")
+                    this.storeTyped(r c editBuf)
                 }
             }
         } {
@@ -15330,6 +15574,38 @@ class GridApp {
             engine.recalcDirty()
             grid.updateVisible(model)
         }
+    }
+
+    ; A typed value the way Excel stores it: "12%", "$5.50", "1,234", "(42)",
+    ; "18:30" and "1 1/2" are numbers, and a General cell takes the format
+    ; that draws them back as typed; "true" is the logical TRUE. Anything
+    ; else is the text it is. Plain value overwrites any prior formula — and
+    ; the pieces the old text was drawn in, which new text cannot belong to.
+    fn storeTyped:void (r:int c:int text:string) {
+        def up:string (to_uppercase (trim text))
+        if ((up == "TRUE") || (up == "FALSE")) {
+            model.applyEditPlain(r c up "")
+            return
+        }
+        def fmt:string (FormulaValue.typedFormat(text))
+        if ((strlen fmt) > 0) {
+            def v@(optional):double (FormulaValue.parseNumberText(text))
+            if (!null? v) {
+                def x:double (unwrap v)
+                def raw:string (to_string x)
+                if ((to_double (to_int x)) == x) {
+                    raw = (to_string (to_int x))
+                }
+                def st:CellStyle ((model.getCellStyle(r c)).copy())
+                if ((st.numFmt == "General") || ((strlen st.numFmt) == 0)) {
+                    st.numFmt = fmt
+                }
+                model.clearRichText(r c)
+                model.applyEditStyled(r c raw "" st)
+                return
+            }
+        }
+        model.applyEditPlain(r c text "")
     }
 
     fn cancelEdit:void () {
@@ -17373,18 +17649,42 @@ class GridApp {
             dy = 0
             dx = 0
         }
-        this.ensureExtent(((startR + clipRows) - 1) ((startC + clipCols) - 1))
+        ; Excel tiles the clipboard block when the selection is an exact
+        ; multiple of its size (e.g. one cell pasted onto a range).
+        def tilesR:int 1
+        def tilesC:int 1
+        if (clipCut == false) {
+            def selH:int ((b.row - a.row) + 1)
+            def selW:int ((b.col - a.col) + 1)
+            if ((selH > clipRows) && ((selH % clipRows) == 0) && ((selW % clipCols) == 0)) {
+                tilesR = (idiv selH clipRows)
+                tilesC = (idiv selW clipCols)
+            }
+            if ((selW > clipCols) && ((selW % clipCols) == 0) && ((selH % clipRows) == 0)) {
+                tilesR = (idiv selH clipRows)
+                tilesC = (idiv selW clipCols)
+            }
+        }
+        def baseDy:int dy
+        def baseDx:int dx
+        this.ensureExtent(((startR + (clipRows * tilesR)) - 1) ((startC + (clipCols * tilesC)) - 1))
         def maxR:int startR
         def maxC:int startC
         model.beginTx()
         engine.resetStats()
+        def tile:int 0
+        while (tile < (tilesR * tilesC)) {
+        def offR:int ((idiv tile tilesC) * clipRows)
+        def offC:int ((tile % tilesC) * clipCols)
+        dy = (baseDy + offR)
+        dx = (baseDx + offC)
         def idx:int 0
         def ri:int 0
         while (ri < clipRows) {
             def ci:int 0
             while (ci < clipCols) {
-                def tr:int (startR + ri)
-                def tc:int (startC + ci)
+                def tr:int ((startR + offR) + ri)
+                def tc:int ((startC + offC) + ci)
                 if ((tr < model.rowCount) && (tc < model.colCount)) {
                     def f:string (itemAt clipFormulas idx)
                     def srcStyle:CellStyle (itemAt clipStyles idx)
@@ -17425,6 +17725,8 @@ class GridApp {
                 ci = (ci + 1)
             }
             ri = (ri + 1)
+        }
+        tile = (tile + 1)
         }
         model.endTx()
         engine.recalcDirty()
@@ -17572,6 +17874,49 @@ class GridApp {
         return (GridApp.numText((first + (step * (to_double at)))))
     }
 
+    ; The fill handle on text and single dates: FillSeries for names and
+    ; numbered text, a day per step for a lone date. "" when the source is
+    ; simply copied.
+    fn fillTextAt:string (r:int c:int sr:int sc:int) {
+        def vertical:boolean ((r < fillR0) || (r > fillR1))
+        def n:int ((fillR1 - fillR0) + 1)
+        def at:int (r - fillR0)
+        if (vertical == false) {
+            n = ((fillC1 - fillC0) + 1)
+            at = (c - fillC0)
+        }
+        def vals:[string]
+        def k:int 0
+        while (k < n) {
+            def rr:int r
+            def cc:int c
+            if vertical {
+                rr = (fillR0 + k)
+            } {
+                cc = (fillC0 + k)
+            }
+            if ((strlen (model.getFormula(rr cc))) > 0) {
+                return ""
+            }
+            push vals (model.getCell(rr cc))
+            k = (k + 1)
+        }
+        if (n == 1) {
+            def raw:string (trim (model.getCell(sr sc)))
+            def v@(optional):double (to_double raw)
+            if (!null? v) {
+                if (XlsxNumberFormat.wholeNumber(raw)) {
+                    def nf:string ((model.getCellStyle(sr sc)).numFmt)
+                    if (XlsxNumberFormat.isDatePattern(nf)) {
+                        return (GridApp.numText(((unwrap v) + (to_double at))))
+                    }
+                    return ""
+                }
+            }
+        }
+        return (FillSeries.next(vals at))
+    }
+
     ; FortuneSheet fill handle: tile source rect; translate relative formula refs.
     fn fillFromSource:void () {
         def a:CellPos (CellPos.new_())
@@ -17602,23 +17947,31 @@ class GridApp {
                     def sc:int (fillC0 + (dc - ((to_int (dc / srcW)) * srcW)))
                     def srcF:string (model.getFormula(sr sc))
                     def wrote:boolean false
+                    ; The source cell's format goes along, as in Excel.
+                    def srcSt:CellStyle (model.getCellStyle(sr sc))
                     if ((strlen srcF) > 0) {
                         def dx:int (c - sc)
                         def dy:int (r - sr)
                         def translated:string (FormulaParser.translateFormula(srcF dx dy))
                         if ((strlen translated) > 0) {
-                            model.applyEdit(r c "" translated)
+                            model.applyEditStyled(r c "" translated srcSt)
                             wrote = true
                         }
                     }
                     if (wrote == false) {
                         ; Two or more numbers dragged on make a series, as in
-                        ; Excel: 1, 2 continues 3, 4; one number is copied.
+                        ; Excel: 1, 2 continues 3, 4; one number is copied —
+                        ; unless it is a date, which counts on by days. Month
+                        ; and weekday names and text ending in a number
+                        ; continue too.
                         def series:string (this.fillSeriesAt(r c))
+                        if ((strlen series) == 0) {
+                            series = (this.fillTextAt(r c sr sc))
+                        }
                         if ((strlen series) > 0) {
-                            model.applyEdit(r c series "")
+                            model.applyEditStyled(r c series "" srcSt)
                         } {
-                            model.applyEdit(r c (model.getCell(sr sc)) "")
+                            model.applyEditStyled(r c (model.getCell(sr sc)) "" srcSt)
                         }
                     }
                     engine.syncCell(book.activeIndex r c)

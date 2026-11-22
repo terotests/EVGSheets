@@ -1,7 +1,7 @@
 tab	group	feature	command	gridcraft	evgsheets_cmd	evgsheets	test	note
 File	File	New	file.new	live	file.new	yes	smoke:a plain visit opens an empty workbook	
 File	File	Open	file.open	live	file.open	yes	probe:wb.opens	opens .xlsx; the probe opens the target workbook
-File	File	Save	file.save	live	file.saveAs	partial	probe:cmd.file.saveAs	Download .xlsx; no save in place
+File	File	Save	file.save	live	file.save	yes	smoke:Save writes back to the file it opened	writes back over the opened file (File System Access); a new workbook asks once where to save
 File	File	Save As	file.saveAs	live	file.saveAs	yes	probe:cmd.file.saveAs	Download .xlsx
 File	File	Close	file.close	live	file.close	partial	probe:cmd.file.close	starts an empty workbook; the page stays
 File	File	Print	file.print	live	file.print	yes	probe:cmd.file.print	
@@ -76,7 +76,7 @@ Home	Cells	Unhide Columns	home.unhideColumns	live	home.unhideColumns	yes	probe:c
 Home	Cells	Hide Sheet	sheet.hide	live	sheet.hide	yes	probe:cmd.sheet.hide	
 Home	Cells	Unhide Sheet	sheet.unhide	live	sheet.unhide	yes	probe:cmd.sheet.unhide	
 Home	Cells	Rename Sheet	sheet.rename	live	sheet.rename	yes	smoke:Enter renames and closes	
-Home	Cells	Move or Copy Sheet	sheet.move	live	sheet.move	partial	probe:cmd.sheet.move	move by drag or menu, duplicate; no Move or Copy dialog
+Home	Cells	Move or Copy Sheet	sheet.move	live	sheet.moveCopy	yes	smoke:…and Create a copy puts one at the end	Move or Copy dialog from the tab menu (before sheet / move to end, create a copy); drag also moves
 Home	Cells	Tab Color	sheet.tabColor	live	sheet.tabColor	yes	probe:cmd.sheet.tabColor	
 Home	Cells	Protect Sheet	review.protectSheet	live	review.protectSheet	yes	probe:cmd.review.protectSheet	locked cells refuse edits; no password
 Home	Cells	Lock Cell	home.lockCell	live	home.lockCell	yes	probe:cmd.home.lockCell	

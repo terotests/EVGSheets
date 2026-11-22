@@ -176,6 +176,7 @@ class ChartDocCodec {
         out = (out + "\"kind\":" + (to_string ch.kind) + ",")
         out = (out + "\"style\":" + (to_string ch.style) + ",")
         out = (out + "\"legend\":" + (ChartDocCodec.boolJson(ch.showLegend)) + ",")
+        out = (out + "\"format\":\"" + (ChartDocCodec.jsonEsc((ch.formatText()))) + "\",")
         out = (out + "\"headerRow\":" + (ChartDocCodec.boolJson(ch.useHeaderRow)) + ",")
         out = (out + "\"headerCol\":" + (ChartDocCodec.boolJson(ch.useHeaderCol)) + ",")
         out = (out + "\"w\":" + (to_string ch.w) + ",")
@@ -258,6 +259,10 @@ class ChartDocCodec {
         doc.chart.kind = (to_int (root.doubleOr("kind" 1.0)))
         doc.chart.style = (to_int (root.doubleOr("style" 1.0)))
         doc.chart.title = (root.stringOr("title" ""))
+        def fmt:string (root.stringOr("format" ""))
+        if ((strlen fmt) > 0) {
+            def took:boolean (doc.chart.setFormats(fmt))
+        }
         doc.chart.showLegend = (root.boolOr("legend" true))
         doc.chart.useHeaderRow = (root.boolOr("headerRow" true))
         doc.chart.useHeaderCol = (root.boolOr("headerCol" true))

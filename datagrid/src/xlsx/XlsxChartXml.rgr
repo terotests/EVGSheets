@@ -1,0 +1,591 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ==============================================================================
+; XlsxChartXml — a chart on the sheet as the DrawingML parts Excel reads
+; ==============================================================================
+;
+; A chart made here lives in the app, not in the model, so before a save the
+; app copies each one into `SpreadsheetModel.outCharts` as a SheetImage: its
+; kind, title, anchor, series references and formatting. This writes those as
+; a drawing part (where each chart sits, in cells) and one chart part each.
+;
+; Kinds Excel draws with the classic chart types map onto them: bar, line,
+; area, scatter, bubble, pie, doughnut, stock and the column + line combo.
+; Waterfall, funnel, Pareto, box plot, histogram, heatmap, strip and stream
+; are Excel's newer "chartex" kinds or have no Excel kind at all; they are
+; written as clustered columns over the same ranges, so the data and the
+; chart survive and the look does not.
+; ==============================================================================
+
+class XlsxChartXml {
+
+    sfn esc:string (s:string) {
+        def out:string ""
+        def i:int 0
+        while (i < (strlen s)) {
+            def ch:int (charAt s i)
+            if (ch == 38) {
+                out = (out + "&amp;")
+            } {
+                if (ch == 60) {
+                    out = (out + "&lt;")
+                } {
+                    if (ch == 62) {
+                        out = (out + "&gt;")
+                    } {
+                        if (ch == 34) {
+                            out = (out + "&quot;")
+                        } {
+                            out = (out + (substring s i (i + 1)))
+                        }
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; One value out of "key=value;key=value", or "".
+    sfn styleGet:string (style:string key:string) {
+        def rest:string style
+        while ((strlen rest) > 0) {
+            def semi:int (indexOf rest ";")
+            def part:string rest
+            if (semi >= 0) {
+                part = (substring rest 0 semi)
+                rest = (substring rest (semi + 1) (strlen rest))
+            } {
+                rest = ""
+            }
+            def eq:int (indexOf part "=")
+            if (eq > 0) {
+                if ((substring part 0 eq) == key) {
+                    return (substring part (eq + 1) (strlen part))
+                }
+            }
+        }
+        return ""
+    }
+
+    ; "#2a9d8f" as the six hex digits DrawingML wants, or "" for anything
+    ; that is not a plain hex colour.
+    sfn hex6:string (css:string) {
+        def t:string (trim css)
+        if ((strlen t) == 7) {
+            if ((charAt t 0) == 35) {
+                return (to_uppercase (substring t 1 7))
+            }
+        }
+        return ""
+    }
+
+    sfn colourAt:string (list:string i:int) {
+        def rest:string list
+        def k:int 0
+        while ((strlen rest) > 0) {
+            def comma:int (indexOf rest ",")
+            def part:string rest
+            if (comma >= 0) {
+                part = (substring rest 0 comma)
+                rest = (substring rest (comma + 1) (strlen rest))
+            } {
+                rest = ""
+            }
+            if (k == i) {
+                return (XlsxChartXml.hex6(part))
+            }
+            k = (k + 1)
+        }
+        return ""
+    }
+
+    ; The cells a reference names on `m`, as the cached values a reader shows
+    ; before it recalculates: <c:numCache> for numbers, <c:strCache> for text.
+    sfn cacheOf:string (m:SpreadsheetModel ref:string numeric:boolean) {
+        def bang:int (indexOf ref "!")
+        def body:string ref
+        if (bang >= 0) {
+            body = (substring ref (bang + 1) (strlen ref))
+        }
+        def plain:string ""
+        def i:int 0
+        while (i < (strlen body)) {
+            def c:string (substring body i (i + 1))
+            if (c != "$") {
+                plain = (plain + c)
+            }
+            i = (i + 1)
+        }
+        def colon:int (indexOf plain ":")
+        def a:string plain
+        def b:string plain
+        if (colon > 0) {
+            a = (substring plain 0 colon)
+            b = (substring plain (colon + 1) (strlen plain))
+        }
+        def p0:[int] (XlsxWorksheet.cellRef(a))
+        def p1:[int] (XlsxWorksheet.cellRef(b))
+        if (((array_length p0) < 2) || ((array_length p1) < 2)) {
+            return ""
+        }
+        def r0:int (itemAt p0 0)
+        def c0:int (itemAt p0 1)
+        def r1:int (itemAt p1 0)
+        def c1:int (itemAt p1 1)
+        if ((r0 < 0) || (c0 < 0)) {
+            return ""
+        }
+        def pts:string ""
+        def n:int 0
+        def r:int r0
+        while (r <= r1) {
+            def col:int c0
+            while (col <= c1) {
+                def v:string (m.getCell(r col))
+                if numeric {
+                    def d@(optional):double (to_double (trim v))
+                    if ((strlen (trim v)) > 0) {
+                        if (!null? d) {
+                            pts = (pts + "<c:pt idx=\"" + (to_string n) + "\"><c:v>" + (XlsxChartXml.esc((trim v))) + "</c:v></c:pt>")
+                        }
+                    }
+                } {
+                    pts = (pts + "<c:pt idx=\"" + (to_string n) + "\"><c:v>" + (XlsxChartXml.esc((m.getDisplay(r col)))) + "</c:v></c:pt>")
+                }
+                n = (n + 1)
+                col = (col + 1)
+            }
+            r = (r + 1)
+        }
+        if numeric {
+            return ("<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"" + (to_string n) + "\"/>" + pts + "</c:numCache>")
+        }
+        return ("<c:strCache><c:ptCount val=\"" + (to_string n) + "\"/>" + pts + "</c:strCache>")
+    }
+
+    sfn numRef:string (m:SpreadsheetModel ref:string) {
+        return ("<c:numRef><c:f>" + (XlsxChartXml.esc(ref)) + "</c:f>" + (XlsxChartXml.cacheOf(m ref true)) + "</c:numRef>")
+    }
+
+    sfn strRef:string (m:SpreadsheetModel ref:string) {
+        return ("<c:strRef><c:f>" + (XlsxChartXml.esc(ref)) + "</c:f>" + (XlsxChartXml.cacheOf(m ref false)) + "</c:strRef>")
+    }
+
+    ; Excel's default series colours, in order.
+    sfn defaultColour:string (i:int) {
+        def pal:[string] ([] _:string ("4472C4" "ED7D31" "A5A5A5" "FFC000" "5B9BD5" "70AD47"))
+        return (itemAt pal (i - ((idiv i 6) * 6)))
+    }
+
+    ; The n-th colour of the chart's own list, or Excel's default.
+    sfn paletteAt:string (img:SheetImage i:int) {
+        def mine:string (XlsxChartXml.colourAt((XlsxChartXml.styleGet(img.chartStyle "colors")) i))
+        if ((strlen mine) > 0) {
+            return mine
+        }
+        return (XlsxChartXml.defaultColour(i))
+    }
+
+    sfn seriesColour:string (img:SheetImage i:int) {
+        def mine:string (XlsxChartXml.colourAt((XlsxChartXml.styleGet(img.chartStyle "colors")) i))
+        if ((strlen mine) > 0) {
+            return mine
+        }
+        if (i == 0) {
+            def f:string (XlsxChartXml.hex6((XlsxChartXml.styleGet(img.chartStyle "fill"))))
+            if ((strlen f) > 0) {
+                return f
+            }
+        }
+        return (XlsxChartXml.defaultColour(i))
+    }
+
+    ; How many cells a one-column reference spans.
+    sfn refCount:int (ref:string) {
+        def colon:int (indexOf ref ":")
+        if (colon < 0) {
+            return 1
+        }
+        def tailDigits:string ""
+        def headDigits:string ""
+        def i:int 0
+        while (i < colon) {
+            def ch:int (charAt ref i)
+            if ((ch >= 48) && (ch <= 57)) {
+                headDigits = (headDigits + (substring ref i (i + 1)))
+            } {
+                headDigits = ""
+            }
+            i = (i + 1)
+        }
+        def j:int (colon + 1)
+        while (j < (strlen ref)) {
+            def ch2:int (charAt ref j)
+            if ((ch2 >= 48) && (ch2 <= 57)) {
+                tailDigits = (tailDigits + (substring ref j (j + 1)))
+            } {
+                tailDigits = ""
+            }
+            j = (j + 1)
+        }
+        def r0:int (?? (to_int headDigits) 1)
+        def r1:int (?? (to_int tailDigits) r0)
+        if (r1 < r0) {
+            return 1
+        }
+        return ((r1 - r0) + 1)
+    }
+
+    sfn richTitle:string (text:string) {
+        return ("<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>" + (XlsxChartXml.esc(text)) + "</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title>")
+    }
+
+    ; The chart type's family: "bar" "line" "area" "scatter" "bubble" "pie"
+    ; "doughnut" "stock" "combo".
+    sfn family:string (kind:int) {
+        if ((kind == 6) || ((kind == 7) || ((kind == 8) || ((kind == 9) || ((kind == 30) || (kind == 31)))))) {
+            return "line"
+        }
+        if ((kind == 10) || ((kind == 11) || ((kind == 12) || (kind == 23)))) {
+            return "area"
+        }
+        if ((kind == 13) || ((kind == 24) || (kind == 32))) {
+            return "scatter"
+        }
+        if (kind == 14) {
+            return "bubble"
+        }
+        if (kind == 16) {
+            return "pie"
+        }
+        if ((kind == 17) || (kind == 18)) {
+            return "doughnut"
+        }
+        if (kind == 29) {
+            return "stock"
+        }
+        if (kind == 25) {
+            return "combo"
+        }
+        return "bar"
+    }
+
+    sfn grouping:string (kind:int) {
+        if ((kind == 3) || ((kind == 21) || ((kind == 11) || ((kind == 12) || (kind == 30))))) {
+            return "stacked"
+        }
+        if ((kind == 4) || ((kind == 22) || ((kind == 23) || (kind == 31)))) {
+            return "percentStacked"
+        }
+        if ((kind == 6) || ((kind == 7) || ((kind == 8) || ((kind == 9) || (kind == 10))))) {
+            return "standard"
+        }
+        return "clustered"
+    }
+
+    ; One series. `what` is "cat" (categories and values), "xy" (x and y
+    ; values) or "bubble" (x, y and size).
+    sfn serXml:string (m:SpreadsheetModel img:SheetImage i:int what:string marker:boolean smooth:boolean noLine:boolean) {
+        def out:string ("<c:ser><c:idx val=\"" + (to_string i) + "\"/><c:order val=\"" + (to_string i) + "\"/>")
+        if (i < (array_length img.nameRefs)) {
+            def nm:string (itemAt img.nameRefs i)
+            if ((strlen nm) > 0) {
+                out = (out + "<c:tx>" + (XlsxChartXml.strRef(m nm)) + "</c:tx>")
+            }
+        }
+        def colour:string (XlsxChartXml.seriesColour(img i))
+        def lw:int (?? (to_int (XlsxChartXml.styleGet(img.chartStyle "lineWidth"))) 0)
+        def w:int 28575
+        if (lw > 0) {
+            w = (lw * 9525)
+        }
+        ; Every series is given its colour outright: a part with no theme
+        ; leaves "automatic" to the reader, and some readers draw nothing.
+        def fill:string ("<a:solidFill><a:srgbClr val=\"" + colour + "\"/></a:solidFill>")
+        if ((what == "cat") || ((what == "pie") || (what == "bubble"))) {
+            out = (out + "<c:spPr>" + fill + "</c:spPr>")
+        } {
+            if noLine {
+                out = (out + "<c:spPr><a:ln w=\"19050\"><a:noFill/></a:ln></c:spPr>")
+            } {
+                out = (out + "<c:spPr><a:ln w=\"" + (to_string w) + "\" cap=\"rnd\">" + fill + "<a:round/></a:ln></c:spPr>")
+            }
+        }
+        if ((what == "xy") || ((what == "line") || (what == "bubble"))) {
+            if (marker || noLine) {
+                if (what != "bubble") {
+                    out = (out + "<c:marker><c:symbol val=\"circle\"/><c:size val=\"5\"/><c:spPr>" + fill + "</c:spPr></c:marker>")
+                }
+            } {
+                out = (out + "<c:marker><c:symbol val=\"none\"/></c:marker>")
+            }
+        }
+        if (what == "pie") {
+            def np:int (XlsxChartXml.refCount((itemAt img.valRefs i)))
+            def k:int 0
+            while (k < np) {
+                out = (out + "<c:dPt><c:idx val=\"" + (to_string k) + "\"/><c:bubble3D val=\"0\"/><c:spPr><a:solidFill><a:srgbClr val=\"" + (XlsxChartXml.paletteAt(img k)) + "\"/></a:solidFill><a:ln w=\"12700\"><a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill></a:ln></c:spPr></c:dPt>")
+                k = (k + 1)
+            }
+        }
+        if ((what == "cat") || ((what == "line") || (what == "pie"))) {
+            if ((strlen img.catRef) > 0) {
+                out = (out + "<c:cat>" + (XlsxChartXml.strRef(m img.catRef)) + "</c:cat>")
+            }
+            out = (out + "<c:val>" + (XlsxChartXml.numRef(m (itemAt img.valRefs i))) + "</c:val>")
+        }
+        if ((what == "xy") || (what == "bubble")) {
+            out = (out + "<c:xVal>" + (XlsxChartXml.numRef(m (itemAt img.valRefs 0))) + "</c:xVal>")
+            out = (out + "<c:yVal>" + (XlsxChartXml.numRef(m (itemAt img.valRefs 1))) + "</c:yVal>")
+            if (what == "bubble") {
+                out = (out + "<c:bubbleSize>" + (XlsxChartXml.numRef(m (itemAt img.valRefs 2))) + "</c:bubbleSize>")
+            }
+        }
+        if smooth {
+            out = (out + "<c:smooth val=\"1\"/>")
+        } {
+            if ((what == "line") || (what == "xy")) {
+                out = (out + "<c:smooth val=\"0\"/>")
+            }
+        }
+        return (out + "</c:ser>")
+    }
+
+    sfn dLbls:string (img:SheetImage) {
+        if ((XlsxChartXml.styleGet(img.chartStyle "dataLabels")) != "1") {
+            return ""
+        }
+        def pos:string ""
+        if ((XlsxChartXml.styleGet(img.chartStyle "labels")) == "inside") {
+            pos = "<c:dLblPos val=\"inEnd\"/>"
+        }
+        return ("<c:dLbls>" + pos + "<c:showLegendKey val=\"0\"/><c:showVal val=\"1\"/><c:showCatName val=\"0\"/><c:showSerName val=\"0\"/><c:showPercent val=\"0\"/><c:showBubbleSize val=\"0\"/></c:dLbls>")
+    }
+
+    sfn axIds:string () {
+        return "<c:axId val=\"500000001\"/><c:axId val=\"500000002\"/>"
+    }
+
+    ; The value axis: bounds, log scale, number format, title, gridlines.
+    sfn valAx:string (img:SheetImage id:string cross:string pos:string) {
+        def st:string img.chartStyle
+        def out:string ("<c:valAx><c:axId val=\"" + id + "\"/><c:scaling>")
+        if ((XlsxChartXml.styleGet(st "log")) == "on") {
+            out = (out + "<c:logBase val=\"10\"/>")
+        }
+        out = (out + "<c:orientation val=\"minMax\"/>")
+        def mx:string (XlsxChartXml.styleGet(st "max"))
+        def mn:string (XlsxChartXml.styleGet(st "min"))
+        if ((strlen mx) > 0) {
+            out = (out + "<c:max val=\"" + (XlsxChartXml.esc(mx)) + "\"/>")
+        }
+        if ((strlen mn) > 0) {
+            out = (out + "<c:min val=\"" + (XlsxChartXml.esc(mn)) + "\"/>")
+        }
+        out = (out + "</c:scaling><c:delete val=\"0\"/><c:axPos val=\"" + pos + "\"/>")
+        if ((XlsxChartXml.styleGet(st "gridlines")) != "off") {
+            out = (out + "<c:majorGridlines/>")
+        }
+        def yt:string (XlsxChartXml.styleGet(st "yTitle"))
+        if (((strlen yt) > 0) && ((XlsxChartXml.styleGet(st "axisTitles")) != "0")) {
+            out = (out + (XlsxChartXml.richTitle(yt)))
+        }
+        def nf:string (XlsxChartXml.styleGet(st "format"))
+        if ((strlen nf) > 0) {
+            out = (out + "<c:numFmt formatCode=\"" + (XlsxChartXml.esc(nf)) + "\" sourceLinked=\"0\"/>")
+        } {
+            out = (out + "<c:numFmt formatCode=\"General\" sourceLinked=\"1\"/>")
+        }
+        out = (out + "<c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"" + cross + "\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"between\"/></c:valAx>")
+        return out
+    }
+
+    sfn catAx:string (img:SheetImage pos:string) {
+        def out:string ("<c:catAx><c:axId val=\"500000001\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"" + pos + "\"/>")
+        def xt:string (XlsxChartXml.styleGet(img.chartStyle "xTitle"))
+        if (((strlen xt) > 0) && ((XlsxChartXml.styleGet(img.chartStyle "axisTitles")) != "0")) {
+            out = (out + (XlsxChartXml.richTitle(xt)))
+        }
+        out = (out + "<c:numFmt formatCode=\"General\" sourceLinked=\"1\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"500000002\"/><c:crosses val=\"autoZero\"/><c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/><c:noMultiLvlLbl val=\"0\"/></c:catAx>")
+        return out
+    }
+
+    ; The whole chart part.
+    sfn chartXml:string (m:SpreadsheetModel img:SheetImage) {
+        def kind:int img.chartKind
+        def fam:string (XlsxChartXml.family(kind))
+        def grp:string (XlsxChartXml.grouping(kind))
+        def n:int (array_length img.valRefs)
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        out = (out + "<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">")
+        out = (out + "<c:roundedCorners val=\"0\"/><c:chart>")
+        if ((strlen img.chartTitle) > 0) {
+            out = (out + (XlsxChartXml.richTitle(img.chartTitle)) + "<c:autoTitleDeleted val=\"0\"/>")
+        } {
+            out = (out + "<c:autoTitleDeleted val=\"1\"/>")
+        }
+        out = (out + "<c:plotArea><c:layout/>")
+        def labels:string (XlsxChartXml.dLbls(img))
+        def horizontal:boolean ((kind == 2) || ((kind == 21) || (kind == 22)))
+        if ((fam == "bar") || (fam == "combo")) {
+            def dir:string "col"
+            if horizontal {
+                dir = "bar"
+            }
+            out = (out + "<c:barChart><c:barDir val=\"" + dir + "\"/><c:grouping val=\"" + grp + "\"/><c:varyColors val=\"0\"/>")
+            def upto:int n
+            if (fam == "combo") {
+                upto = 1
+            }
+            def i:int 0
+            while (i < upto) {
+                out = (out + (XlsxChartXml.serXml(m img i "cat" false false false)))
+                i = (i + 1)
+            }
+            out = (out + labels + "<c:gapWidth val=\"150\"/>")
+            if (grp != "clustered") {
+                out = (out + "<c:overlap val=\"100\"/>")
+            }
+            out = (out + (XlsxChartXml.axIds()) + "</c:barChart>")
+            if (fam == "combo") {
+                out = (out + "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>")
+                def j:int 1
+                while (j < n) {
+                    out = (out + (XlsxChartXml.serXml(m img j "line" true false false)))
+                    j = (j + 1)
+                }
+                out = (out + labels + "<c:marker val=\"1\"/>" + (XlsxChartXml.axIds()) + "</c:lineChart>")
+            }
+        }
+        if (fam == "line") {
+            out = (out + "<c:lineChart><c:grouping val=\"" + grp + "\"/><c:varyColors val=\"0\"/>")
+            def marks:boolean ((kind == 7) || (kind == 9))
+            def i2:int 0
+            while (i2 < n) {
+                out = (out + (XlsxChartXml.serXml(m img i2 "line" marks (kind == 9) false)))
+                i2 = (i2 + 1)
+            }
+            out = (out + labels + "<c:marker val=\"1\"/>" + (XlsxChartXml.axIds()) + "</c:lineChart>")
+        }
+        if (fam == "area") {
+            out = (out + "<c:areaChart><c:grouping val=\"" + grp + "\"/><c:varyColors val=\"0\"/>")
+            def i3:int 0
+            while (i3 < n) {
+                out = (out + (XlsxChartXml.serXml(m img i3 "cat" false false false)))
+                i3 = (i3 + 1)
+            }
+            out = (out + labels + (XlsxChartXml.axIds()) + "</c:areaChart>")
+        }
+        if (fam == "stock") {
+            out = (out + "<c:stockChart>")
+            def i4:int 0
+            while ((i4 < n) && (i4 < 3)) {
+                out = (out + (XlsxChartXml.serXml(m img i4 "line" false false true)))
+                i4 = (i4 + 1)
+            }
+            out = (out + "<c:hiLowLines/>" + (XlsxChartXml.axIds()) + "</c:stockChart>")
+        }
+        if ((fam == "scatter") && (n >= 2)) {
+            def style:string "lineMarker"
+            if (kind == 32) {
+                style = "smoothMarker"
+            }
+            out = (out + "<c:scatterChart><c:scatterStyle val=\"" + style + "\"/><c:varyColors val=\"0\"/>")
+            out = (out + (XlsxChartXml.serXml(m img 0 "xy" true (kind == 32) (kind == 13))))
+            out = (out + labels + (XlsxChartXml.axIds()) + "</c:scatterChart>")
+        }
+        if ((fam == "bubble") && (n >= 3)) {
+            out = (out + "<c:bubbleChart><c:varyColors val=\"0\"/>")
+            out = (out + (XlsxChartXml.serXml(m img 0 "bubble" true false false)))
+            out = (out + labels + "<c:bubbleScale val=\"100\"/>" + (XlsxChartXml.axIds()) + "</c:bubbleChart>")
+        }
+        if ((fam == "pie") || (fam == "doughnut")) {
+            def tag:string "c:pieChart"
+            if (fam == "doughnut") {
+                tag = "c:doughnutChart"
+            }
+            out = (out + "<" + tag + "><c:varyColors val=\"1\"/>")
+            if (n > 0) {
+                out = (out + (XlsxChartXml.serXml(m img 0 "pie" false false false)))
+            }
+            out = (out + labels + "<c:firstSliceAng val=\"0\"/>")
+            if (fam == "doughnut") {
+                out = (out + "<c:holeSize val=\"50\"/>")
+            }
+            out = (out + "</" + tag + ">")
+        }
+        ; Axes, for everything but a circle.
+        if ((fam != "pie") && (fam != "doughnut")) {
+            if ((fam == "scatter") || (fam == "bubble")) {
+                def xs:SheetImage (new SheetImage)
+                xs.chartStyle = ("xTitle=;yTitle=" + (XlsxChartXml.styleGet(img.chartStyle "xTitle")) + ";gridlines=off;axisTitles=" + (XlsxChartXml.styleGet(img.chartStyle "axisTitles")))
+                out = (out + (XlsxChartXml.valAx(xs "500000001" "500000002" "b")))
+                out = (out + (XlsxChartXml.valAx(img "500000002" "500000001" "l")))
+            } {
+                def cpos:string "b"
+                def vpos:string "l"
+                if horizontal {
+                    cpos = "l"
+                    vpos = "b"
+                }
+                out = (out + (XlsxChartXml.catAx(img cpos)))
+                out = (out + (XlsxChartXml.valAx(img "500000002" "500000001" vpos)))
+            }
+        }
+        out = (out + "</c:plotArea>")
+        def leg:string (XlsxChartXml.styleGet(img.chartStyle "legend"))
+        if (leg != "none") {
+            def lp:string "r"
+            if (leg == "top") {
+                lp = "t"
+            }
+            if (leg == "bottom") {
+                lp = "b"
+            }
+            if (leg == "left") {
+                lp = "l"
+            }
+            out = (out + "<c:legend><c:legendPos val=\"" + lp + "\"/><c:overlay val=\"0\"/></c:legend>")
+        }
+        out = (out + "<c:plotVisOnly val=\"1\"/><c:dispBlanksAs val=\"gap\"/></c:chart>")
+        def area:string (XlsxChartXml.hex6((XlsxChartXml.styleGet(img.chartStyle "area"))))
+        if ((strlen area) > 0) {
+            out = (out + "<c:spPr><a:solidFill><a:srgbClr val=\"" + area + "\"/></a:solidFill></c:spPr>")
+        }
+        return (out + "</c:chartSpace>")
+    }
+
+    ; The drawing part: one two-cell anchor per chart, the n-th naming the
+    ; relationship rId<n>.
+    sfn drawingXml:string (charts:[SheetImage]) {
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        out = (out + "<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">")
+        def i:int 0
+        while (i < (array_length charts)) {
+            def img:SheetImage (itemAt charts i)
+            out = (out + "<xdr:twoCellAnchor>")
+            out = (out + "<xdr:from><xdr:col>" + (to_string img.fromCol) + "</xdr:col><xdr:colOff>" + (to_string (img.offX * 9525)) + "</xdr:colOff><xdr:row>" + (to_string img.fromRow) + "</xdr:row><xdr:rowOff>" + (to_string (img.offY * 9525)) + "</xdr:rowOff></xdr:from>")
+            out = (out + "<xdr:to><xdr:col>" + (to_string img.toCol) + "</xdr:col><xdr:colOff>" + (to_string (img.toOffX * 9525)) + "</xdr:colOff><xdr:row>" + (to_string img.toRow) + "</xdr:row><xdr:rowOff>" + (to_string (img.toOffY * 9525)) + "</xdr:rowOff></xdr:to>")
+            def id:string (to_string (i + 2))
+            out = (out + "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"" + id + "\" name=\"Chart " + (to_string (i + 1)) + "\"")
+            if ((strlen img.altText) > 0) {
+                out = (out + " descr=\"" + (XlsxChartXml.esc(img.altText)) + "\"")
+            }
+            out = (out + "/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>")
+            out = (out + "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId" + (to_string (i + 1)) + "\"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>")
+            i = (i + 1)
+        }
+        return (out + "</xdr:wsDr>")
+    }
+
+    sfn drawingRelsXml:string (firstChart:int count:int) {
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+        def i:int 0
+        while (i < count) {
+            out = (out + "<Relationship Id=\"rId" + (to_string (i + 1)) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/evgchart" + (to_string (firstChart + i)) + ".xml\"/>")
+            i = (i + 1)
+        }
+        return (out + "</Relationships>")
+    }
+}

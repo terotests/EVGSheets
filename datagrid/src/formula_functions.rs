@@ -8,6 +8,7 @@ use crate::rgr::DgNative;
 use crate::date_serial::DateSerial;
 use crate::formula_value::FormulaValue;
 use crate::xlsx_number_format::XlsxNumberFormat;
+use crate::formula_more::FormulaMore;
 
 /// FormulaFunctions - pure, unit-testable spreadsheet function library.
 ///
@@ -400,12 +401,13 @@ impl FormulaFunctions {
         if ((((n == "PMT" || n == "PV") || n == "FV") || n == "NPER") || n == "NPV") || n == "SLN" {
             return true;
         }
-        false
+        FormulaMore::isKnown(&n)
     }
     /// Every function name this library answers, space-separated — for docs,
     /// hosts, and "what do we actually have?" checks.
     pub fn catalog() -> String {
-        "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW SUBTOTAL STDEV STDEV.S STDEVP STDEV.P VAR VAR.S VARP VAR.P PMT PV FV NPER NPV SLN".to_string()
+        let more: String = FormulaMore::names();
+        format!("{}{}", "SUM AVERAGE MIN MAX COUNT COUNTA PRODUCT IF IFS SWITCH AND OR NOT XOR ABS ROUND INT MOD POWER SQRT SIGN PI EXP LN LOG10 FLOOR CEILING LEN LEFT RIGHT MID UPPER LOWER TRIM CONCAT CONCATENATE TEXTJOIN REPLACE VALUE TRUE FALSE IFERROR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISERR N T NA DATE YEAR MONTH DAY WEEKDAY EDATE EOMONTH DAYS DATEVALUE TEXT ROUNDUP ROUNDDOWN TRUNC MEDIAN COUNTBLANK COUNTIF SUMIF AVERAGEIF COUNTIFS SUMIFS AVERAGEIFS CHOOSE VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH FILTER UNIQUE SORT SUMPRODUCT LARGE SMALL SUBSTITUTE FIND SEARCH REPT PROPER EXACT CHAR CODE TRANSPOSE TODAY NOW SUBTOTAL STDEV STDEV.S STDEVP STDEV.P VAR VAR.S VARP VAR.P PMT PV FV NPER NPV SLN".to_string(), DgNative::substr(&more, 0, DgNative::str_len(&more) - 1))
     }
     /// Dispatch by uppercase function name. (`call` is reserved in Ranger.)
     pub fn invoke(name: &str, args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
@@ -713,6 +715,9 @@ impl FormulaFunctions {
         if n == "TRANSPOSE" {
             return FormulaFunctions::fnTranspose(args);
         }
+        if FormulaMore::isKnown(&n) {
+            return FormulaMore::invoke(&n, args);
+        }
         FormulaValue::fromError("#NAME?".to_string())
     }
     /// --- helpers: collect numeric scalars from args (flattens nothing; engine expands ranges) ---
@@ -737,14 +742,91 @@ impl FormulaFunctions {
         out
     }
     /// The numbers among the arguments, arrays expanded; text and blanks skipped.
+    /// The numbers SUM, AVERAGE, COUNT, MIN, MAX… work on, as Excel picks
+    /// them: inside a range or an array only numbers count (text and
+    /// TRUE/FALSE there are skipped); an argument given directly also counts
+    /// when it is TRUE/FALSE (1/0) or text that reads as a number, so
+    /// SUM(1,"2",TRUE) is 4.
     pub fn collectNumbers(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Vec<f64> {
         let mut vals: Vec<f64> = Vec::new();
-        for v in FormulaFunctions::flatArgs(args).iter() {
-            if v.borrow().isNumeric() {
-                vals.push(v.borrow().numberValue());
+        for a in args.iter() {
+            if a.borrow().isArray() {
+                let n: i64 = a.borrow().count();
+                let mut i: i64 = 0;
+                while i < n {
+                    let v: Rc<RefCell<FormulaValue>> = a.borrow().items[i as usize].clone();
+                    if v.borrow().kind == 1 {
+                        vals.push(v.borrow().num);
+                    }
+                    i += 1;
+                }
+            } else {
+                let k: i64 = a.borrow().kind;
+                if k == 1 {
+                    vals.push(a.borrow().num);
+                } else if k == 3 {
+                    vals.push(if a.borrow().flag { 1.0 } else { 0.0 });
+                } else if k == 2 {
+                    if let Some(x) = FormulaValue::parseNumberText(&a.borrow().text.clone()) {
+                        vals.push(x);
+                    }
+                }
             }
         }
         vals
+    }
+    /// A condition's truth the way IF, AND and OR read it: numbers are true
+    /// unless 0, TRUE/FALSE are themselves, text "TRUE"/"FALSE" too, other
+    /// text is #VALUE! (None).
+    pub fn logicalOf(v: &Rc<RefCell<FormulaValue>>) -> Option<bool> {
+        let k: i64 = v.borrow().kind;
+        if k == 5 {
+            let one: Rc<RefCell<FormulaValue>> = v.borrow().single();
+            return FormulaFunctions::logicalOf(&one);
+        }
+        if k == 2 {
+            let up: String = FormulaFunctions::upper(&v.borrow().text.clone());
+            if up == "TRUE" {
+                return Some(true);
+            }
+            if up == "FALSE" {
+                return Some(false);
+            }
+            return None;
+        }
+        Some(v.borrow().isTrue())
+    }
+    /// AND/OR/XOR's inputs: logicals and numbers in ranges (text and blanks
+    /// there are skipped), direct arguments read by logicalOf. None when a
+    /// direct argument is text, or when there is nothing logical at all.
+    pub fn logicalArgs(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Option<Vec<bool>> {
+        let mut out: Vec<bool> = Vec::new();
+        for a in args.iter() {
+            if a.borrow().isArray() {
+                let n: i64 = a.borrow().count();
+                let mut i: i64 = 0;
+                while i < n {
+                    let v: Rc<RefCell<FormulaValue>> = a.borrow().items[i as usize].clone();
+                    let k: i64 = v.borrow().kind;
+                    if k == 1 || k == 3 {
+                        out.push(v.borrow().isTrue());
+                    }
+                    i += 1;
+                }
+            } else {
+                if a.borrow().kind == 0 {
+                    continue;
+                }
+                match FormulaFunctions::logicalOf(a) {
+                    Some(b) => out.push(b),
+                    None => return None,
+                }
+            }
+        }
+        if out.is_empty() {
+            return None;
+        }
+        Some(out)
     }
     pub fn needArity(args: &Vec<Rc<RefCell<FormulaValue>>>, min_n: i64) -> Rc<RefCell<FormulaValue>> {
         if (args.len() as i64) < min_n {
@@ -1152,7 +1234,10 @@ impl FormulaFunctions {
         if ce {
             return cond;
         }
-        let ct: bool = cond.borrow().isTrue();
+        let ct: bool = match FormulaFunctions::logicalOf(&cond) {
+            Some(b) => b,
+            None => return FormulaValue::fromError("#VALUE!".to_string()),
+        };
         if ct {
             return args[1].clone();
         }
@@ -1177,8 +1262,10 @@ impl FormulaFunctions {
             if ce {
                 return cond;
             }
-            if cond.borrow().isTrue() {
-                return args[(i + 1) as usize].clone();
+            match FormulaFunctions::logicalOf(&cond) {
+                Some(true) => return args[(i + 1) as usize].clone(),
+                Some(false) => {}
+                None => return FormulaValue::fromError("#VALUE!".to_string()),
             }
             i += 2;
         }
@@ -1220,15 +1307,13 @@ impl FormulaFunctions {
         if ee {
             return err;
         }
-        let mut i: i64 = 0;
-        let n: i64 = args.len() as i64;
-        if n == 0 {
-            return FormulaValue::fromError("#VALUE!".to_string());
-        }
-        while i < n {
-            let v: Rc<RefCell<FormulaValue>> = args[i as usize].clone();
-            let vt: bool = v.borrow().isTrue();
-            if !vt {
+        let vals: Vec<bool> = match FormulaFunctions::logicalArgs(args) {
+            Some(v) => v,
+            None => return FormulaValue::fromError("#VALUE!".to_string()),
+        };
+        let mut i: usize = 0;
+        while i < vals.len() {
+            if vals[i] == false {
                 return FormulaValue::fromBool(false);
             }
             i += 1;
@@ -1241,22 +1326,19 @@ impl FormulaFunctions {
         if ee {
             return err;
         }
-        let mut i: i64 = 0;
-        let n: i64 = args.len() as i64;
-        if n == 0 {
-            return FormulaValue::fromError("#VALUE!".to_string());
-        }
-        while i < n {
-            let v: Rc<RefCell<FormulaValue>> = args[i as usize].clone();
-            let vt: bool = v.borrow().isTrue();
-            if vt {
+        let vals: Vec<bool> = match FormulaFunctions::logicalArgs(args) {
+            Some(v) => v,
+            None => return FormulaValue::fromError("#VALUE!".to_string()),
+        };
+        let mut i: usize = 0;
+        while i < vals.len() {
+            if vals[i] == true {
                 return FormulaValue::fromBool(true);
             }
             i += 1;
         }
         FormulaValue::fromBool(false)
     }
-    /// XOR — true when an odd number of arguments are true (Excel).
     pub fn fnXor(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let err: Rc<RefCell<FormulaValue>> = FormulaFunctions::firstError(args);
         let ee: bool = err.borrow().isError();
@@ -1343,6 +1425,66 @@ impl FormulaFunctions {
         }
         FormulaValue::fromNumber(x)
     }
+    pub fn pow10(k: i64) -> f64 {
+        let mut p: f64 = 1.0;
+        let mut i: i64 = 0;
+        let n: i64 = if k < 0 { 0 - k } else { k };
+        while i < n {
+            p *= 10.0;
+            i += 1;
+        }
+        if k < 0 {
+            return 1.0 / p;
+        }
+        p
+    }
+    /// x to 15 significant digits, the precision Excel keeps: 1.005*100 is
+    /// 100.49999999999999 in binary and 100.5 to Excel.
+    pub fn sig15(x: f64) -> f64 {
+        if x == 0.0 || x != x {
+            return x;
+        }
+        let a: f64 = if x < 0.0 { 0.0 - x } else { x };
+        let mut e: i64 = 0;
+        let mut m: f64 = a;
+        while m >= 10.0 {
+            m /= 10.0;
+            e += 1;
+        }
+        while m < 1.0 {
+            m *= 10.0;
+            e -= 1;
+        }
+        let k: i64 = 14 - e;
+        let r: f64 = if k >= 0 {
+            let p: f64 = FormulaFunctions::pow10(k);
+            (a * p + 0.5).floor() / p
+        } else {
+            let p: f64 = FormulaFunctions::pow10(0 - k);
+            (a / p + 0.5).floor() * p
+        };
+        if x < 0.0 { 0.0 - r } else { r }
+    }
+    /// ROUND(x, digits): half away from zero, on the decimal digits Excel
+    /// sees (ROUND(1.005, 2) = 1.01, ROUND(-2.5, 0) = -3); negative digits
+    /// round to tens, hundreds… (ROUND(1234.5, -2) = 1200). mode: 0 round,
+    /// 1 up (away from zero), -1 down (toward zero).
+    pub fn roundDigits(x: f64, digits: i64, mode: i64) -> f64 {
+        let a: f64 = if x < 0.0 { 0.0 - x } else { x };
+        let y: f64 = FormulaFunctions::sig15(a * FormulaFunctions::pow10(digits));
+        let mut r: f64 = (y + 0.5).floor();
+        if mode == 1 {
+            r = y.floor();
+            if r < y {
+                r += 1.0;
+            }
+        }
+        if mode == -1 {
+            r = y.floor();
+        }
+        let out: f64 = FormulaFunctions::sig15(r / FormulaFunctions::pow10(digits));
+        if x < 0.0 { 0.0 - out } else { out }
+    }
     pub fn fnRound(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 1);
         let ae: bool = ar.borrow().isError();
@@ -1357,20 +1499,18 @@ impl FormulaFunctions {
         let mut digits: i64 = 0;
         if (args.len() as i64) >= 2 {
             let d: Rc<RefCell<FormulaValue>> = args[1].clone();
-            digits = (d.borrow().asNumber()).floor() as i64;
+            if d.borrow().isError() {
+                return d;
+            }
+            let dv: f64 = d.borrow().asNumber();
+            digits = if dv < 0.0 { 0 - ((0.0 - dv).floor() as i64) } else { dv.floor() as i64 };
         }
-        if digits < 0 {
-            digits = 0;
+        let xv: Rc<RefCell<FormulaValue>> = v.borrow().coerceNumber();
+        if xv.borrow().isError() {
+            return xv;
         }
-        let mut scale: f64 = 1.0;
-        let mut i: i64 = 0;
-        while i < digits {
-            scale *= 10.0;
-            i += 1;
-        }
-        let xx: f64 = v.borrow().asNumber();
-        let rr: f64 = (((xx * scale + 0.5).floor() as i64) as f64) / scale;
-        FormulaValue::fromNumber(rr)
+        let xx: f64 = xv.borrow().num;
+        FormulaValue::fromNumber(FormulaFunctions::roundDigits(xx, digits, 0))
     }
     pub fn fnInt(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 1);
@@ -1429,17 +1569,14 @@ impl FormulaFunctions {
             return b;
         }
         let base: f64 = a.borrow().asNumber();
-        let exp: i64 = (b.borrow().asNumber()).floor() as i64;
-        if exp < 0 {
+        let exp: f64 = b.borrow().asNumber();
+        if base < 0.0 && exp.floor() != exp {
             return FormulaValue::fromError("#NUM!".to_string());
         }
-        let mut acc: f64 = 1.0;
-        let mut i: i64 = 0;
-        while i < exp {
-            acc *= base;
-            i += 1;
+        if base == 0.0 && exp < 0.0 {
+            return FormulaValue::fromError("#DIV/0!".to_string());
         }
-        FormulaValue::fromNumber(acc)
+        FormulaValue::fromNumber(FormulaMore::powD(base, exp))
     }
     pub fn fnSqrt(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 1);
@@ -1567,28 +1704,59 @@ impl FormulaFunctions {
         out
     }
     pub fn fnFloor(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
-        FormulaFunctions::fnInt(args)
+        FormulaFunctions::toMultiple(args, false)
     }
     pub fn fnCeiling(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
+        FormulaFunctions::toMultiple(args, true)
+    }
+    /// CEILING / FLOOR(x, significance) as Excel 2010 has them: to a multiple
+    /// of the significance, up (CEILING) or down (FLOOR); a negative number
+    /// with a negative significance goes away from zero (CEILING) or toward
+    /// it (FLOOR). A positive number with a negative significance is #NUM!.
+    pub fn toMultiple(args: &Vec<Rc<RefCell<FormulaValue>>>, up: bool) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 1);
-        let ae: bool = ar.borrow().isError();
-        if ae {
+        if ar.borrow().isError() {
             return ar;
         }
-        let v: Rc<RefCell<FormulaValue>> = args[0].clone();
-        let ee: bool = v.borrow().isError();
-        if ee {
-            return v;
+        let xv: Rc<RefCell<FormulaValue>> = args[0].borrow().coerceNumber();
+        if xv.borrow().isError() {
+            return xv;
         }
-        let x: f64 = v.borrow().asNumber();
-        let t: i64 = x.floor() as i64;
-        if (t as f64) == x {
-            return FormulaValue::fromNumber(t as f64);
+        let mut sig: f64 = 1.0;
+        if args.len() >= 2 {
+            let sv: Rc<RefCell<FormulaValue>> = args[1].borrow().coerceNumber();
+            if sv.borrow().isError() {
+                return sv;
+            }
+            sig = sv.borrow().num;
         }
-        if x > 0.0 {
-            return FormulaValue::fromNumber((t + 1) as f64);
+        let x: f64 = xv.borrow().num;
+        if x == 0.0 {
+            return FormulaValue::fromNumber(0.0);
         }
-        FormulaValue::fromNumber(t as f64)
+        if sig == 0.0 {
+            if up {
+                return FormulaValue::fromNumber(0.0);
+            }
+            return FormulaValue::fromError("#DIV/0!".to_string());
+        }
+        if x > 0.0 && sig < 0.0 {
+            return FormulaValue::fromError("#NUM!".to_string());
+        }
+        if x < 0.0 && sig < 0.0 {
+            let q: f64 = FormulaFunctions::sig15((0.0 - x) / (0.0 - sig));
+            let mut k: f64 = q.floor();
+            if up && k < q {
+                k += 1.0;
+            }
+            return FormulaValue::fromNumber(FormulaFunctions::sig15(k * sig));
+        }
+        let q: f64 = FormulaFunctions::sig15(x / sig);
+        let mut k: f64 = q.floor();
+        if up && k < q {
+            k += 1.0;
+        }
+        FormulaValue::fromNumber(FormulaFunctions::sig15(k * sig))
     }
     /// --- text ---
     pub fn fnLen(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
@@ -2096,7 +2264,10 @@ impl FormulaFunctions {
                     vals[(j + 1) as usize] = cur;
                     j -= 1;
                 } else {
-                    j = -1;
+                    // Stop here: the key goes after `cur`. (Setting j to -1
+                    // to leave the loop put every key that was already in
+                    // place at the front, so a sorted list came back wrong.)
+                    break;
                 }
             }
             vals[(j + 1) as usize] = key;
@@ -2194,6 +2365,63 @@ impl FormulaFunctions {
         }
         0
     }
+    pub fn hasWildcard(p: &str) -> bool {
+        DgNative::index_of(p, "*") >= 0 || DgNative::index_of(p, "?") >= 0 || DgNative::index_of(p, "~") >= 0
+    }
+    /// Excel's wildcard match over the whole text: * any run (also none), ?
+    /// exactly one character, ~* ~? ~~ the character itself. Callers pass
+    /// both sides in capitals for a case-blind match.
+    pub fn wildcardMatch(text: &str, pat: &str) -> bool {
+        // The pattern as tokens: 0 literal, 1 ?, 2 *.
+        let mut kinds: Vec<i64> = Vec::new();
+        let mut chars: Vec<i64> = Vec::new();
+        let pn: i64 = DgNative::str_len(pat);
+        let mut i: i64 = 0;
+        while i < pn {
+            let ch: i64 = DgNative::char_at(pat, i);
+            if ch == 126 && i + 1 < pn {
+                kinds.push(0);
+                chars.push(DgNative::char_at(pat, i + 1));
+                i += 2;
+                continue;
+            }
+            if ch == 63 {
+                kinds.push(1);
+            } else if ch == 42 {
+                kinds.push(2);
+            } else {
+                kinds.push(0);
+            }
+            chars.push(ch);
+            i += 1;
+        }
+        let tn: i64 = DgNative::str_len(text);
+        let kn: i64 = kinds.len() as i64;
+        let mut ti: i64 = 0;
+        let mut ki: i64 = 0;
+        let mut star_k: i64 = -1;
+        let mut star_t: i64 = 0;
+        while ti < tn {
+            if ki < kn && (kinds[ki as usize] == 1 || (kinds[ki as usize] == 0 && chars[ki as usize] == DgNative::char_at(text, ti))) {
+                ti += 1;
+                ki += 1;
+            } else if ki < kn && kinds[ki as usize] == 2 {
+                star_k = ki;
+                star_t = ti;
+                ki += 1;
+            } else if star_k >= 0 {
+                ki = star_k + 1;
+                star_t += 1;
+                ti = star_t;
+            } else {
+                return false;
+            }
+        }
+        while ki < kn && kinds[ki as usize] == 2 {
+            ki += 1;
+        }
+        ki == kn
+    }
     pub fn criterionMatches(v: &Rc<RefCell<FormulaValue>>, criterion: &Rc<RefCell<FormulaValue>>) -> bool {
         let c: String = criterion.borrow().toText();
         let mut op: &str = "=";
@@ -2257,6 +2485,15 @@ impl FormulaFunctions {
                 cmp = 1;
             }
         } else {
+            // = and <> on text take Excel's wildcards: * any run, ? one
+            // character, ~ before either for the character itself.
+            if (op == "=" || op == "<>") && FormulaFunctions::hasWildcard(&rest) {
+                let hit: bool = FormulaFunctions::wildcardMatch(&FormulaFunctions::upper(&v.borrow().toText()), &FormulaFunctions::upper(&rest));
+                if op == "=" {
+                    return hit;
+                }
+                return !hit;
+            }
             cmp = FormulaFunctions::compareText(&FormulaFunctions::upper(&v.borrow().toText()), &FormulaFunctions::upper(&rest));
         }
         if op == "=" {
@@ -2474,105 +2711,215 @@ impl FormulaFunctions {
         let out = FormulaFunctions::upper(&a.borrow().toText()) == FormulaFunctions::upper(&b.borrow().toText());
         out
     }
-    /// Exact match only (Excel's range_lookup = FALSE / 0). The optional 4th
-    /// argument is accepted and ignored: approximate / sorted search is not
-    /// implemented — same stance as MATCH — so a miss stays #N/A rather than a
-    /// quietly wrong neighbour row.
-    pub fn fnVlookup(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
-        let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 3);
-        let ae: bool = ar.borrow().isError();
-        if ae {
-            return ar;
-        }
-        let needle: Rc<RefCell<FormulaValue>> = args[0].clone();
-        let table: Rc<RefCell<FormulaValue>> = args[1].clone();
-        let col_idx: i64 = (args[2].borrow().asNumber()).floor() as i64;
-        if !table.borrow().isArray() {
-            return FormulaValue::fromError("#VALUE!".to_string());
-        }
-        if col_idx < 1 {
-            return FormulaValue::fromError("#VALUE!".to_string());
-        }
-        if col_idx > table.borrow().cols {
-            return FormulaValue::fromError("#REF!".to_string());
-        }
-        let mut r: i64 = 0;
-        while r < table.borrow().rows {
-            if FormulaFunctions::valuesEqualLoose(&table.borrow().at(r, 0), &needle) {
-                return table.borrow().at(r, col_idx - 1);
-            }
-            r += 1;
-        }
-        FormulaValue::fromError("#N/A".to_string())
+    /// Same kind of value (number, text, logical) — approximate matches only
+    /// ever stop on one of the needle's kind.
+    pub fn sameKind(a: &Rc<RefCell<FormulaValue>>, b: &Rc<RefCell<FormulaValue>>) -> bool {
+        a.borrow().kind == b.borrow().kind
     }
-    pub fn fnHlookup(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
-        let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 3);
-        let ae: bool = ar.borrow().isError();
-        if ae {
-            return ar;
-        }
-        let needle: Rc<RefCell<FormulaValue>> = args[0].clone();
-        let table: Rc<RefCell<FormulaValue>> = args[1].clone();
-        let row_idx: i64 = (args[2].borrow().asNumber()).floor() as i64;
-        if !table.borrow().isArray() {
-            return FormulaValue::fromError("#VALUE!".to_string());
-        }
-        if row_idx < 1 {
-            return FormulaValue::fromError("#VALUE!".to_string());
-        }
-        if row_idx > table.borrow().rows {
-            return FormulaValue::fromError("#REF!".to_string());
-        }
-        let mut c: i64 = 0;
-        while c < table.borrow().cols {
-            if FormulaFunctions::valuesEqualLoose(&table.borrow().at(0, c), &needle) {
-                return table.borrow().at(row_idx - 1, c);
+    /// Where `needle` is in `look`, -1 when it is not. mode:
+    ///   0  exact; text with * ? ~ matches as a wildcard pattern (VLOOKUP/MATCH)
+    ///   2  exact, wildcards (XLOOKUP/XMATCH match_mode 2)
+    ///   3  exact, no wildcards (XLOOKUP/XMATCH match_mode 0)
+    ///   1  sorted ascending: the last value <= needle (VLOOKUP TRUE, MATCH 1)
+    ///  -1  sorted descending: the last value >= needle (MATCH -1)
+    ///   4  exact or the next smaller value, any order (XLOOKUP -1)
+    ///   5  exact or the next larger value, any order (XLOOKUP 1)
+    /// reverse searches last to first. Blank cells never match.
+    pub fn lookupIn(look: &Vec<Rc<RefCell<FormulaValue>>>, needle0: &Rc<RefCell<FormulaValue>>, mode: i64, reverse: bool) -> i64 {
+        let needle: Rc<RefCell<FormulaValue>> = if needle0.borrow().isArray() { needle0.borrow().single() } else { needle0.clone() };
+        let n: i64 = look.len() as i64;
+        let wild: bool = needle.borrow().kind == 2 && (mode == 2 || mode == 0) && FormulaFunctions::hasWildcard(&needle.borrow().text.clone());
+        let pat: String = FormulaFunctions::upper(&needle.borrow().text.clone());
+        let mut best: i64 = -1;
+        let mut k: i64 = 0;
+        while k < n {
+            let i: i64 = if reverse { n - 1 - k } else { k };
+            let v: Rc<RefCell<FormulaValue>> = look[i as usize].clone();
+            k += 1;
+            if v.borrow().isBlank() {
+                continue;
             }
-            c += 1;
-        }
-        FormulaValue::fromError("#N/A".to_string())
-    }
-    /// XLOOKUP(lookup, lookup_array, return_array, [if_not_found]) — exact match.
-    pub fn fnXlookup(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
-        let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 3);
-        let ae: bool = ar.borrow().isError();
-        if ae {
-            return ar;
-        }
-        let needle: Rc<RefCell<FormulaValue>> = args[0].clone();
-        let mut look_head: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
-        look_head.push(args[1].clone());
-        let look: Vec<Rc<RefCell<FormulaValue>>> = FormulaFunctions::flatArgs(&look_head);
-        let ret_arg: Rc<RefCell<FormulaValue>> = args[2].clone();
-        let mut i: i64 = 0;
-        while i < (look.len() as i64) {
-            if FormulaFunctions::valuesEqualLoose(&look[i as usize].clone(), &needle) {
-                if ret_arg.borrow().isArray() {
-                    if ret_arg.borrow().rows == (look.len() as i64) {
-                        if ret_arg.borrow().cols > 1 {
-                            let mut row_items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
-                            let mut c: i64 = 0;
-                            while c < ret_arg.borrow().cols {
-                                row_items.push(ret_arg.borrow().at(i, c));
-                                c += 1;
-                            }
-                            return FormulaValue::fromArray(1, ret_arg.borrow().cols.clone(), &row_items);
+            if mode == 0 || mode == 2 || mode == 3 {
+                if wild {
+                    if v.borrow().kind == 2 && FormulaFunctions::wildcardMatch(&FormulaFunctions::upper(&v.borrow().text.clone()), &pat) {
+                        return i;
+                    }
+                } else if FormulaValue::excelCompare(&v, &needle) == 0 {
+                    return i;
+                }
+                continue;
+            }
+            if !FormulaFunctions::sameKind(&v, &needle) {
+                continue;
+            }
+            let c: i64 = FormulaValue::excelCompare(&v, &needle);
+            if mode == 1 {
+                if c <= 0 {
+                    best = i;
+                } else {
+                    break;
+                }
+            } else if mode == -1 {
+                if c >= 0 {
+                    best = i;
+                } else {
+                    break;
+                }
+            } else if mode == 4 || mode == 5 {
+                if c == 0 {
+                    return i;
+                }
+                if (mode == 4 && c < 0) || (mode == 5 && c > 0) {
+                    if best < 0 {
+                        best = i;
+                    } else {
+                        let d: i64 = FormulaValue::excelCompare(&v, &look[best as usize].clone());
+                        if (mode == 4 && d > 0) || (mode == 5 && d < 0) {
+                            best = i;
                         }
-                        return ret_arg.borrow().at(i, 0);
                     }
                 }
-                let mut ret_head: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
-                ret_head.push(ret_arg.clone());
-                let ret_flat: Vec<Rc<RefCell<FormulaValue>>> = FormulaFunctions::flatArgs(&ret_head);
-                if i < (ret_flat.len() as i64) {
-                    return ret_flat[i as usize].clone();
-                }
-                return FormulaValue::fromError("#N/A".to_string());
+            }
+        }
+        best
+    }
+    /// The values of row `r` (row) or column `c` of a rectangle.
+    pub fn lineOf(table: &Rc<RefCell<FormulaValue>>, index: i64, row: bool) -> Vec<Rc<RefCell<FormulaValue>>> {
+        let mut out: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        if !table.borrow().isArray() {
+            out.push(table.clone());
+            return out;
+        }
+        let n: i64 = if row { table.borrow().cols } else { table.borrow().rows };
+        let mut i: i64 = 0;
+        while i < n {
+            if row {
+                out.push(table.borrow().at(index, i));
+            } else {
+                out.push(table.borrow().at(i, index));
             }
             i += 1;
         }
-        if (args.len() as i64) >= 4 {
-            return args[3].clone();
+        out
+    }
+    /// The 4th argument of VLOOKUP/HLOOKUP: TRUE (the default) is the sorted,
+    /// approximate match; FALSE or 0 exact.
+    pub fn approxArg(args: &Vec<Rc<RefCell<FormulaValue>>>, at: usize) -> bool {
+        if args.len() <= at {
+            return true;
+        }
+        let a: Rc<RefCell<FormulaValue>> = args[at].clone();
+        if a.borrow().isBlank() {
+            return false;
+        }
+        a.borrow().isTrue()
+    }
+    pub fn fnVlookup(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
+        FormulaFunctions::tableLookup(args, false)
+    }
+    pub fn fnHlookup(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
+        FormulaFunctions::tableLookup(args, true)
+    }
+    pub fn tableLookup(args: &Vec<Rc<RefCell<FormulaValue>>>, across: bool) -> Rc<RefCell<FormulaValue>> {
+        let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 3);
+        if ar.borrow().isError() {
+            return ar;
+        }
+        let needle: Rc<RefCell<FormulaValue>> = args[0].clone();
+        if needle.borrow().isError() {
+            return needle;
+        }
+        let table: Rc<RefCell<FormulaValue>> = args[1].clone();
+        if args[2].borrow().isError() {
+            return args[2].clone();
+        }
+        let idx: i64 = (args[2].borrow().asNumber()).floor() as i64;
+        if !table.borrow().isArray() {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        if idx < 1 {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        let limit: i64 = if across { table.borrow().rows } else { table.borrow().cols };
+        if idx > limit {
+            return FormulaValue::fromError("#REF!".to_string());
+        }
+        let keys: Vec<Rc<RefCell<FormulaValue>>> = FormulaFunctions::lineOf(&table, 0, across);
+        let mode: i64 = if FormulaFunctions::approxArg(args, 3) { 1 } else { 0 };
+        let at: i64 = FormulaFunctions::lookupIn(&keys, &needle, mode, false);
+        if at < 0 {
+            return FormulaValue::fromError("#N/A".to_string());
+        }
+        if across {
+            return table.borrow().at(idx - 1, at);
+        }
+        table.borrow().at(at, idx - 1)
+    }
+    /// XLOOKUP(lookup, lookup_array, return_array, [if_not_found],
+    /// [match_mode 0 exact | -1 or next smaller | 1 or next larger | 2 wildcard],
+    /// [search_mode 1 first-to-last | -1 last-to-first]).
+    pub fn fnXlookup(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
+        let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 3);
+        if ar.borrow().isError() {
+            return ar;
+        }
+        let needle: Rc<RefCell<FormulaValue>> = args[0].clone();
+        if needle.borrow().isError() {
+            return needle;
+        }
+        let look_arg: Rc<RefCell<FormulaValue>> = args[1].clone();
+        let horizontal: bool = look_arg.borrow().isArray() && look_arg.borrow().rows == 1 && look_arg.borrow().cols > 1;
+        let mut look_head: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        look_head.push(look_arg.clone());
+        let look: Vec<Rc<RefCell<FormulaValue>>> = FormulaFunctions::flatArgs(&look_head);
+        let mut mm: i64 = 0;
+        if args.len() >= 5 && !args[4].borrow().isBlank() {
+            mm = (args[4].borrow().asNumber()).floor() as i64;
+        }
+        let mut sm: i64 = 1;
+        if args.len() >= 6 && !args[5].borrow().isBlank() {
+            sm = (args[5].borrow().asNumber()).floor() as i64;
+        }
+        let mode: i64 = if mm == -1 { 4 } else if mm == 1 { 5 } else if mm == 2 { 2 } else { 3 };
+        let i: i64 = FormulaFunctions::lookupIn(&look, &needle, mode, sm < 0);
+        if i < 0 {
+            if args.len() >= 4 && !args[3].borrow().isBlank() {
+                return args[3].clone();
+            }
+            return FormulaValue::fromError("#N/A".to_string());
+        }
+        let ret_arg: Rc<RefCell<FormulaValue>> = args[2].clone();
+        if ret_arg.borrow().isArray() {
+            if horizontal && ret_arg.borrow().cols == (look.len() as i64) {
+                if ret_arg.borrow().rows > 1 {
+                    let mut col_items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                    let mut r: i64 = 0;
+                    while r < ret_arg.borrow().rows {
+                        col_items.push(ret_arg.borrow().at(r, i));
+                        r += 1;
+                    }
+                    return FormulaValue::fromArray(ret_arg.borrow().rows.clone(), 1, &col_items);
+                }
+                return ret_arg.borrow().at(0, i);
+            }
+            if ret_arg.borrow().rows == (look.len() as i64) {
+                if ret_arg.borrow().cols > 1 {
+                    let mut row_items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                    let mut c: i64 = 0;
+                    while c < ret_arg.borrow().cols {
+                        row_items.push(ret_arg.borrow().at(i, c));
+                        c += 1;
+                    }
+                    return FormulaValue::fromArray(1, ret_arg.borrow().cols.clone(), &row_items);
+                }
+                return ret_arg.borrow().at(i, 0);
+            }
+        }
+        let mut ret_head: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        ret_head.push(ret_arg.clone());
+        let ret_flat: Vec<Rc<RefCell<FormulaValue>>> = FormulaFunctions::flatArgs(&ret_head);
+        if i < (ret_flat.len() as i64) {
+            return ret_flat[i as usize].clone();
         }
         FormulaValue::fromError("#N/A".to_string())
     }
@@ -2716,7 +3063,7 @@ impl FormulaFunctions {
         let rows: i64 = src.borrow().rows;
         let cols: i64 = src.borrow().cols;
         let mut sort_idx: i64 = 1;
-        if (args.len() as i64) >= 2 {
+        if (args.len() as i64) >= 2 && !args[1].borrow().isBlank() {
             sort_idx = (args[1].borrow().asNumber()).floor() as i64;
         }
         let mut ascending: bool = true;
@@ -2789,49 +3136,71 @@ impl FormulaFunctions {
     }
     /// INDEX(range, row, [col]). A one-row or one-column range takes a single
     /// index, which is how it is almost always written.
+    /// INDEX(array, row, [col]): one value, or with row 0 the whole column
+    /// and with col 0 the whole row. A one-row or one-column array takes a
+    /// single position.
     pub fn fnIndex(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 2);
-        let ae: bool = ar.borrow().isError();
-        if ae {
+        if ar.borrow().isError() {
             return ar;
         }
         let table: Rc<RefCell<FormulaValue>> = args[0].clone();
+        if table.borrow().isError() {
+            return table;
+        }
         if !table.borrow().isArray() {
+            let a0: i64 = (args[1].borrow().asNumber()).floor() as i64;
+            if a0 <= 1 {
+                return table;
+            }
+            return FormulaValue::fromError("#REF!".to_string());
+        }
+        let rows: i64 = table.borrow().rows;
+        let cols: i64 = table.borrow().cols;
+        let mut a: i64 = (args[1].borrow().asNumber()).floor() as i64;
+        let mut b: i64 = 0;
+        let has_col: bool = args.len() >= 3 && !args[2].borrow().isBlank();
+        if has_col {
+            b = (args[2].borrow().asNumber()).floor() as i64;
+        } else {
+            // One position into a single row reads across it.
+            if rows == 1 {
+                b = a;
+                a = 1;
+            } else if cols == 1 {
+                b = 1;
+            } else if a > 0 {
+                b = 0;
+            }
+        }
+        if a < 0 || b < 0 {
             return FormulaValue::fromError("#VALUE!".to_string());
         }
-        let a: i64 = (args[1].borrow().asNumber()).floor() as i64;
-        if (args.len() as i64) >= 3 {
-            let b: i64 = (args[2].borrow().asNumber()).floor() as i64;
-            if a < 1 {
-                return FormulaValue::fromError("#VALUE!".to_string());
-            }
-            if b < 1 {
-                return FormulaValue::fromError("#VALUE!".to_string());
-            }
-            if a > table.borrow().rows {
-                return FormulaValue::fromError("#REF!".to_string());
-            }
-            if b > table.borrow().cols {
-                return FormulaValue::fromError("#REF!".to_string());
-            }
-            return table.borrow().at(a - 1, b - 1);
+        if a > rows || b > cols {
+            return FormulaValue::fromError("#REF!".to_string());
         }
-        if a < 1 {
-            return FormulaValue::fromError("#VALUE!".to_string());
+        if a == 0 && b == 0 {
+            return table;
         }
-        if table.borrow().rows == 1 {
-            if a > table.borrow().cols {
-                return FormulaValue::fromError("#REF!".to_string());
+        if a == 0 {
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut r: i64 = 0;
+            while r < rows {
+                items.push(table.borrow().at(r, b - 1));
+                r += 1;
             }
-            return table.borrow().at(0, a - 1);
+            return FormulaValue::fromArray(rows, 1, &items);
         }
-        if table.borrow().cols == 1 {
-            if a > table.borrow().rows {
-                return FormulaValue::fromError("#REF!".to_string());
+        if b == 0 {
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut c: i64 = 0;
+            while c < cols {
+                items.push(table.borrow().at(a - 1, c));
+                c += 1;
             }
-            return table.borrow().at(a - 1, 0);
+            return FormulaValue::fromArray(1, cols, &items);
         }
-        FormulaValue::fromError("#REF!".to_string())
+        table.borrow().at(a - 1, b - 1)
     }
     /// MATCH(needle, range, [type]). Only exact match (type 0) is implemented;
     /// the sorted-range types are a different search and are refused rather than
@@ -2846,21 +3215,21 @@ impl FormulaFunctions {
         let mut head: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
         head.push(args[1].clone());
         let flat: Vec<Rc<RefCell<FormulaValue>>> = FormulaFunctions::flatArgs(&head);
-        let mut mode: i64 = 0;
-        if (args.len() as i64) >= 3 {
-            mode = (args[2].borrow().asNumber()).floor() as i64;
+        if needle.borrow().isError() {
+            return needle;
         }
-        if mode != 0 {
+        // match_type 1 (the default): sorted ascending, the largest value <=
+        // the needle; 0 exact (wildcards on text); -1 sorted descending.
+        let mut mode: i64 = 1;
+        if (args.len() as i64) >= 3 && !args[2].borrow().isBlank() {
+            let m: f64 = args[2].borrow().asNumber();
+            mode = if m > 0.0 { 1 } else if m < 0.0 { -1 } else { 0 };
+        }
+        let i: i64 = FormulaFunctions::lookupIn(&flat, &needle, mode, false);
+        if i < 0 {
             return FormulaValue::fromError("#N/A".to_string());
         }
-        let mut i: i64 = 0;
-        while i < (flat.len() as i64) {
-            if FormulaFunctions::valuesEqualLoose(&flat[i as usize].clone(), &needle) {
-                return FormulaValue::fromNumber((i + 1) as f64);
-            }
-            i += 1;
-        }
-        FormulaValue::fromError("#N/A".to_string())
+        FormulaValue::fromNumber((i + 1) as f64)
     }
     pub fn fnSumproduct(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 1);
@@ -3007,6 +3376,19 @@ impl FormulaFunctions {
             if from < 0 {
                 from = 0;
             }
+        }
+        // SEARCH takes wildcards: the first place the pattern matches from.
+        if !case_sensitive && FormulaFunctions::hasWildcard(&needle) {
+            let hn: i64 = DgNative::str_len(&hay);
+            let pat: String = format!("{}*", needle);
+            let mut s: i64 = from;
+            while s < hn {
+                if FormulaFunctions::wildcardMatch(&DgNative::substr(&hay, s, hn), &pat) {
+                    return FormulaValue::fromNumber((s + 1) as f64);
+                }
+                s += 1;
+            }
+            return FormulaValue::fromError("#VALUE!".to_string());
         }
         let at: i64 = FormulaFunctions::findFrom(&hay, &needle, from);
         if at < 0 {
@@ -3155,6 +3537,11 @@ impl FormulaFunctions {
         let ok: bool = v.borrow().isNumeric();
         if ok {
             return FormulaValue::fromNumber(v.borrow().numberValue());
+        }
+        if v.borrow().kind == 2 {
+            if let Some(n) = FormulaValue::parseNumberText(&v.borrow().text.clone()) {
+                return FormulaValue::fromNumber(n);
+            }
         }
         FormulaValue::fromError("#VALUE!".to_string())
     }

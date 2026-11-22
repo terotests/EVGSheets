@@ -201,7 +201,9 @@ export async function mountSheets(container, options = {}) {
 
   // --- the workbook ---------------------------------------------------------
   let note = "";
+  let fileHandle = null;
   async function openBytes(raw, name) {
+    fileHandle = null;
     const ok = app.openWorkbook(asRangerBuffer(raw), name || "workbook.xlsx");
     note = ok ? "" : app.grid.note;
     clearImages();
@@ -373,12 +375,72 @@ export async function mountSheets(container, options = {}) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // Save in place: a file opened through the browser's file picker (File
+  // System Access) keeps its handle, and Save writes back over it. Without
+  // that API, or for a format this editor reads but does not write, Save
+  // asks where to put the file, and as a last resort downloads it.
+  const canPick = () => typeof window.showOpenFilePicker === "function" && typeof window.showSaveFilePicker === "function";
+  const pickTypes = [{
+    description: "Spreadsheets",
+    accept: { "application/octet-stream": OPEN_ACCEPT.split(",").filter((x) => x.startsWith(".")) },
+  }];
+  async function writeHandle(h, raw) {
+    const w = await h.createWritable();
+    await w.write(raw);
+    await w.close();
+  }
+  async function openWithPicker() {
+    try {
+      const [h] = await window.showOpenFilePicker({ types: pickTypes, multiple: false });
+      const f = await h.getFile();
+      await openBytes(await f.arrayBuffer(), f.name);
+      fileHandle = h;
+      app.sync();
+      await after();
+    } catch (e) {
+      if (!e || e.name !== "AbortError") fileInput.click();
+    }
+  }
+  async function saveInPlace() {
+    const raw = app.grid.saveWorkbookBytes();
+    const name = app.grid.suggestSaveName() || "workbook.xlsx";
+    if (options.onSave) {
+      options.onSave(raw, name, controller, { inPlace: true });
+      app.grid.markSavedAs(name);
+      return;
+    }
+    try {
+      if (fileHandle && fileHandle.name === name && app.grid.app.book.sourcePath) {
+        await writeHandle(fileHandle, raw);
+        app.grid.markSavedAs(name);
+      } else if (canPick()) {
+        const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: "Workbook", accept: { [mimeFor(name)]: ["." + (/\.([^.]+)$/.exec(name) || [, "xlsx"])[1]] } }] });
+        await writeHandle(h, raw);
+        fileHandle = h;
+        app.grid.markSavedAs(h.name || name);
+      } else {
+        saveBlob(new Blob([raw], { type: mimeFor(name) }), name);
+        app.grid.markSavedAs(name);
+      }
+    } catch (e) {
+      if (e && e.name === "AbortError") app.grid.app.view.status = "not saved";
+      else app.grid.app.view.status = "save failed: " + (e && e.message ? e.message : e);
+    }
+    app.sync();
+    await draw();
+  }
+
   function serveFileRequest() {
     const want = app.takeFileRequest();
     if (!want) return;
     if (want === "open") {
       if (options.onOpenRequest) options.onOpenRequest(controller);
+      else if (canPick()) openWithPicker();
       else fileInput.click();
+      return;
+    }
+    if (want === "save") {
+      saveInPlace();
       return;
     }
     if (want === "saveAs") {
@@ -570,8 +632,31 @@ export async function mountSheets(container, options = {}) {
 
   // Keys are taken on the wrapper: with the mirror up, focus is on one of its
   // DOM nodes and the canvas never sees the event.
+  // Alt pressed and let go on its own shows the ribbon's key tips; Alt with a
+  // letter goes straight to that tip, as in Excel.
+  let altAlone = false;
+  wrap.addEventListener("keyup", async (ev) => {
+    if (ev.key !== "Alt" || !altAlone) return;
+    altAlone = false;
+    ev.preventDefault();
+    app.key("Alt", false, false);
+    await after();
+  });
   wrap.addEventListener("keydown", async (ev) => {
     if (options.onKey && options.onKey(ev, controller) === false) return;
+    if (ev.key === "Alt") {
+      altAlone = !ev.repeat || altAlone;
+      ev.preventDefault();
+      return;
+    }
+    altAlone = false;
+    if (ev.altKey && !ev.ctrlKey && !ev.metaKey && /^(Key[A-Z]|Digit[0-9])$/.test(ev.code)) {
+      ev.preventDefault();
+      if (!app.keyTipsOn()) app.key("Alt", false, false);
+      app.text(ev.code.slice(-1).toLowerCase(), false, false);
+      await after();
+      return;
+    }
     if (KEY_NAMES.has(ev.key)) {
       // Tab inside the sheet moves to the next cell; it leaves the editor only
       // from the chrome, where F6 is the way between regions.

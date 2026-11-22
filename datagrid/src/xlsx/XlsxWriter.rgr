@@ -36,6 +36,7 @@
 ; ==============================================================================
 
 Import "../lib.rs"
+Import "XlsxChartXml.rgr"
 Import "../../zip/ZipWriter.rgr"
 Import "../../../ooxml/OpcPackage.rgr"
 Import "../../../pdf_writer/src/core/Utf8.rgr"
@@ -67,6 +68,10 @@ class XlsxWriter {
     ; before its parts are written, rather than threaded through four
     ; signatures that have no other use for it.
     def tableBase:int 0
+    ; Charts are numbered across the workbook the same way; the sheet being
+    ; written gets drawing `drawingNum` and its charts start at `chartBase`.
+    def chartBase:int 1
+    def drawingNum:int 0
     ; Font / fill / border tables, as the XML fragments they will be written
     ; as. Deduplicating on the fragment is the same thing as deduplicating on
     ; the properties, and it needs no comparison function.
@@ -178,6 +183,17 @@ class XlsxWriter {
     ; where a string is code units. Where it is bytes, strfromcode encodes
     ; each byte as a character and the file comes out with every accent
     ; doubled — so the untouched stretches move with `substring`.
+    ; The seven error values a cell can hold.
+    sfn isErrorValue:boolean (s:string) {
+        if ((strlen s) < 4) {
+            return false
+        }
+        if ((charAt s 0) != 35) {
+            return false
+        }
+        return ((s == "#NULL!") || (s == "#DIV/0!") || (s == "#VALUE!") || (s == "#REF!") || (s == "#NAME?") || (s == "#NUM!") || (s == "#N/A") || (s == "#SPILL!") || (s == "#CALC!"))
+    }
+
     sfn esc:string (s:string) {
         def n:int (strlen s)
         def out:string ""
@@ -607,6 +623,69 @@ class XlsxWriter {
         return out
     }
 
+    ; Whether this save writes the sheet's charts. Over a source that already
+    ; had a drawing on the sheet, the source's drawing is what is kept.
+    fn writesCharts:boolean (m:SpreadsheetModel) {
+        if ((array_length m.outCharts) == 0) {
+            return false
+        }
+        if overMode {
+            def i:int 0
+            while (i < (array_length m.opaque)) {
+                def o:SheetOpaque (itemAt m.opaque i)
+                if (o.name == "drawing") {
+                    return false
+                }
+                i = (i + 1)
+            }
+        }
+        return true
+    }
+
+    fn drawingRelId:int (m:SpreadsheetModel) {
+        return (((sheetRelBase + (XlsxWriter.hyperlinkRelCount(m))) + (m.tableCount())) + 1)
+    }
+
+    ; The drawing and chart parts of one sheet, through `add`.
+    fn chartParts:[string] (m:SpreadsheetModel) {
+        def out:[string]
+        if ((this.writesCharts(m)) == false) {
+            return out
+        }
+        push out ("xl/drawings/evgdrawing" + (to_string drawingNum) + ".xml")
+        push out (XlsxChartXml.drawingXml(m.outCharts))
+        push out ("xl/drawings/_rels/evgdrawing" + (to_string drawingNum) + ".xml.rels")
+        push out (XlsxChartXml.drawingRelsXml(chartBase (array_length m.outCharts)))
+        def i:int 0
+        while (i < (array_length m.outCharts)) {
+            push out ("xl/charts/evgchart" + (to_string (chartBase + i)) + ".xml")
+            push out (XlsxChartXml.chartXml(m (itemAt m.outCharts i)))
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; Content-type overrides for every chart part the workbook writes.
+    fn chartTypes:string (book:WorkbookModel) {
+        def out:string ""
+        def cb:int 1
+        def si:int 0
+        while (si < (book.sheetCount())) {
+            def sh:SpreadsheetModel (book.sheetAt(si))
+            if (this.writesCharts(sh)) {
+                str_append out ("<Override PartName=\"/xl/drawings/evgdrawing" + (to_string (si + 1)) + ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>")
+                def k:int 0
+                while (k < (array_length sh.outCharts)) {
+                    str_append out ("<Override PartName=\"/xl/charts/evgchart" + (to_string (cb + k)) + ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>")
+                    k = (k + 1)
+                }
+                cb = (cb + (array_length sh.outCharts))
+            }
+            si = (si + 1)
+        }
+        return out
+    }
+
     fn sheetXml:string (m:SpreadsheetModel) {
         def lastR:int (m.usedRow())
         def lastC:int (m.usedCol())
@@ -724,22 +803,47 @@ class XlsxWriter {
                         str_append tag (" s=\"" + (to_string (sid + 1)) + "\"")
                     }
                     def numeric:boolean (XlsxNumberFormat.wholeNumber(raw))
+                    ; TRUE/FALSE are booleans and #DIV/0! and its kind errors,
+                    ; each with its own cell type, or a reader takes them for text.
+                    def logical:boolean ((raw == "TRUE") || (raw == "FALSE"))
+                    def isErr:boolean (XlsxWriter.isErrorValue(raw))
+                    def boolV:string "0"
+                    if (raw == "TRUE") {
+                        boolV = "1"
+                    }
                     if ((strlen formula) > 0) {
                         ; A formula cell carries the expression and the cached
                         ; value, which is what lets a reader show something
                         ; before it has an engine.
-                        if (numeric == false) {
-                            str_append tag " t=\"str\""
+                        def cached:string (XlsxWriter.esc(raw))
+                        if logical {
+                            str_append tag " t=\"b\""
+                            cached = boolV
+                        } {
+                            if isErr {
+                                str_append tag " t=\"e\""
+                            } {
+                                if (numeric == false) {
+                                    str_append tag " t=\"str\""
+                                }
+                            }
                         }
-                        str_append tag ("><f>" + (XlsxWriter.esc(formula)) + "</f>")
+                        str_append tag ("><f>" + (XlsxWriter.esc((FormulaParser.addFilePrefixes(formula)))) + "</f>")
                         if ((strlen raw) > 0) {
-                            str_append tag ("<v>" + (XlsxWriter.esc(raw)) + "</v>")
+                            str_append tag ("<v>" + cached + "</v>")
                         }
                         str_append tag "</c>"
                     } {
                         if ((strlen raw) == 0) {
                             str_append tag "/>"
                         } {
+                            if (logical || isErr) {
+                                if logical {
+                                    str_append tag (" t=\"b\"><v>" + boolV + "</v></c>")
+                                } {
+                                    str_append tag (" t=\"e\"><v>" + (XlsxWriter.esc(raw)) + "</v></c>")
+                                }
+                            } {
                             if numeric {
                                 str_append tag ("><v>" + raw + "</v></c>")
                             } {
@@ -752,6 +856,7 @@ class XlsxWriter {
                                 } {
                                     str_append tag (" t=\"inlineStr\"><is><t xml:space=\"preserve\">" + (XlsxWriter.esc(raw)) + "</t></is></c>")
                                 }
+                            }
                             }
                         }
                     }
@@ -837,7 +942,18 @@ class XlsxWriter {
         if m.printModelled {
             str_append out (XlsxWriter.printXml(m))
         }
-        str_append out (this.opaqueXml(m 3))
+        def slot3:string (this.opaqueXml(m 3))
+        if (this.writesCharts(m)) {
+            ; <drawing> comes before <legacyDrawing> (the comments' shapes).
+            def dr:string ("<drawing r:id=\"rId" + (to_string (this.drawingRelId(m))) + "\"/>")
+            def legacy:int (indexOf slot3 "<legacyDrawing")
+            if (legacy >= 0) {
+                slot3 = ((substring slot3 0 legacy) + dr + (substring slot3 legacy (strlen slot3)))
+            } {
+                slot3 = (slot3 + dr)
+            }
+        }
+        str_append out slot3
         ; Tables, last: a `<tableParts>` element points at the table PARTS by
         ; relationship, and the relationships are numbered after the sheet's
         ; hyperlinks, which is why the count of those is asked for here.
@@ -918,6 +1034,9 @@ class XlsxWriter {
             def num:int ((tableBase + ti) + 1)
             str_append body ("<Relationship Id=\"rId" + (to_string rid) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/table\" Target=\"../tables/table" + (to_string num) + ".xml\"/>")
             ti = (ti + 1)
+        }
+        if (this.writesCharts(m)) {
+            str_append body ("<Relationship Id=\"rId" + (to_string (this.drawingRelId(m))) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/evgdrawing" + (to_string drawingNum) + ".xml\"/>")
         }
         if ((strlen body) == 0) {
             return ""
@@ -1048,6 +1167,7 @@ class XlsxWriter {
         if sawJs {
             str_append out "<Default Extension=\"js\" ContentType=\"text/plain\"/>"
         }
+        str_append out (this.chartTypes(book))
         str_append out "</Types>"
         return out
     }
@@ -1221,6 +1341,7 @@ class XlsxWriter {
         }
         overMode = true
         overPkg = pkg
+        chartBase = 1
         def fresh:[string:boolean]
         writtenParts = fresh
 
@@ -1242,7 +1363,17 @@ class XlsxWriter {
                 srcRels = (pkg.readXml(relsPath))
             }
             sheetRelBase = (XlsxWriter.highestRelId(srcRels))
+            drawingNum = (i + 1)
             this.addOver(z path (this.sheetXml(sh)))
+            def cparts:[string] (this.chartParts(sh))
+            def cpi:int 0
+            while ((cpi + 1) < (array_length cparts)) {
+                this.addOver(z (itemAt cparts cpi) (itemAt cparts (cpi + 1)))
+                cpi = (cpi + 2)
+            }
+            if (this.writesCharts(sh)) {
+                chartBase = (chartBase + (array_length sh.outCharts))
+            }
             def merged:string (this.mergedSheetRels(sh srcRels))
             if ((strlen merged) > 0) {
                 this.addOver(z relsPath merged)
@@ -1581,6 +1712,7 @@ class XlsxWriter {
                 str_append add "<Default Extension=\"js\" ContentType=\"text/plain\"/>"
             }
         }
+        str_append add (this.chartTypes(book))
         return ((head + add) + "</Types>")
     }
 
@@ -1609,6 +1741,7 @@ class XlsxWriter {
     ; Pack the workbook into an open ZipWriter (parts only; caller finalizes).
     fn packInto:boolean (book:WorkbookModel z:ZipWriter) {
         lastError = ""
+        chartBase = 1
         if ((book.sheetCount()) == 0) {
             lastError = "workbook has no sheets"
             return false
@@ -1630,7 +1763,17 @@ class XlsxWriter {
             ; anything that writes one, because the sheet, its relationships
             ; and the part itself all have to name the same file.
             tableBase = tableSeen
+            drawingNum = (i + 1)
             XlsxWriter.addPart(z ("xl/worksheets/sheet" + (to_string (i + 1)) + ".xml") (this.sheetXml(sh)))
+            def cparts:[string] (this.chartParts(sh))
+            def cpi:int 0
+            while ((cpi + 1) < (array_length cparts)) {
+                XlsxWriter.addPart(z (itemAt cparts cpi) (itemAt cparts (cpi + 1)))
+                cpi = (cpi + 2)
+            }
+            if (this.writesCharts(sh)) {
+                chartBase = (chartBase + (array_length sh.outCharts))
+            }
             def rels:string (this.sheetRelsXml(sh))
             if ((strlen rels) > 0) {
                 XlsxWriter.addPart(z ("xl/worksheets/_rels/sheet" + (to_string (i + 1)) + ".xml.rels") rels)

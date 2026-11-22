@@ -89,6 +89,11 @@ impl DateSerial {
     }
     /// The inverse: [year, month, day].
     pub fn toYMD(serial: f64) -> Vec<i64> {
+        // Day 60 is 29 February 1900, a day that never was: Excel kept
+        // Lotus 1-2-3's leap year, and its serials count it.
+        if serial.floor() == 60.0 {
+            return vec![1900, 2, 29];
+        }
         let mut s: i64 = serial.floor() as i64;
         if s < 1 {
             s = 1;

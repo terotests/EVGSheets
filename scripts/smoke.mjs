@@ -228,6 +228,34 @@ try {
   ok("the reader is told Bold is pressed", pressed === String(!wasBold), String(pressed));
   await click(page, "sx-rb-text-bold");
 
+  // Key tips: Alt shows a letter on each ribbon tab, H the Home tab's, 1 is Bold.
+  await page.evaluate(() => window.sheet.run("nav.goto", "D8"));
+  await page.keyboard.press("Alt");
+  await page.waitForTimeout(80);
+  const tips1 = await page.evaluate(() => window.sheet.app.keyTipState());
+  ok("Alt shows key tips on the ribbon tabs", /^1\|\|/.test(tips1) && tips1.includes("H=sx-ribtabs-tab-home") && tips1.includes("N=sx-ribtabs-tab-insert"), tips1.slice(0, 120));
+  await shot(page, "02b_keytips");
+  await page.keyboard.press("h");
+  await page.waitForTimeout(80);
+  const tips2 = await page.evaluate(() => window.sheet.app.keyTipState());
+  ok("…H shows the Home tab's commands", /^2\|/.test(tips2) && /(^|,|\|)1=sx-rb-[a-z]+-bold/.test(tips2) && tips2.split(",").length > 15, tips2.slice(0, 160));
+  const boldBefore = (await state(page)).bold;
+  await page.keyboard.press("1");
+  await page.waitForTimeout(80);
+  s = await state(page);
+  ok("…and 1 is Bold", s.bold === !boldBefore && (await page.evaluate(() => window.sheet.app.keyTipState())).startsWith("0|"), String(s.bold));
+  await page.keyboard.press("Alt");
+  await page.keyboard.press("n");
+  await page.waitForTimeout(80);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(40);
+  const back = await page.evaluate(() => window.sheet.app.keyTipState());
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(40);
+  const off = await page.evaluate(() => window.sheet.app.keyTipState());
+  ok("…Escape steps back to the tabs, then closes the tips", back.startsWith("1|") && off.startsWith("0|"), back.slice(0, 20) + " / " + off.slice(0, 20));
+  await page.evaluate(() => { window.sheet.run("format.bold"); window.sheet.app.ribbonTab = "home"; window.sheet.app.buildChrome(); window.sheet.app.sync(); window.sheet.redraw(); });
+
   // The ribbon is Excel's: no menu bar over it, its groups named under them.
   const clar = JSON.parse(await page.evaluate(() => window.sheet.app.ribbonClarity()));
   ok("the full editor has no menu bar over the ribbon", (await page.evaluate(() => window.sheet.app.rectOf("sx-mb-format-trigger"))) === "");
@@ -471,6 +499,93 @@ try {
   ok("Remove takes the link off", await page.evaluate(() => !window.sheet.app.link.win.open && window.sheet.app.grid.app.model.hyperlinkAt(11, 7) === ""));
   await page.evaluate(() => window.sheet.run("edit.undo", ""));
 
+  // Commands that need answers ask for them: a ribbon click with no argument
+  // opens one EVGUI form (FormDialog), which writes the core's argument.
+  const ribbon = (cmd) => page.evaluate((c) => { const app = window.sheet.app; const k = Object.keys(app.actions).find((x) => app.actions[x].command === c && app.actions[x].arg === ""); const r = app.runAction(k); app.sync(); return r; }, cmd);
+  const formOpen = () => page.evaluate(() => window.sheet.app.form.win.open);
+  // A value set from the test, then the form drawn again before its OK is clicked.
+  const formSet = async (fn) => { await page.evaluate(fn); await page.evaluate(() => { window.sheet.app.form.buildAll(); window.sheet.app.sync(); window.sheet.redraw(); }); await page.waitForTimeout(150); };
+  const cellAt = (r, c) => page.evaluate(([r, c]) => window.sheet.app.grid.app.model.getCell(r, c), [r, c]);
+  await page.evaluate(() => { const s = window.sheet; s.run("nav.goto", "R41"); });
+  for (const [ref, v] of [["R41", "5"], ["R40", "=R41*3"]]) {
+    await page.evaluate((r) => window.sheet.run("nav.goto", r), ref);
+    await page.keyboard.type(v);
+    await page.keyboard.press("Enter");
+  }
+  await page.evaluate(() => window.sheet.run("nav.goto", "R40"));
+  await ribbon("data.goalSeek");
+  await page.waitForTimeout(120);
+  ok("Goal Seek on the ribbon opens a form on the active cell", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.win.title === "Goal Seek" && f.in0.value === "R40" && window.sheet.app.ui.focusId === "sx-form-in0"; }));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("…an incomplete form stays open and says why", await page.evaluate(() => window.sheet.app.form.win.open && window.sheet.app.form.statusEl.textContent !== ""));
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("90");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("R41");
+  await shot(page, "08b_goal_seek");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  ok("…and OK seeks the goal and closes", !(await formOpen()) && Math.abs(Number(await cellAt(40, 17)) - 30) < 0.001, await cellAt(40, 17));
+
+  // Sort: levels chosen in the form, run as Custom Sort.
+  const rows = [["Name", "Score"], ["b", "2"], ["a", "3"], ["c", "1"]];
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = 0; j < 2; j++) {
+      await page.evaluate((r) => window.sheet.run("nav.goto", r), String.fromCharCode(84 + j) + (44 + i));
+      await page.keyboard.type(rows[i][j]);
+      await page.keyboard.press("Enter");
+    }
+  }
+  await page.evaluate(() => window.sheet.run("nav.goto", "U45"));
+  await ribbon("data.sort");
+  await page.waitForTimeout(120);
+  ok("Sort… opens a form with the region's columns", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.s0.value === "U" && f.s0.items.length === 2 && f.s2.items.length === 3; }));
+  await formSet(() => { window.sheet.app.form.s1.value = "desc"; });
+  await click(page, "sx-form-ok");
+  ok("…and sorts by the chosen column and order", [await cellAt(44, 20), await cellAt(46, 20)].join(",") === "3,1", [await cellAt(44, 19), await cellAt(44, 20)].join(","));
+
+  // Define Name, then Use in Formula offers it.
+  await page.evaluate(() => window.sheet.run("nav.goto", "T45:U47"));
+  await ribbon("formulas.defineName");
+  await page.waitForTimeout(100);
+  ok("Define Name opens with the selection as Refers to", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.in1.value.indexOf("$T$45") >= 0; }));
+  await page.keyboard.type("Scores");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  ok("…and OK defines it", await page.evaluate(() => !window.sheet.app.form.win.open && window.sheet.app.grid.app.book.hasName("Scores")));
+  await page.evaluate(() => window.sheet.run("nav.goto", "W45"));
+  await ribbon("formulas.useInFormula");
+  await page.waitForTimeout(80);
+  ok("Use in Formula offers the defined names", await page.evaluate(() => { const f = window.sheet.app.form; return f.win.open && f.s0.items.some((it) => it.value === "Scores"); }));
+  await formSet(() => { window.sheet.app.form.s0.value = "Scores"; });
+  await click(page, "sx-form-ok");
+  { const st = await page.evaluate(() => window.sheet.state()); ok("…and OK starts a formula with it", st.editing && st.editText === "=Scores", JSON.stringify([st.editing, st.editText, st.cell, st.status, await formOpen()])); }
+  await page.keyboard.press("Escape");
+
+  // Symbol: the picked character goes into the cell being edited.
+  await ribbon("insert.symbol");
+  await page.waitForTimeout(80);
+  ok("Symbol opens a picker", await formOpen());
+  await formSet(() => { window.sheet.app.form.s0.value = "€"; });
+  await click(page, "sx-form-ok");
+  { const st = await page.evaluate(() => window.sheet.state()); ok("…and OK types the symbol", st.editText === "€" || st.formula === "€", JSON.stringify([st.editing, st.editText, st.cell, st.status, await formOpen()])); }
+  await page.keyboard.press("Escape");
+
+  // Functions typed into the sheet: one from the second library, an array
+  // constant that spills, and a reference function.
+  for (const [ref, f] of [["Y50", "=TEXTBEFORE(\"north,south\",\",\")"], ["Y51", "=SUM({1,2;3,4})"], ["Y52", "=SEQUENCE(2,2)"], ["Y55", "=ROW()+COLUMN(C1)"]]) {
+    await page.evaluate((r) => window.sheet.run("nav.goto", r), ref);
+    await page.keyboard.type(f);
+    await page.keyboard.press("Enter");
+  }
+  await page.waitForTimeout(80);
+  const fv = [await cellAt(49, 24), await cellAt(50, 24), await cellAt(52, 25), await cellAt(54, 24)];
+  ok("typed functions: TEXTBEFORE, an array constant, SEQUENCE spilling, ROW", fv.join("|") === "north|10|4|58", fv.join("|"));
+
+  // Chart commands with no chart selected say so instead of opening.
+  ok("Select Data without a chart says to select one", !(await ribbon("chart.selectData")) && !(await formOpen()) && (await page.evaluate(() => window.sheet.state().status)).includes("chart"));
+
   // Fill colour: swatches in an EVGUI dialog, previewed on the sheet.
   await page.evaluate(() => window.sheet.run("nav.goto", "J14"));
   await page.evaluate(() => window.sheet.run("format.fill", ""));
@@ -586,7 +701,7 @@ try {
   await page.waitForTimeout(120);
   ok("Insert chart makes the chart and opens its editor", await page.evaluate((n) => window.sheet.app.chart.win.open && !window.sheet.app.chart.win.isModal && !window.sheet.app.grid.app.chartDialog.visible && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
   const kinds = await page.evaluate(() => window.sheet.app.chart.kind.items.map((it) => it.value));
-  ok("…offering only the types the data suits", kinds.length > 0 && kinds.length < 20, kinds.join(","));
+  ok("…offering only the types the data suits", kinds.length > 0 && kinds.length < 32, kinds.join(","));
   const pickKind = kinds[kinds.length - 1];
   await click(page, "sx-chart-kind-trigger");
   ok("the type is a drop-down", await page.evaluate(() => window.sheet.app.chart.kind.open));
@@ -595,6 +710,24 @@ try {
   ok("a type chosen redraws the chart on the sheet", await page.evaluate((k) => { const a = window.sheet.app.grid.app; const l = a.view.chartLayer; const p = l.panelAt(l.count() - 1); return !window.sheet.app.chart.kind.open && String(p.chart.kind) === k; }, pickKind));
   await shot(page, "14_chart");
   await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  // The Format pane: a row cycles the legend, another opens Format Axis.
+  const lastChart = () => page.evaluate(() => { const l = window.sheet.app.grid.app.view.chartLayer; const c = l.panelAt(l.count() - 1).chart; return { legend: c.legendPos, min: c.valueMin, fmt: c.numFormat }; });
+  await page.evaluate(() => { const a = window.sheet.app.grid.app; window.sheet.run("chart.set", "Column"); window.sheet.run("chart.formatSelection", ""); window.sheet.app.sync(); });
+  await page.evaluate(() => window.sheet.redraw());
+  await page.waitForTimeout(80);
+  await click(page, "sx-pane-list-pane-row-7");
+  ok("the Format pane moves the legend", (await lastChart()).legend === "bottom", (await lastChart()).legend);
+  await click(page, "sx-pane-list-pane-row-11");
+  await page.waitForTimeout(100);
+  ok("…and opens Format Axis as a form", await page.evaluate(() => window.sheet.app.form.win.open && window.sheet.app.form.win.title === "Format Axis"));
+  await formSet(() => { const f = window.sheet.app.form; f.in0.setValue("0"); f.in1.setValue("500"); f.in2.setValue("0.0"); });
+  await click(page, "sx-form-ok");
+  await page.waitForTimeout(100);
+  const fa = await lastChart();
+  ok("Format Axis sets the bounds and the number format", fa.min === "0" && fa.fmt === "0.0" && !(await formOpen()), JSON.stringify(fa));
+  await shot(page, "14b_chart_format");
+  await page.evaluate(() => { window.sheet.app.grid.app.closePane(); window.sheet.app.sync(); });
   await page.waitForTimeout(80);
   ok("Escape leaves the chart on the sheet", await page.evaluate((n) => !window.sheet.app.chart.win.open && window.sheet.app.grid.app.view.chartLayer.count() === n + 1, charts0));
   await page.evaluate(() => { const a = window.sheet.app.grid.app; const p = a.view.chartLayer.panelAt(a.view.chartLayer.count() - 1); a.chartEditId = 0; a.openChartDialog(p.chart.id); window.sheet.app.sync(); });
@@ -662,6 +795,20 @@ try {
   await click(page, "sx-delsheet-ok");
   s = await state(page);
   ok("…and Delete deletes it", s.sheets.join(",") === names0.join(",") && !(await page.evaluate(() => window.sheet.app.delSheet.win.open)), s.sheets.join(","));
+  // Move or Copy… from the tab menu: a copy of the first sheet, put at the end.
+  const t0m = await centre(page, "sx-tabs-tab-0");
+  await page.mouse.click(t0m.x, t0m.y, { button: "right" });
+  await page.waitForTimeout(100);
+  await click(page, "sx-ctx-item-t-movecopy");
+  await page.waitForTimeout(100);
+  ok("Move or Copy… opens its dialog", await page.evaluate(() => window.sheet.app.form.win.open && window.sheet.app.form.win.title === "Move or Copy"));
+  await formSet(() => { const f = window.sheet.app.form; f.s0.value = "end"; f.s1.value = "copy:"; });
+  await click(page, "sx-form-ok");
+  await page.waitForTimeout(100);
+  s = await state(page);
+  ok("…and Create a copy puts one at the end", !(await formOpen()) && s.sheets.length === names0.length + 1 && s.sheets[0] === names0[0] && s.sheets[s.sheets.length - 1] === names0[0] + " (2)", s.sheets.join(","));
+  await page.evaluate(() => { const a = window.sheet.app.grid.app; a.runCommand("sheet.delete", ""); a.setActiveSheet(0); window.sheet.app.sync(); window.sheet.redraw(); });
+  await page.waitForTimeout(100);
   // Dragging the first tab past the second.
   const d0 = await centre(page, "sx-tabs-tab-0");
   const d2 = await centre(page, "sx-tabs-tab-2");
@@ -742,8 +889,12 @@ try {
     ["sales.xls", 0, [0, 0], /\S/],
     ["sales.ods", 0, [0, 0], /\S/],
     ["semicolons.csv", 0, [0, 0], /\S/],
+    ["values.xlsb", 0, [0, 0], /\S/],
+    ["units.tsv", 0, [0, 0], /\S/],
   ]) {
     const chooser = fmt.waitForEvent("filechooser", { timeout: 10000 });
+    // The plain file input: without File System Access the page falls back to it.
+    await fmt.evaluate(() => { window.showOpenFilePicker = undefined; });
     await fmt.evaluate(() => window.sheet.run("file.open", ""));
     await (await chooser).setFiles(path.join(FIX, file));
     await fmt.waitForFunction((f) => window.sheet.app.grid.app.book.sourcePath === f, file, { timeout: 20000 }).catch(() => {});
@@ -759,6 +910,34 @@ try {
   const odsPath = await d.path();
   const head = odsPath ? fs.readFileSync(odsPath).subarray(0, 120).toString("latin1") : "";
   ok("Download .ods gives an OpenDocument file", /\.ods$/.test(d.suggestedFilename()) && head.startsWith("PK") && head.includes("application/vnd.oasis.opendocument.spreadsheet"), d.suggestedFilename());
+
+  // Save in place, through stand-ins for the File System Access pickers: a
+  // workbook opened from a handle is written back to it without asking; a new
+  // one asks once where to go, and after that saves there too.
+  await fmt.evaluate((arr) => {
+    window.__writes = [];
+    window.__asked = 0;
+    const handle = (name, data) => ({
+      name,
+      getFile: async () => new File([new Uint8Array(data)], name),
+      createWritable: async () => ({ write: async (d) => { window.__writes.push(name + ":" + (d.byteLength ?? d.length ?? 0)); }, close: async () => {} }),
+    });
+    window.showOpenFilePicker = async () => [handle("book.xlsx", arr)];
+    window.showSaveFilePicker = async (o) => { window.__asked++; return handle(o.suggestedName, []); };
+  }, Array.from(fs.readFileSync(path.join(REPO, "parity", "fixtures", "quarterly-sales-dashboard.xlsx"))));
+  await fmt.evaluate(() => window.sheet.run("file.open", ""));
+  await fmt.waitForFunction(() => window.sheet.app.grid.app.book.sourcePath === "book.xlsx", null, { timeout: 20000 }).catch(() => {});
+  await fmt.evaluate(() => window.sheet.run("file.save", ""));
+  await fmt.waitForFunction(() => window.__writes.length >= 1, null, { timeout: 20000 }).catch(() => {});
+  const inPlace = await fmt.evaluate(() => ({ w: window.__writes.slice(), asked: window.__asked }));
+  ok("Save writes back to the file it opened", inPlace.asked === 0 && inPlace.w.length === 1 && /^book\.xlsx:\d{4,}$/.test(inPlace.w[0]), JSON.stringify(inPlace));
+  await fmt.evaluate(() => window.sheet.run("file.new", ""));
+  await fmt.evaluate(() => window.sheet.run("file.save", ""));
+  await fmt.waitForFunction(() => window.__writes.length >= 2, null, { timeout: 20000 }).catch(() => {});
+  await fmt.evaluate(() => window.sheet.run("file.save", ""));
+  await fmt.waitForFunction(() => window.__writes.length >= 3, null, { timeout: 20000 }).catch(() => {});
+  const fresh = await fmt.evaluate(() => ({ w: window.__writes.slice(1), asked: window.__asked }));
+  ok("Save asks once for a new workbook, then saves in place", fresh.asked === 1 && fresh.w.length === 2 && fresh.w.every((x) => /^workbook\.xlsx:/.test(x)), JSON.stringify(fresh));
   await fmt.close();
 
   // --- the embeds page --------------------------------------------------------
