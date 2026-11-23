@@ -475,6 +475,11 @@ pub struct SpreadsheetModel {
     pub spillSize: HashMap<String,String>,
     pub spillOwner: HashMap<String,String>,
     pub spillKeys: Vec<String>,
+    /// Formulas read from a file as plain (pre-dynamic-array) formulas. Excel
+    /// evaluates those with implicit intersection: a range gives the value on
+    /// the formula's own row or column, and nothing spills. Typing a formula
+    /// into the cell clears the mark.
+    pub legacyFormulas: HashMap<String,bool>,
     /// Cells whose text is drawn in pieces. Keyed like everything else, and kept
     /// beside the value rather than inside it — see RichText.
     /// Pictures floating over this sheet, in the order the drawing listed them.
@@ -631,6 +636,7 @@ impl SpreadsheetModel {
             spillSize: HashMap::new(),
             spillOwner: HashMap::new(),
             spillKeys: Vec::new(),
+            legacyFormulas: HashMap::new(),
             images: Vec::new(),
             fileCharts: Vec::new(),
             outCharts: Vec::new(),
@@ -915,6 +921,12 @@ impl SpreadsheetModel {
             }
             sp += 1;
         }
+        let lk: Vec<String> = self.legacyFormulas.keys()
+            .cloned()
+            .collect::<Vec<String>>();
+        for k5 in lk.iter() {
+            c.borrow_mut().legacyFormulas.insert(k5.clone(), true);
+        }
         let ok: Vec<String> = self.spillOwner.keys()
             .cloned()
             .collect::<Vec<String>>();
@@ -1090,6 +1102,12 @@ impl SpreadsheetModel {
         if self.formulas.contains_key(&src) {
             self.formulas.insert(src.clone(), String::new());
         }
+        let was_legacy: bool = self.legacyFormulas.contains_key(&src);
+        self.legacyFormulas.remove(&src);
+        self.legacyFormulas.remove(&dst);
+        if was_legacy {
+            self.legacyFormulas.insert(dst.clone(), true);
+        }
         let mut sid: i64 = -1;
         if self.cellStyleIds.contains_key(&src) {
             sid = self.cellStyleIds.get(&src).cloned().unwrap();
@@ -1103,6 +1121,7 @@ impl SpreadsheetModel {
         if self.formulas.contains_key(&k) {
             self.formulas.insert(k.clone(), String::new());
         }
+        self.legacyFormulas.remove(&k);
         self.cellStyleIds.insert(k.clone(), -1);
     }
     /// The cells that hold a formula, in the order they were written, as
@@ -2001,6 +2020,46 @@ impl SpreadsheetModel {
             r += 1;
         }
     }
+    /// The size of the block the anchor at (row, col) spilled into: which = 0
+    /// gives its rows, 1 its columns; 0 when nothing spilled from there.
+    pub fn spillExtent(&self, row: i64, col: i64, which: i64) -> i64 {
+        let k: String = self.cellKey(row, col);
+        if let Some(dims) = self.spillSize.get(&k) {
+            let parts: Vec<String> = dims.split(",").map(|s| s.to_string()).collect::<Vec<String>>();
+            if (parts.len() as i64) < 2 {
+                return 0;
+            }
+            return SpreadsheetModel::parseInt0(&parts[which as usize].clone());
+        }
+        0
+    }
+    /// A formula written for a spilling engine whose result is (or tried to
+    /// be) more than one cell: saved as a dynamic array formula.
+    pub fn isDynamicAt(&self, row: i64, col: i64) -> bool {
+        if self.getFormula(row, col).is_empty() {
+            return false;
+        }
+        if self.isLegacyFormula(row, col) {
+            return false;
+        }
+        if self.spillExtent(row, col, 0) * self.spillExtent(row, col, 1) > 1 {
+            return true;
+        }
+        self.getCell(row, col) == "#SPILL!"
+    }
+    pub fn hasDynamicFormula(&self) -> bool {
+        for k in self.formulaKeys.iter() {
+            let rc: Vec<String> = k.split(",").map(|s| s.to_string()).collect::<Vec<String>>();
+            if (rc.len() as i64) == 2 {
+                let r: i64 = SpreadsheetModel::parseInt0(&rc[0].clone());
+                let c: i64 = SpreadsheetModel::parseInt0(&rc[1].clone());
+                if self.isDynamicAt(r, c) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
     pub fn isSpilled(&self, row: i64, col: i64) -> bool {
         let k: String = self.cellKey(row, col);
         if let Some(owner) = self.spillOwner.get(&k) {
@@ -2379,6 +2438,7 @@ impl SpreadsheetModel {
     }
     pub fn setFormula(&mut self, row: i64, col: i64, formula: &str) {
         let k: String = self.cellKey(row, col);
+        self.legacyFormulas.remove(&k);
         if self.formulas.contains_key(&k) {
         } else {
             self.formulaKeys.push(k.clone());
@@ -2403,6 +2463,14 @@ impl SpreadsheetModel {
         }
         self.formulaKeys.push(k.clone());
         self.formulas.insert(k.clone(), formula.to_string());
+    }
+    pub fn markLegacyFormula(&mut self, row: i64, col: i64) {
+        let k: String = self.cellKey(row, col);
+        self.legacyFormulas.insert(k, true);
+    }
+    pub fn isLegacyFormula(&self, row: i64, col: i64) -> bool {
+        let k: String = self.cellKey(row, col);
+        self.legacyFormulas.contains_key(&k)
     }
     pub fn hasFormula(&self, row: i64, col: i64) -> bool {
         let k: String = self.cellKey(row, col);

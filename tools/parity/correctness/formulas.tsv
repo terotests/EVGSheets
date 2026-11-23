@@ -24,7 +24,7 @@
 =0.1+0.2=0.3	TRUE
 =1E+308*10	#NUM!
 =-D!A1	-1
-=D!A1:A5*2	2
+=D!A1:A5*2	2	#VALUE!
 # --- math
 =SUM(D!A1:A5)	15
 =SUM(D!B1:B5)	7.5
@@ -182,7 +182,7 @@
 =VLOOKUP("b*",D!I1:J5,2,FALSE)	200
 =HLOOKUP("b",D!O1:Q2,2,FALSE)	22
 =INDEX(D!I1:J5,3,2)	300
-=INDEX(D!I1:J5,0,2)	100
+=INDEX(D!I1:J5,0,2)	100	#VALUE!
 =INDEX(D!A1:A5,6)	#REF!
 =INDEX(D!A1:A5,2)	2
 =SUM(INDEX(D!I1:J5,0,2))	1500
@@ -334,7 +334,7 @@
 =LAMBDA(x,x+1)(2)	3
 =REDUCE(0,D!A1:A5,LAMBDA(a,b,a+b))	15
 # --- names, structured refs and errors
-=myRange	1
+=myRange	1	#VALUE!
 =SUM(myRange)	15
 =taxRate*100	24
 =SUM(Sales[Amount])	60

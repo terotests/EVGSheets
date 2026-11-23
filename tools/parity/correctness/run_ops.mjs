@@ -86,6 +86,22 @@ scenario("copy-to-other-sheet", "copy/paste", async () => {
   await select("A1:B1"); await run("edit.copy");
   await run("sheet.add"); await select("A1"); await run("edit.paste");
 }, { A1: 7, B1: 8, "B1=": "A1+1" });
+scenario("cut-to-other-sheet-moves-references", "copy/paste", async () => {
+  await fill({ A1: 5, A2: "=A1+1", B1: "=A1" });
+  await select("A1:A2"); await run("edit.cut");
+  await run("sheet.add"); await select("C3"); await run("edit.paste");
+  await run("view.sheet.prev");
+}, { A1: "", "B1=": "Sheet2!C3", B1: 5 });
+scenario("cut-to-other-sheet-block-refs", "copy/paste", async () => {
+  await fill({ A1: 5, A2: "=A1+1", B1: 7, B2: "=B1*2" });
+  await select("A1:A2"); await run("edit.cut");
+  await run("sheet.add"); await select("C3"); await run("edit.paste");
+}, { C3: 5, "C4=": "C3+1", C4: 6 });
+scenario("cut-to-other-sheet-outside-ref", "copy/paste", async () => {
+  await fill({ A1: 5, B1: "=A1*2" });
+  await select("B1"); await run("edit.cut");
+  await run("sheet.add"); await select("A1"); await run("edit.paste");
+}, { "A1=": "Sheet1!A1*2", A1: 10 });
 scenario("copy-ref-off-sheet-is-REF", "copy/paste", async () => {
   await fill({ A1: 1, B2: "=A1" });
   await select("B2"); await run("edit.copy"); await select("A1"); await run("edit.paste");
@@ -158,6 +174,11 @@ scenario("subtotal-ignores-filtered", "sort/filter", async () => {
   await G("() => { M.setFilter(0, true, ['x']); }");
   await G("() => { G.sheetView.markDirty(); G.sheetView.rebuild(); G.engine.recalcAll && G.engine.recalcAll(); }");
 }, { D1: 101, D2: 111 });
+
+scenario("aggregate-ignores-hidden", "sort/filter", async () => {
+  await fill({ B2: 1, B3: 10, B4: 100, D1: "=AGGREGATE(9,5,B2:B4)", D2: "=AGGREGATE(9,4,B2:B4)", D3: "=SUBTOTAL(109,B2:B4)" });
+  await select("B3"); await run("home.hideRows");
+}, { D1: 101, D2: 111, D3: 101 });
 
 scenario("insert-row-grows-sum", "rows/cols", async () => {
   await fill({ A1: 1, A2: 2, A3: 3, A4: "=SUM(A1:A3)" });

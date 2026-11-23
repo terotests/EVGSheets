@@ -450,7 +450,8 @@ impl FormulaMore {
         }
         if n == "AGGREGATE" {
             // AGGREGATE(function, options, ref1, [k]): options 2, 3, 6 and 7
-            // leave out error values; hidden rows are not known here.
+            // leave out error values. Hidden rows (1, 3, 5, 7) are left out of
+            // the ranges by the engine before they get here.
             if (args.len() as i64) < 3 {
                 return FormulaMore::err("#VALUE!");
             }
