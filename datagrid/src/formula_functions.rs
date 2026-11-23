@@ -1230,6 +1230,9 @@ impl FormulaFunctions {
             return ar;
         }
         let cond: Rc<RefCell<FormulaValue>> = args[0].clone();
+        if cond.borrow().isArray() && cond.borrow().count() > 1 {
+            return FormulaFunctions::ifOverArray(args);
+        }
         let ce: bool = cond.borrow().isError();
         if ce {
             return cond;
@@ -1245,6 +1248,77 @@ impl FormulaFunctions {
             return args[2].clone();
         }
         FormulaValue::fromBool(false)
+    }
+    /// IF with an array condition: element by element, each branch broadcast
+    /// (a single value everywhere, a row or column along its length).
+    pub fn ifOverArray(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
+        let mut rows: i64 = 0;
+        let mut cols: i64 = 0;
+        for a in args.iter() {
+            if a.borrow().isArray() && a.borrow().count() > 1 {
+                if a.borrow().rows > rows {
+                    rows = a.borrow().rows;
+                }
+                if a.borrow().cols > cols {
+                    cols = a.borrow().cols;
+                }
+            }
+        }
+        let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        let mut r: i64 = 0;
+        while r < rows {
+            let mut c: i64 = 0;
+            while c < cols {
+                let cv: Rc<RefCell<FormulaValue>> = FormulaFunctions::broadcastAt(&args[0].clone(), r, c);
+                if cv.borrow().kind == 4 {
+                    items.push(cv);
+                } else {
+                    match FormulaFunctions::logicalOf(&cv) {
+                        Some(b) => {
+                            if b {
+                                items.push(FormulaFunctions::broadcastAt(&args[1].clone(), r, c));
+                            } else if args.len() >= 3 {
+                                items.push(FormulaFunctions::broadcastAt(&args[2].clone(), r, c));
+                            } else {
+                                items.push(FormulaValue::fromBool(false));
+                            }
+                        }
+                        None => items.push(FormulaValue::fromError("#VALUE!".to_string())),
+                    }
+                }
+                c += 1;
+            }
+            r += 1;
+        }
+        FormulaValue::fromArray(rows, cols, &items)
+    }
+    /// Item (r, c) of a value broadcast to a larger rectangle; #N/A past its end.
+    pub fn broadcastAt(v: &Rc<RefCell<FormulaValue>>, r: i64, c: i64) -> Rc<RefCell<FormulaValue>> {
+        if !v.borrow().isArray() || v.borrow().count() <= 1 {
+            let one: Rc<RefCell<FormulaValue>> = v.borrow().single();
+            if one.borrow().kind == 0 {
+                return FormulaValue::fromNumber(0.0);
+            }
+            return one;
+        }
+        let ar: i64 = v.borrow().rows;
+        let ac: i64 = v.borrow().cols;
+        let mut rr: i64 = r;
+        let mut cc: i64 = c;
+        if ar == 1 {
+            rr = 0;
+        }
+        if ac == 1 {
+            cc = 0;
+        }
+        if rr >= ar || cc >= ac {
+            return FormulaValue::fromError("#N/A".to_string());
+        }
+        let it: Rc<RefCell<FormulaValue>> = v.borrow().at(rr, cc);
+        if it.borrow().kind == 0 {
+            return FormulaValue::fromNumber(0.0);
+        }
+        it
     }
     /// IFS(cond1, val1, cond2, val2, …) — first true condition wins; else #N/A.
     pub fn fnIfs(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
@@ -1384,11 +1458,62 @@ impl FormulaFunctions {
             return ar;
         }
         let v: Rc<RefCell<FormulaValue>> = args[0].clone();
+        if v.borrow().isArray() {
+            return FormulaFunctions::replaceErrors(&v, &args[1].clone(), false);
+        }
         let ee: bool = v.borrow().isError();
         if ee {
             return args[1].clone();
         }
         v
+    }
+    /// IFERROR / IFNA over an array: each error item (only #N/A for IFNA)
+    /// replaced by the fallback, item by item when the fallback is an array too.
+    pub fn replaceErrors(v: &Rc<RefCell<FormulaValue>>, alt: &Rc<RefCell<FormulaValue>>, na_only: bool) -> Rc<RefCell<FormulaValue>> {
+        let rows: i64 = v.borrow().rows;
+        let cols: i64 = v.borrow().cols;
+        let alt_arr: bool = alt.borrow().isArray() && alt.borrow().count() > 1;
+        let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        let mut r: i64 = 0;
+        while r < rows {
+            let mut c: i64 = 0;
+            while c < cols {
+                let it: Rc<RefCell<FormulaValue>> = v.borrow().at(r, c);
+                let mut hit: bool = it.borrow().kind == 4;
+                if hit && na_only {
+                    hit = it.borrow().err == "#N/A";
+                }
+                if !hit {
+                    items.push(it);
+                } else if alt_arr {
+                    let ar: i64 = alt.borrow().rows;
+                    let ac: i64 = alt.borrow().cols;
+                    let mut rr: i64 = r;
+                    let mut cc: i64 = c;
+                    if ar == 1 {
+                        rr = 0;
+                    }
+                    if ac == 1 {
+                        cc = 0;
+                    }
+                    if rr >= ar || cc >= ac {
+                        items.push(FormulaValue::fromError("#N/A".to_string()));
+                    } else {
+                        items.push(alt.borrow().at(rr, cc));
+                    }
+                } else {
+                    let one: Rc<RefCell<FormulaValue>> = alt.borrow().single();
+                    if one.borrow().kind == 0 {
+                        items.push(FormulaValue::fromNumber(0.0));
+                    } else {
+                        items.push(one);
+                    }
+                }
+                c += 1;
+            }
+            r += 1;
+        }
+        FormulaValue::fromArray(rows, cols, &items)
     }
     pub fn fnIfNa(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Rc<RefCell<FormulaValue>> {
         let ar: Rc<RefCell<FormulaValue>> = FormulaFunctions::needArity(args, 2);
@@ -1397,6 +1522,9 @@ impl FormulaFunctions {
             return ar;
         }
         let v: Rc<RefCell<FormulaValue>> = args[0].clone();
+        if v.borrow().isArray() {
+            return FormulaFunctions::replaceErrors(&v, &args[1].clone(), true);
+        }
         if v.borrow().kind == 4 {
             if v.borrow().err == "#N/A" {
                 return args[1].clone();
@@ -3145,7 +3273,8 @@ impl FormulaFunctions {
             return ar;
         }
         let table: Rc<RefCell<FormulaValue>> = args[0].clone();
-        if table.borrow().isError() {
+        // an array with error items is still a table: only a plain error passes through
+        if table.borrow().kind == 4 {
             return table;
         }
         if !table.borrow().isArray() {

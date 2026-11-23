@@ -90,7 +90,28 @@ impl FormulaStats {
         if x > 709.0 {
             return 1.0e308;
         }
-        FormulaFunctions::expD(x)
+        // e^x = 2^k e^r with |r| <= ln2/2; ln2 split in two so r keeps its bits.
+        let k: f64 = (x / 0.6931471805599453 + 0.5).floor();
+        let r: f64 = (x - k * 0.6931471803691238) - k * 1.9082149292705877e-10;
+        let mut term: f64 = 1.0;
+        let mut sum: f64 = 1.0;
+        let mut n: i64 = 1;
+        while n < 22 {
+            term = (term * r) / (n as f64);
+            sum += term;
+            n += 1;
+        }
+        let mut i: i64 = 0;
+        let ki: i64 = k as i64;
+        while i < ki {
+            sum *= 2.0;
+            i += 1;
+        }
+        while i > ki {
+            sum /= 2.0;
+            i -= 1;
+        }
+        sum
     }
     pub fn pow(b: f64, e: f64) -> f64 {
         if b == 0.0 {
@@ -1055,6 +1076,339 @@ impl FormulaStats {
         out.push(ssres);
         out
     }
+    /// LINEST/LOGEST/TREND/GROWTH with several x variables: known_x with as
+    /// many rows (y a column) or columns (y a row) as known_y and more than
+    /// one in the other direction. Blank when the shapes are a single x.
+    pub fn multiFit(n: &str, args: &Vec<Rc<RefCell<FormulaValue>>>, log_y: bool) -> Rc<RefCell<FormulaValue>> {
+        if (args.len() as i64) < 2 || !FormulaMore::has(args, 1) {
+            return FormulaValue::blank();
+        }
+        let yg: Rc<RefCell<FormulaValue>> = FormulaMore::grid(&args[0].clone());
+        let xg: Rc<RefCell<FormulaValue>> = FormulaMore::grid(&args[1].clone());
+        let yr: i64 = yg.borrow().rows;
+        let yc: i64 = yg.borrow().cols;
+        let xr: i64 = xg.borrow().rows;
+        let xc: i64 = xg.borrow().cols;
+        let mut by_col: bool = false;
+        if yc == 1 && yr > 1 && xr == yr && xc > 1 {
+            by_col = true;
+        } else if !(yr == 1 && yc > 1 && xc == yc && xr > 1) {
+            return FormulaValue::blank();
+        }
+        let cnt: i64 = yr * yc;
+        let mut k: i64 = xr;
+        if by_col {
+            k = xc;
+        }
+        let mut ys: Vec<f64> = Vec::new();
+        let mut xs: Vec<f64> = Vec::new();
+        let mut i: i64 = 0;
+        while i < cnt {
+            let y: Rc<RefCell<FormulaValue>> = yg.borrow().items[i as usize].clone();
+            if y.borrow().kind != 1 {
+                return FormulaStats::err("#VALUE!");
+            }
+            let mut yy: f64 = y.borrow().num;
+            if log_y {
+                if yy <= 0.0 {
+                    return FormulaStats::err("#NUM!");
+                }
+                yy = FormulaStats::ln(yy);
+            }
+            ys.push(yy);
+            let mut j: i64 = 0;
+            while j < k {
+                let mut at: i64 = j * xc + i;
+                if by_col {
+                    at = i * xc + j;
+                }
+                let x: Rc<RefCell<FormulaValue>> = xg.borrow().items[at as usize].clone();
+                if x.borrow().kind != 1 {
+                    return FormulaStats::err("#VALUE!");
+                }
+                xs.push(x.borrow().num);
+                j += 1;
+            }
+            i += 1;
+        }
+        let mut ci: i64 = 3;
+        if n == "LINEST" || n == "LOGEST" {
+            ci = 2;
+        }
+        let with_const: bool = FormulaStats::flag(args, ci, true);
+        // centred columns (with a constant), normal equations, Gauss-Jordan inverse
+        let nf: f64 = cnt as f64;
+        let mut mx: Vec<f64> = Vec::new();
+        let mut j: i64 = 0;
+        while j < k {
+            let mut sm: f64 = 0.0;
+            i = 0;
+            while i < cnt {
+                sm += xs[(i * k + j) as usize];
+                i += 1;
+            }
+            if with_const {
+                mx.push(sm / nf);
+            } else {
+                mx.push(0.0);
+            }
+            j += 1;
+        }
+        let mut my: f64 = 0.0;
+        if with_const {
+            my = FormulaStats::mean(&ys);
+        }
+        // augmented [A | I | c] with A = Xc'Xc, c = Xc'yc
+        let w: i64 = 2 * k + 1;
+        let mut m: Vec<f64> = Vec::new();
+        let mut r: i64 = 0;
+        while r < k {
+            let mut c: i64 = 0;
+            while c < k {
+                let mut sm: f64 = 0.0;
+                i = 0;
+                while i < cnt {
+                    sm += (xs[(i * k + r) as usize] - mx[r as usize]) * (xs[(i * k + c) as usize] - mx[c as usize]);
+                    i += 1;
+                }
+                m.push(sm);
+                c += 1;
+            }
+            c = 0;
+            while c < k {
+                if c == r {
+                    m.push(1.0);
+                } else {
+                    m.push(0.0);
+                }
+                c += 1;
+            }
+            let mut sy: f64 = 0.0;
+            i = 0;
+            while i < cnt {
+                sy += (xs[(i * k + r) as usize] - mx[r as usize]) * (ys[i as usize] - my);
+                i += 1;
+            }
+            m.push(sy);
+            r += 1;
+        }
+        let mut dropped: Vec<bool> = Vec::new();
+        let mut scale: f64 = 0.0;
+        r = 0;
+        while r < k {
+            dropped.push(false);
+            let d: f64 = FormulaStats::absD(m[(r * w + r) as usize]);
+            if d > scale {
+                scale = d;
+            }
+            r += 1;
+        }
+        let mut p: i64 = 0;
+        while p < k {
+            let piv: f64 = m[(p * w + p) as usize];
+            if FormulaStats::absD(piv) <= scale * 1.0e-13 {
+                // collinear with the earlier columns: Excel leaves it out (0)
+                dropped[p as usize] = true;
+                let mut c: i64 = 0;
+                while c < w {
+                    m[(p * w + c) as usize] = 0.0;
+                    c += 1;
+                }
+                r = 0;
+                while r < k {
+                    m[(r * w + p) as usize] = 0.0;
+                    m[(r * w + k + p) as usize] = 0.0;
+                    r += 1;
+                }
+                p += 1;
+                continue;
+            }
+            let mut c: i64 = 0;
+            while c < w {
+                m[(p * w + c) as usize] = m[(p * w + c) as usize] / piv;
+                c += 1;
+            }
+            r = 0;
+            while r < k {
+                if r != p {
+                    let f: f64 = m[(r * w + p) as usize];
+                    if f != 0.0 {
+                        c = 0;
+                        while c < w {
+                            m[(r * w + c) as usize] = m[(r * w + c) as usize] - f * m[(p * w + c) as usize];
+                            c += 1;
+                        }
+                    }
+                }
+                r += 1;
+            }
+            p += 1;
+        }
+        let mut beta: Vec<f64> = Vec::new();
+        let mut used: f64 = 0.0;
+        let mut b0: f64 = my;
+        j = 0;
+        while j < k {
+            let bj: f64 = m[(j * w + 2 * k) as usize];
+            beta.push(bj);
+            b0 -= bj * mx[j as usize];
+            if !dropped[j as usize] {
+                used += 1.0;
+            }
+            j += 1;
+        }
+        if !with_const {
+            b0 = 0.0;
+        }
+        if n == "TREND" || n == "GROWTH" {
+            let mut nx: Rc<RefCell<FormulaValue>> = xg.clone();
+            if FormulaMore::has(args, 2) {
+                nx = FormulaMore::grid(&args[2].clone());
+            }
+            let nr: i64 = nx.borrow().rows;
+            let nc: i64 = nx.borrow().cols;
+            if (by_col && nc != k) || (!by_col && nr != k) {
+                return FormulaStats::err("#REF!");
+            }
+            let mut pts: i64 = nr;
+            if !by_col {
+                pts = nc;
+            }
+            let mut out: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            i = 0;
+            while i < pts {
+                let mut y: f64 = b0;
+                j = 0;
+                while j < k {
+                    let mut at: i64 = j * nc + i;
+                    if by_col {
+                        at = i * nc + j;
+                    }
+                    let xv: Rc<RefCell<FormulaValue>> = nx.borrow().items[at as usize].clone();
+                    if xv.borrow().kind != 1 {
+                        return FormulaStats::err("#VALUE!");
+                    }
+                    y += beta[j as usize] * xv.borrow().num;
+                    j += 1;
+                }
+                if log_y {
+                    y = FormulaStats::exp(y);
+                }
+                out.push(FormulaValue::fromNumber(y));
+                i += 1;
+            }
+            if by_col {
+                return FormulaValue::fromArray(pts, 1, &out);
+            }
+            return FormulaValue::fromArray(1, pts, &out);
+        }
+        // LINEST / LOGEST: m_k … m_1, b and optionally the statistics
+        let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        j = k - 1;
+        while j >= 0 {
+            let mut v: f64 = beta[j as usize];
+            if log_y {
+                v = FormulaStats::exp(v);
+            }
+            items.push(FormulaValue::fromNumber(v));
+            j -= 1;
+        }
+        if log_y {
+            items.push(FormulaValue::fromNumber(FormulaStats::exp(b0)));
+        } else {
+            items.push(FormulaValue::fromNumber(b0));
+        }
+        let cols: i64 = k + 1;
+        if !FormulaStats::flag(args, 3, false) {
+            return FormulaValue::fromArray(1, cols, &items);
+        }
+        let mut ssres: f64 = 0.0;
+        let mut sstot: f64 = 0.0;
+        i = 0;
+        while i < cnt {
+            let mut fit: f64 = b0;
+            j = 0;
+            while j < k {
+                fit += beta[j as usize] * xs[(i * k + j) as usize];
+                j += 1;
+            }
+            let e: f64 = ys[i as usize] - fit;
+            ssres += e * e;
+            let d: f64 = ys[i as usize] - my;
+            sstot += d * d;
+            i += 1;
+        }
+        let mut df: f64 = nf - used;
+        if with_const {
+            df -= 1.0;
+        }
+        let ssreg: f64 = sstot - ssres;
+        let mut sey: f64 = 0.0;
+        if df > 0.0 {
+            sey = FormulaStats::sqrtD(ssres / df);
+        }
+        j = k - 1;
+        while j >= 0 {
+            let vjj: f64 = m[(j * w + k + j) as usize];
+            items.push(FormulaValue::fromNumber(sey * FormulaStats::sqrtD(FormulaStats::absD(vjj))));
+            j -= 1;
+        }
+        if with_const {
+            // var(b) = sey^2 (1/n + mx' V mx)
+            let mut q: f64 = 0.0;
+            r = 0;
+            while r < k {
+                let mut c: i64 = 0;
+                while c < k {
+                    q += mx[r as usize] * m[(r * w + k + c) as usize] * mx[c as usize];
+                    c += 1;
+                }
+                r += 1;
+            }
+            items.push(FormulaValue::fromNumber(sey * FormulaStats::sqrtD(1.0 / nf + q)));
+        } else {
+            items.push(FormulaValue::fromError("#N/A".to_string()));
+        }
+        let mut r2: f64 = 1.0;
+        if sstot > 0.0 {
+            r2 = ssreg / sstot;
+        }
+        let mut fstat: f64 = 0.0;
+        if ssres > 0.0 && used > 0.0 {
+            fstat = (ssreg / used) / (ssres / df);
+        }
+        let row3: Vec<f64> = vec![r2, sey];
+        let row4: Vec<f64> = vec![fstat, df];
+        let row5: Vec<f64> = vec![ssreg, ssres];
+        let mut c: i64 = 0;
+        while c < cols {
+            if c < 2 {
+                items.push(FormulaValue::fromNumber(row3[c as usize]));
+            } else {
+                items.push(FormulaValue::fromError("#N/A".to_string()));
+            }
+            c += 1;
+        }
+        c = 0;
+        while c < cols {
+            if c < 2 {
+                items.push(FormulaValue::fromNumber(row4[c as usize]));
+            } else {
+                items.push(FormulaValue::fromError("#N/A".to_string()));
+            }
+            c += 1;
+        }
+        c = 0;
+        while c < cols {
+            if c < 2 {
+                items.push(FormulaValue::fromNumber(row5[c as usize]));
+            } else {
+                items.push(FormulaValue::fromError("#N/A".to_string()));
+            }
+            c += 1;
+        }
+        FormulaValue::fromArray(5, cols, &items)
+    }
     /// Known y and x from TREND/GROWTH/LINEST arguments: x defaults to
     /// 1, 2, 3 ... Returns false when they do not pair up.
     pub fn knownXY(args: &Vec<Rc<RefCell<FormulaValue>>>, log_y: bool, xs: &mut Vec<f64>, ys: &mut Vec<f64>) -> bool {
@@ -1401,6 +1755,10 @@ impl FormulaStats {
         }
         if n == "TREND" || n == "GROWTH" || n == "LINEST" || n == "LOGEST" {
             let log_y: bool = n == "GROWTH" || n == "LOGEST";
+            let multi: Rc<RefCell<FormulaValue>> = FormulaStats::multiFit(n, args, log_y);
+            if !multi.borrow().isBlank() {
+                return multi;
+            }
             let mut xs: Vec<f64> = Vec::new();
             let mut ys: Vec<f64> = Vec::new();
             if (args.len() as i64) < 1 || !FormulaStats::knownXY(args, log_y, &mut xs, &mut ys) {

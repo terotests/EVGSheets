@@ -2652,7 +2652,7 @@ impl FormulaEngine {
     }
     pub fn isVolatile(expr: &str) -> bool {
         let u: String = FormulaFunctions::upper(expr);
-        let names: Vec<String> = vec!["OFFSET(".to_string(), "INDIRECT(".to_string(), "RAND(".to_string(), "RANDBETWEEN(".to_string(), "TODAY(".to_string(), "NOW(".to_string()];
+        let names: Vec<String> = vec!["OFFSET(".to_string(), "INDIRECT(".to_string(), "RAND(".to_string(), "RANDBETWEEN(".to_string(), "RANDARRAY(".to_string(), "TODAY(".to_string(), "NOW(".to_string()];
         for nm in names.iter() {
             if DgNative::index_of(&u, nm) >= 0 {
                 return true;
@@ -3789,7 +3789,7 @@ impl FormulaEngine {
             return by_ref;
         }
         let lup: String = FormulaFunctions::upper(&name);
-        let fam: bool = lup == "LOCAL.NAME" || lup == "LET" || lup == "LAMBDA" || lup == "REDUCE" || lup == "SCAN" || lup == "MAP" || lup == "BYROW" || lup == "BYCOL" || lup == "MAKEARRAY" || lup == "LAMBDA.INVOKE";
+        let fam: bool = lup == "LOCAL.NAME" || lup == "LET" || lup == "LAMBDA" || lup == "REDUCE" || lup == "SCAN" || lup == "MAP" || lup == "BYROW" || lup == "BYCOL" || lup == "MAKEARRAY" || lup == "LAMBDA.INVOKE" || lup == "GROUPBY" || lup == "PIVOTBY";
         let li: i64 = self.localIndex(&lup);
         if fam || (li >= 0 && self.localIsFn[li as usize]) {
             return self.evalLambdaCall(n, sheet_idx);
@@ -4069,6 +4069,580 @@ impl FormulaEngine {
         }
         None
     }
+    // --- GROUPBY / PIVOTBY ---------------------------------------------------------
+
+    /// A grouping key for one value: type letter and text (case-insensitive).
+    pub fn groupKeyOf(v: &Rc<RefCell<FormulaValue>>) -> String {
+        let k: i64 = v.borrow().kind;
+        if k == 1 {
+            return format!("n{}", v.borrow().asRaw());
+        }
+        if k == 2 {
+            return format!("t{}", FormulaFunctions::upper(&v.borrow().text));
+        }
+        if k == 3 {
+            return format!("b{}", v.borrow().flag);
+        }
+        if k == 4 {
+            return format!("x{}", v.borrow().err);
+        }
+        "e".to_string()
+    }
+    /// Row `r` of a grid as one key: each value's key with its length in front.
+    pub fn groupRowKey(g: &Rc<RefCell<FormulaValue>>, r: i64) -> String {
+        let mut s: String = String::new();
+        let cols: i64 = g.borrow().cols;
+        let mut c: i64 = 0;
+        while c < cols {
+            let k: String = FormulaEngine::groupKeyOf(&g.borrow().at(r, c));
+            s = format!("{}{}:{}", s, DgNative::str_len(&k), k);
+            c += 1;
+        }
+        s
+    }
+    /// Sort order of two values: numbers, text, logicals, errors, then blanks.
+    pub fn groupCmp(a: &Rc<RefCell<FormulaValue>>, b: &Rc<RefCell<FormulaValue>>) -> i64 {
+        let ra: i64 = FormulaEngine::groupRank(a);
+        let rb: i64 = FormulaEngine::groupRank(b);
+        if ra != rb {
+            if ra < rb {
+                return -1;
+            }
+            return 1;
+        }
+        if ra == 0 {
+            let x: f64 = a.borrow().num;
+            let y: f64 = b.borrow().num;
+            if x < y {
+                return -1;
+            }
+            if x > y {
+                return 1;
+            }
+            return 0;
+        }
+        if ra == 1 {
+            return FormulaFunctions::compareText(&FormulaFunctions::upper(&a.borrow().text), &FormulaFunctions::upper(&b.borrow().text));
+        }
+        if ra == 2 {
+            let x: bool = a.borrow().flag;
+            let y: bool = b.borrow().flag;
+            if x == y {
+                return 0;
+            }
+            if y {
+                return -1;
+            }
+            return 1;
+        }
+        0
+    }
+    pub fn groupRank(v: &Rc<RefCell<FormulaValue>>) -> i64 {
+        let k: i64 = v.borrow().kind;
+        if k == 1 {
+            return 0;
+        }
+        if k == 2 {
+            return 1;
+        }
+        if k == 3 {
+            return 2;
+        }
+        if k == 4 {
+            return 3;
+        }
+        4
+    }
+    /// Compares data rows ra and rb of grid g on column `col` (all columns,
+    /// left to right, when col < 0); `desc` reverses it but keeps blanks last.
+    pub fn groupRowCmp(g: &Rc<RefCell<FormulaValue>>, ra: i64, rb: i64, col: i64, desc: bool) -> i64 {
+        let cols: i64 = g.borrow().cols;
+        let mut c: i64 = 0;
+        while c < cols {
+            if col < 0 || c == col {
+                let a: Rc<RefCell<FormulaValue>> = g.borrow().at(ra, c);
+                let b: Rc<RefCell<FormulaValue>> = g.borrow().at(rb, c);
+                let mut o: i64 = FormulaEngine::groupCmp(&a, &b);
+                if desc && FormulaEngine::groupRank(&a) != 4 && FormulaEngine::groupRank(&b) != 4 {
+                    o = 0 - o;
+                }
+                if o != 0 {
+                    return o;
+                }
+            }
+            c += 1;
+        }
+        0
+    }
+    /// The distinct keys of the data rows `rows` of grid g, as one first row
+    /// each, sorted ascending (descending with `desc`) on column `col` (-1 all).
+    pub fn groupDistinct(g: &Rc<RefCell<FormulaValue>>, rows: &Vec<i64>, col: i64, desc: bool) -> Vec<i64> {
+        let mut seen: HashMap<String, bool> = HashMap::new();
+        let mut out: Vec<i64> = Vec::new();
+        for r in rows.iter() {
+            let k: String = FormulaEngine::groupRowKey(g, *r);
+            if !seen.contains_key(&k) {
+                seen.insert(k.clone(), true);
+                out.push(*r);
+            }
+        }
+        // insertion sort: stable, and the group count is small
+        let mut i: i64 = 1;
+        while i < (out.len() as i64) {
+            let cur: i64 = out[i as usize];
+            let mut j: i64 = i - 1;
+            while j >= 0 {
+                let mut o: i64 = FormulaEngine::groupRowCmp(g, out[j as usize], cur, col, desc);
+                if o == 0 && col >= 0 {
+                    o = FormulaEngine::groupRowCmp(g, out[j as usize], cur, -1, false);
+                }
+                if o <= 0 {
+                    break;
+                }
+                out[(j + 1) as usize] = out[j as usize];
+                j -= 1;
+            }
+            out[(j + 1) as usize] = cur;
+            i += 1;
+        }
+        out
+    }
+    /// One aggregate: the group's values of column `vc` as a column, through the
+    /// LAMBDA or the named function.
+    pub fn groupAgg(&mut self, vals: &Rc<RefCell<FormulaValue>>, rows: &Vec<i64>, vc: i64, lam: &Option<Rc<RefCell<FormulaNode>>>, agg: &str, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
+        let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        for r in rows.iter() {
+            items.push(vals.borrow().at(*r, vc));
+        }
+        let cnt: i64 = items.len() as i64;
+        let col: Rc<RefCell<FormulaValue>> = FormulaValue::fromArray(cnt, 1, &items);
+        let mut call: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        call.push(col);
+        if let Some(l) = lam.clone() {
+            let out: Rc<RefCell<FormulaValue>> = self.applyLambda(&l, &call, sheet_idx);
+            if out.borrow().isArray() && out.borrow().count() > 1 {
+                return FormulaValue::fromError("#CALC!".to_string());
+            }
+            return out.borrow().single();
+        }
+        FormulaFunctions::invoke(agg, &call).borrow().single()
+    }
+    pub fn groupAggName(v: &Rc<RefCell<FormulaValue>>) -> String {
+        let one: Rc<RefCell<FormulaValue>> = v.borrow().single();
+        if one.borrow().kind == 1 {
+            let k: i64 = one.borrow().num.floor() as i64;
+            let names: Vec<&str> = vec!["", "AVERAGE", "COUNT", "COUNTA", "MAX", "MIN", "PRODUCT", "STDEV.S", "STDEV.P", "SUM", "VAR.S", "VAR.P", "MEDIAN"];
+            let mut kk: i64 = k;
+            if kk > 100 && kk < 112 {
+                kk -= 100;
+            }
+            if kk >= 1 && kk <= 12 {
+                return names[kk as usize].to_string();
+            }
+            return String::new();
+        }
+        if one.borrow().kind == 2 {
+            let mut t: String = FormulaFunctions::upper(&one.borrow().text.trim().to_string());
+            if DgNative::index_of(&t, "_XLFN.") == 0 {
+                t = DgNative::substr(&t, 6, DgNative::str_len(&t));
+            }
+            if FormulaFunctions::isKnown(&t) {
+                return t;
+            }
+        }
+        String::new()
+    }
+    pub fn optInt(v: &Rc<RefCell<FormulaValue>>, dflt: i64) -> i64 {
+        let one: Rc<RefCell<FormulaValue>> = v.borrow().single();
+        if one.borrow().kind == 0 {
+            return dflt;
+        }
+        if one.borrow().kind == 3 {
+            if one.borrow().flag {
+                return 1;
+            }
+            return 0;
+        }
+        one.borrow().asNumber().floor() as i64
+    }
+    /// GROUPBY(row_fields, values, function, [field_headers], [total_depth],
+    /// [sort_order], [filter_array], [field_relationship]) and PIVOTBY(row_fields,
+    /// col_fields, values, function, [field_headers], [row_total_depth],
+    /// [row_sort_order], [col_total_depth], [col_sort_order], [filter_array]).
+    /// The function is a LAMBDA, a function name (SUM) or its text or number.
+    /// Total depths beyond 1 (subtotals) are not supported: #VALUE!.
+    pub fn evalGroupBy(&mut self, n: &Rc<RefCell<FormulaNode>>, sheet_idx: i64, pivot: bool) -> Rc<RefCell<FormulaValue>> {
+        let kn: i64 = n.borrow().kids.len() as i64;
+        let mut fn_at: i64 = 2;
+        if pivot {
+            fn_at = 3;
+        }
+        if kn < fn_at + 1 {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        let mut a: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        let mut k: i64 = 0;
+        while k < 10 {
+            if k < kn && k != fn_at {
+                let v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[k as usize].clone(), sheet_idx);
+                if v.borrow().kind == 4 {
+                    return v;
+                }
+                a.push(v);
+            } else {
+                a.push(FormulaValue::blank());
+            }
+            k += 1;
+        }
+        let fnode: Rc<RefCell<FormulaNode>> = n.borrow().kids[fn_at as usize].clone();
+        let lam: Option<Rc<RefCell<FormulaNode>>> = self.lambdaOf(&fnode);
+        let mut agg: String = String::new();
+        if lam.is_none() {
+            let nm: String = FormulaEngine::localNameOf(&fnode);
+            if !nm.is_empty() && self.localIndex(&nm) < 0 {
+                if FormulaFunctions::isKnown(&nm) {
+                    agg = nm.clone();
+                }
+            } else {
+                let fv: Rc<RefCell<FormulaValue>> = self.evalNode(&fnode, sheet_idx);
+                if fv.borrow().kind == 4 {
+                    return fv;
+                }
+                agg = FormulaEngine::groupAggName(&fv);
+            }
+            if agg.is_empty() {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+        }
+        let rf: Rc<RefCell<FormulaValue>> = FormulaMore::grid(&a[0].clone());
+        let mut cf: Rc<RefCell<FormulaValue>> = FormulaValue::blank();
+        let mut vi: i64 = 1;
+        if pivot {
+            cf = FormulaMore::grid(&a[1].clone());
+            vi = 2;
+        }
+        let vals: Rc<RefCell<FormulaValue>> = FormulaMore::grid(&a[vi as usize].clone());
+        let nrows: i64 = vals.borrow().rows;
+        let vcols: i64 = vals.borrow().cols;
+        if rf.borrow().rows != nrows || (pivot && cf.borrow().rows != nrows) {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        let mut o: i64 = fn_at + 1;
+        let fh_given: bool = !a[o as usize].borrow().single().borrow().isBlank();
+        let mut fh: i64 = FormulaEngine::optInt(&a[o as usize].clone(), -1);
+        o += 1;
+        let total: i64 = FormulaEngine::optInt(&a[o as usize].clone(), 1);
+        o += 1;
+        let sort: i64 = FormulaEngine::optInt(&a[o as usize].clone(), 1);
+        o += 1;
+        let mut col_total: i64 = 1;
+        let mut col_sort: i64 = 1;
+        if pivot {
+            col_total = FormulaEngine::optInt(&a[o as usize].clone(), 1);
+            o += 1;
+            col_sort = FormulaEngine::optInt(&a[o as usize].clone(), 1);
+            o += 1;
+        }
+        let filter: Rc<RefCell<FormulaValue>> = a[o as usize].clone();
+        if total > 1 || total < -1 || col_total > 1 || col_total < -1 {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        if fh_given && (fh < 0 || fh > 3) {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
+        if !fh_given {
+            // headers when the first values row is all text and the second is not
+            let mut first_text: bool = vcols > 0;
+            let mut second_not: bool = false;
+            let mut c: i64 = 0;
+            while c < vcols {
+                if vals.borrow().at(0, c).borrow().kind != 2 {
+                    first_text = false;
+                }
+                if nrows > 1 && vals.borrow().at(1, c).borrow().kind != 2 {
+                    second_not = true;
+                }
+                c += 1;
+            }
+            fh = 0;
+            if first_text && second_not {
+                fh = 3;
+            }
+        }
+        let has_hdr: bool = fh == 1 || fh == 3;
+        let show: bool = fh >= 2;
+        let mut field_hdr: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        let mut kcount: i64 = 0;
+        let mut c: i64 = 0;
+        while c < rf.borrow().cols {
+            kcount += 1;
+            if has_hdr {
+                field_hdr.push(rf.borrow().at(0, c));
+            } else {
+                field_hdr.push(FormulaValue::fromString(format!("Field {}", kcount)));
+            }
+            c += 1;
+        }
+        let mut value_hdr: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        c = 0;
+        while c < vcols {
+            if has_hdr {
+                value_hdr.push(vals.borrow().at(0, c));
+            } else {
+                value_hdr.push(FormulaValue::fromString(format!("Value {}", c + 1)));
+            }
+            c += 1;
+        }
+        let mut rows: Vec<i64> = Vec::new();
+        let mut r: i64 = 0;
+        if has_hdr {
+            r = 1;
+        }
+        let has_filter: bool = !filter.borrow().isBlank();
+        while r < nrows {
+            if has_filter {
+                let fv: Rc<RefCell<FormulaValue>> = FormulaMore::grid(&filter).borrow().items[r as usize].clone();
+                if fv.borrow().kind == 4 {
+                    return fv;
+                }
+                let keep: bool = match FormulaFunctions::logicalOf(&fv) {
+                    Some(b) => b,
+                    None => false,
+                };
+                if !keep {
+                    r += 1;
+                    continue;
+                }
+            }
+            rows.push(r);
+            r += 1;
+        }
+        let lead: i64 = rf.borrow().cols;
+        // groups: row key -> data rows
+        let mut by_row: HashMap<String, Vec<i64>> = HashMap::new();
+        for x in rows.iter() {
+            let key: String = FormulaEngine::groupRowKey(&rf, *x);
+            let mut lst: Vec<i64> = by_row.get(&key).cloned().unwrap_or(Vec::new());
+            lst.push(*x);
+            by_row.insert(key.clone(), lst);
+        }
+        let mut sort_col: i64 = -1;
+        let desc: bool = sort < 0;
+        let sabs: i64 = if sort < 0 { 0 - sort } else { sort };
+        if sabs >= 1 && sabs <= lead {
+            sort_col = sabs - 1;
+        }
+        let rkeys: Vec<i64> = FormulaEngine::groupDistinct(&rf, &rows, sort_col, desc && sort_col >= 0);
+        let mut out: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+        let mut out_rows: i64 = 0;
+        let mut width: i64 = lead + vcols;
+        if !pivot {
+            if show {
+                for h in field_hdr.iter() {
+                    out.push(h.clone());
+                }
+                for h in value_hdr.iter() {
+                    out.push(h.clone());
+                }
+                out_rows += 1;
+            }
+            // body lines: keys then aggregates, kept apart so a value column can sort them
+            let mut lines: Vec<Vec<Rc<RefCell<FormulaValue>>>> = Vec::new();
+            for rk in rkeys.iter() {
+                let mut line: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+                c = 0;
+                while c < lead {
+                    line.push(rf.borrow().at(*rk, c));
+                    c += 1;
+                }
+                let grp: Vec<i64> = by_row.get(&FormulaEngine::groupRowKey(&rf, *rk)).cloned().unwrap_or(Vec::new());
+                c = 0;
+                while c < vcols {
+                    let v: Rc<RefCell<FormulaValue>> = self.groupAgg(&vals, &grp, c, &lam, &agg, sheet_idx);
+                    line.push(v);
+                    c += 1;
+                }
+                lines.push(line);
+            }
+            if sabs > lead && sabs <= lead + vcols {
+                let ci: usize = (sabs - 1) as usize;
+                let mut i: i64 = 1;
+                while i < (lines.len() as i64) {
+                    let cur: Vec<Rc<RefCell<FormulaValue>>> = lines[i as usize].clone();
+                    let mut j: i64 = i - 1;
+                    while j >= 0 {
+                        let mut cmp: i64 = FormulaEngine::groupCmp(&lines[j as usize][ci].clone(), &cur[ci].clone());
+                        if desc {
+                            cmp = 0 - cmp;
+                        }
+                        if cmp <= 0 {
+                            break;
+                        }
+                        lines[(j + 1) as usize] = lines[j as usize].clone();
+                        j -= 1;
+                    }
+                    lines[(j + 1) as usize] = cur;
+                    i += 1;
+                }
+            }
+            let mut tline: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            if total != 0 {
+                tline.push(FormulaValue::fromString("Total".to_string()));
+                c = 1;
+                while c < lead {
+                    tline.push(FormulaValue::blank());
+                    c += 1;
+                }
+                c = 0;
+                while c < vcols {
+                    let v: Rc<RefCell<FormulaValue>> = self.groupAgg(&vals, &rows, c, &lam, &agg, sheet_idx);
+                    tline.push(v);
+                    c += 1;
+                }
+            }
+            if total < 0 {
+                for v in tline.iter() {
+                    out.push(v.clone());
+                }
+                out_rows += 1;
+            }
+            for line in lines.iter() {
+                for v in line.iter() {
+                    out.push(v.clone());
+                }
+                out_rows += 1;
+            }
+            if total > 0 {
+                for v in tline.iter() {
+                    out.push(v.clone());
+                }
+                out_rows += 1;
+            }
+            if out_rows == 0 {
+                return FormulaValue::fromError("#CALC!".to_string());
+            }
+            return FormulaValue::fromArray(out_rows, width, &out);
+        }
+        // PIVOTBY
+        let ccols: i64 = cf.borrow().cols;
+        let mut csort_col: i64 = -1;
+        let cdesc: bool = col_sort < 0;
+        let cabs: i64 = if col_sort < 0 { 0 - col_sort } else { col_sort };
+        if cabs >= 1 && cabs <= ccols {
+            csort_col = cabs - 1;
+        }
+        let ckeys: Vec<i64> = FormulaEngine::groupDistinct(&cf, &rows, csort_col, cdesc && csort_col >= 0);
+        // column slots: a data row standing for its column key, or -1 for the total
+        let mut slots: Vec<i64> = Vec::new();
+        if col_total < 0 {
+            slots.push(-1);
+        }
+        for ck in ckeys.iter() {
+            slots.push(*ck);
+        }
+        if col_total > 0 {
+            slots.push(-1);
+        }
+        width = lead + (slots.len() as i64) * vcols;
+        let value_row: bool = vcols > 1 || show;
+        let mut level: i64 = 0;
+        while level < ccols {
+            c = 0;
+            while c < lead {
+                out.push(FormulaValue::blank());
+                c += 1;
+            }
+            for sl in slots.iter() {
+                let mut v: i64 = 0;
+                while v < vcols {
+                    if *sl >= 0 {
+                        out.push(cf.borrow().at(*sl, level));
+                    } else if level == 0 {
+                        out.push(FormulaValue::fromString("Total".to_string()));
+                    } else {
+                        out.push(FormulaValue::blank());
+                    }
+                    v += 1;
+                }
+            }
+            out_rows += 1;
+            level += 1;
+        }
+        if value_row {
+            c = 0;
+            while c < lead {
+                if show {
+                    out.push(field_hdr[c as usize].clone());
+                } else {
+                    out.push(FormulaValue::blank());
+                }
+                c += 1;
+            }
+            for _sl in slots.iter() {
+                for h in value_hdr.iter() {
+                    out.push(h.clone());
+                }
+            }
+            out_rows += 1;
+        }
+        // body: row slots likewise, -1 the total row
+        let mut rslots: Vec<i64> = Vec::new();
+        if total < 0 {
+            rslots.push(-1);
+        }
+        for rk in rkeys.iter() {
+            rslots.push(*rk);
+        }
+        if total > 0 {
+            rslots.push(-1);
+        }
+        for rs in rslots.iter() {
+            let mut rk_key: String = String::new();
+            if *rs >= 0 {
+                rk_key = FormulaEngine::groupRowKey(&rf, *rs);
+                c = 0;
+                while c < lead {
+                    out.push(rf.borrow().at(*rs, c));
+                    c += 1;
+                }
+            } else {
+                out.push(FormulaValue::fromString("Total".to_string()));
+                c = 1;
+                while c < lead {
+                    out.push(FormulaValue::blank());
+                    c += 1;
+                }
+            }
+            for sl in slots.iter() {
+                let mut ck_key: String = String::new();
+                if *sl >= 0 {
+                    ck_key = FormulaEngine::groupRowKey(&cf, *sl);
+                }
+                let mut grp: Vec<i64> = Vec::new();
+                for x in rows.iter() {
+                    if *rs >= 0 && FormulaEngine::groupRowKey(&rf, *x) != rk_key {
+                        continue;
+                    }
+                    if *sl >= 0 && FormulaEngine::groupRowKey(&cf, *x) != ck_key {
+                        continue;
+                    }
+                    grp.push(*x);
+                }
+                let mut v: i64 = 0;
+                while v < vcols {
+                    if grp.is_empty() {
+                        out.push(FormulaValue::blank());
+                    } else {
+                        let av: Rc<RefCell<FormulaValue>> = self.groupAgg(&vals, &grp, v, &lam, &agg, sheet_idx);
+                        out.push(av);
+                    }
+                    v += 1;
+                }
+            }
+            out_rows += 1;
+        }
+        FormulaValue::fromArray(out_rows, width, &out)
+    }
     /// Call a LAMBDA with values for its parameters.
     pub fn applyLambda(&mut self, lam: &Rc<RefCell<FormulaNode>>, vals: &Vec<Rc<RefCell<FormulaValue>>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
         let kn: i64 = lam.borrow().kids.len() as i64;
@@ -4116,6 +4690,9 @@ impl FormulaEngine {
     pub fn evalLambdaCall(&mut self, n: &Rc<RefCell<FormulaNode>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
         let name: String = FormulaFunctions::upper(&n.borrow().fnName.clone());
         let kn: i64 = n.borrow().kids.len() as i64;
+        if name == "GROUPBY" || name == "PIVOTBY" {
+            return self.evalGroupBy(n, sheet_idx, name == "PIVOTBY");
+        }
         if name == "LOCAL.NAME" {
             let nm: String = FormulaEngine::localNameOf(n);
             let at: i64 = self.localIndex(&nm);
@@ -4415,6 +4992,62 @@ impl FormulaEngine {
                 return FormulaValue::fromString(f.clone());
             }
             return FormulaValue::fromString(format!("={}", f));
+        }
+        if name == "RANDARRAY" {
+            // RANDARRAY([rows], [columns], [min], [max], [whole_number])
+            let mut p: Vec<f64> = vec![1.0, 1.0, 0.0, 1.0, 0.0];
+            let mut k: i64 = 0;
+            while k < kn && k < 5 {
+                let v: Rc<RefCell<FormulaValue>> = self.evalNode(&n.borrow().kids[k as usize].clone(), sheet_idx);
+                let one: Rc<RefCell<FormulaValue>> = v.borrow().single();
+                if one.borrow().isError() {
+                    return one;
+                }
+                if !one.borrow().isBlank() {
+                    if one.borrow().kind == 3 {
+                        p[k as usize] = if one.borrow().flag { 1.0 } else { 0.0 };
+                    } else {
+                        let x: f64 = one.borrow().asNumber();
+                        if one.borrow().kind == 2 && FormulaValue::parsePlainNumber(&one.borrow().text).is_none() {
+                            return FormulaValue::fromError("#VALUE!".to_string());
+                        }
+                        p[k as usize] = x;
+                    }
+                }
+                k += 1;
+            }
+            let rows: i64 = p[0].floor() as i64;
+            let cols: i64 = p[1].floor() as i64;
+            let lo: f64 = p[2];
+            let hi: f64 = p[3];
+            let whole: bool = p[4] != 0.0;
+            if rows == 0 || cols == 0 {
+                return FormulaValue::fromError("#CALC!".to_string());
+            }
+            if rows < 1 || cols < 1 || hi < lo || rows * cols > 1048576 {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            if whole && (lo.floor() != lo || hi.floor() != hi) {
+                return FormulaValue::fromError("#VALUE!".to_string());
+            }
+            if self.randState <= 0.0 {
+                self.randState = (self.todaySerial * 86400.0).floor() + 12345.0;
+            }
+            let m: f64 = 2147483647.0;
+            let mut items: Vec<Rc<RefCell<FormulaValue>>> = Vec::new();
+            let mut i: i64 = 0;
+            while i < rows * cols {
+                let next: f64 = self.randState * 48271.0;
+                self.randState = next - (next / m).floor() * m;
+                let u: f64 = self.randState / m;
+                if whole {
+                    items.push(FormulaValue::fromNumber(lo + (u * (hi - lo + 1.0)).floor()));
+                } else {
+                    items.push(FormulaValue::fromNumber(lo + u * (hi - lo)));
+                }
+                i += 1;
+            }
+            return FormulaValue::fromArray(rows, cols, &items);
         }
         if name == "RAND" || name == "RANDBETWEEN" {
             if self.randState <= 0.0 {
