@@ -8,6 +8,7 @@ use crate::rgr::DgNative;
 use crate::date_serial::DateSerial;
 use crate::formula_value::FormulaValue;
 use crate::formula_functions::FormulaFunctions;
+use crate::formula_stats::FormulaStats;
 
 /// FormulaMore - the second half of the pure function library: math and
 /// trigonometry, statistics, dates and times, text, information, lookup over
@@ -35,7 +36,7 @@ impl FormulaMore {
     pub fn isKnown(n: &str) -> bool {
         let all: String = FormulaMore::names();
         let key: String = format!(" {} ", n);
-        DgNative::index_of(&all, &key) >= 0
+        DgNative::index_of(&all, &key) >= 0 || FormulaStats::isKnown(n)
     }
 
     // --- small helpers ---------------------------------------------------------
@@ -267,6 +268,10 @@ impl FormulaMore {
         let r5: Rc<RefCell<FormulaValue>> = FormulaMore::arrayFn(&nm, args);
         if !r5.borrow().isBlank() {
             return r5;
+        }
+        let r7: Rc<RefCell<FormulaValue>> = FormulaStats::invoke(&nm, args);
+        if !r7.borrow().isBlank() {
+            return r7;
         }
         let r6: Rc<RefCell<FormulaValue>> = FormulaMore::financeFn(&nm, args);
         r6

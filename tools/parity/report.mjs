@@ -106,7 +106,9 @@ const known = ff.slice(ff.indexOf("pub fn isKnown"), ff.indexOf("\n    }\n", ff.
 // FormulaFunctions::isKnown falls through to FormulaMore::names().
 const fm = fs.readFileSync(P("datagrid", "src", "formula_more.rs"), "utf8");
 const moreNames = (fm.match(/pub fn names\(\) -> String \{\s*"([^"]*)"/) || ["", ""])[1].trim().split(/\s+/).filter(Boolean);
-const functions = [...new Set([...known.matchAll(/"([A-Z][A-Z0-9.]*)"/g)].map((m) => m[1]).concat(moreNames))].sort();
+const fs3 = fs.readFileSync(P("datagrid", "src", "formula_stats.rs"), "utf8");
+const statNames = (fs3.match(/pub fn names\(\) -> String \{\s*"([^"]*)"/) || ["", ""])[1].trim().split(/\s+/).filter(Boolean);
+const functions = [...new Set([...known.matchAll(/"([A-Z][A-Z0-9.]*)"/g)].map((m) => m[1]).concat(moreNames, statNames))].sort();
 
 // --- metrics ----------------------------------------------------------------------
 const wbIds = Object.keys(probe?.results || {}).filter((k) => k.startsWith("wb."));
