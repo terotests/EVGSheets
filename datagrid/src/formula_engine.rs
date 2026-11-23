@@ -2218,7 +2218,21 @@ impl FormulaParser {
                     break;
                 }
             }
-            let ident2: String = DgNative::substr(&self.src, start, self.pos);
+            let mut ident2: String = DgNative::substr(&self.src, start, self.pos);
+            // Sheet1!A1:Sheet1!A5 names the sheet again on the far corner.
+            if self.peek() == 33 && !sheet.is_empty() && FormulaParser::upper(&ident2) == FormulaParser::upper(&sheet) {
+                self.next();
+                start = self.pos;
+                while self.pos < self.srcLen {
+                    let ch4: i64 = DgNative::char_at(&self.src, self.pos);
+                    if (((ch4 >= 65 && ch4 <= 90) || (ch4 >= 97 && ch4 <= 122)) || (ch4 >= 48 && ch4 <= 57)) || ch4 == 36 {
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+                ident2 = DgNative::substr(&self.src, start, self.pos);
+            }
             let mut r2: Vec<i64> = Vec::new();
             let mut c2: Vec<i64> = Vec::new();
             let mut ar2: Vec<bool> = Vec::new();
@@ -2285,6 +2299,23 @@ impl FormulaParser {
         self.skipWs();
         if self.peek() == 58 {
             self.next();
+            // 'My Sheet'!A1:'My Sheet'!A5
+            if self.peek() == 39 {
+                self.next();
+                while self.pos < self.srcLen {
+                    let q: i64 = self.next();
+                    if q == 39 {
+                        if self.peek() == 39 {
+                            self.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                if self.peek() == 33 {
+                    self.next();
+                }
+            }
             start = self.pos;
             while self.pos < self.srcLen {
                 let ch3: i64 = DgNative::char_at(&self.src, self.pos);
@@ -3041,7 +3072,7 @@ impl FormulaEngine {
             self.calcStatus.insert(key.to_string(), "cached".to_string());
             return;
         }
-        let ast: Rc<RefCell<FormulaNode>> = self.parser.borrow_mut().parse(&self.expandNames(&expr));
+        let mut ast: Rc<RefCell<FormulaNode>> = self.parser.borrow_mut().parse(&self.expandNames(&expr));
         if !self.parser.borrow().ok {
             // keep cached XLSX value
             self.calcStatus.insert(key.to_string(), "unsupported".to_string());
@@ -3050,6 +3081,9 @@ impl FormulaEngine {
         self.curRow = row;
         self.curCol = col;
         self.curSheet = si;
+        if sheet.borrow().isLegacyFormula(row, col) {
+            ast = self.legacyRewrite(&ast, true);
+        }
         let mut v: Rc<RefCell<FormulaValue>> = self.evalNode(&ast, si);
         // A plain formula from a file was written for a spreadsheet without
         // spilling: it shows one value, picked by implicit intersection.
@@ -3073,6 +3107,64 @@ impl FormulaEngine {
         self.calcStatus.insert(key.to_string(), "calculated".to_string());
         self.calcValues.insert(key.to_string(), v.borrow().asRaw());
         self.applyResult(key, &v);
+    }
+    /// A plain formula from a file is evaluated as Excel evaluated it before
+    /// dynamic arrays: a range used where one value is expected (a formula's
+    /// result, an operand of arithmetic inside SUM, an argument of LEN) is
+    /// implicitly intersected with the formula's row or column. Ranges handed
+    /// straight to SUM and the like, and anything inside a function that takes
+    /// arrays (SUMPRODUCT, INDEX, lookups ...), keep their shape.
+    pub fn legacyRewrite(&self, n: &Rc<RefCell<FormulaNode>>, value_ctx: bool) -> Rc<RefCell<FormulaNode>> {
+        let k: i64 = n.borrow().kind;
+        if k == 4 || k == 9 {
+            if value_ctx {
+                let w: Rc<RefCell<FormulaNode>> = Rc::new(RefCell::new(FormulaNode::new()));
+                w.borrow_mut().kind = 7;
+                w.borrow_mut().fnName = "_IMPLICIT".to_string();
+                w.borrow_mut().kids.push(n.clone());
+                return w;
+            }
+            return n.clone();
+        }
+        let kn: i64 = n.borrow().kids.len() as i64;
+        if k == 5 || k == 6 {
+            let mut i: i64 = 0;
+            while i < kn {
+                let kid: Rc<RefCell<FormulaNode>> = n.borrow().kids[i as usize].clone();
+                let nk: Rc<RefCell<FormulaNode>> = self.legacyRewrite(&kid, value_ctx);
+                n.borrow_mut().kids[i as usize] = nk;
+                i += 1;
+            }
+            return n.clone();
+        }
+        if k == 7 {
+            let up: String = FormulaFunctions::upper(&n.borrow().fnName.clone());
+            let scalar: bool = FormulaEngine::liftsOverArrays(&up);
+            let by_ref: bool = FormulaEngine::takesRefs(&up);
+            let mut i: i64 = 0;
+            while i < kn {
+                let kid: Rc<RefCell<FormulaNode>> = n.borrow().kids[i as usize].clone();
+                let kk: i64 = kid.borrow().kind;
+                let direct: bool = kk == 3 || kk == 4 || kk == 9 || kk == 12;
+                let use_value: bool = scalar || (by_ref && !direct);
+                let nk: Rc<RefCell<FormulaNode>> = self.legacyRewrite(&kid, use_value);
+                n.borrow_mut().kids[i as usize] = nk;
+                i += 1;
+            }
+            return n.clone();
+        }
+        n.clone()
+    }
+    /// Functions whose arguments are references or single values: a range
+    /// given directly is read whole, an expression is a single value.
+    pub fn takesRefs(upper: &str) -> bool {
+        let names: Vec<&str> = vec!["SUM", "AVERAGE", "AVERAGEA", "MIN", "MINA", "MAX", "MAXA", "COUNT", "COUNTA", "PRODUCT", "MEDIAN", "STDEV", "STDEV.S", "STDEV.P", "STDEVP", "VAR", "VAR.S", "VAR.P", "VARP"];
+        for nm in names.iter() {
+            if *nm == upper {
+                return true;
+            }
+        }
+        false
     }
     /// The first range that reaches the result without passing through a
     /// function: `A1:A5` in `=A1:A5*2`, none in `=SUM(A1:A5)`.
@@ -3681,6 +3773,17 @@ impl FormulaEngine {
     }
     pub fn evalCall(&mut self, n: &Rc<RefCell<FormulaNode>>, sheet_idx: i64) -> Rc<RefCell<FormulaValue>> {
         let name: String = n.borrow().fnName.clone();
+        if name == "_IMPLICIT" {
+            let rn: Rc<RefCell<FormulaNode>> = n.borrow().kids[0].clone();
+            let v: Rc<RefCell<FormulaValue>> = self.evalNode(&rn, sheet_idx);
+            let multi: bool = v.borrow().isArray() && v.borrow().count() > 1;
+            if !multi {
+                return v;
+            }
+            let r: i64 = self.curRow;
+            let c: i64 = self.curCol;
+            return self.implicitPick(&rn, &v, r, c);
+        }
         let by_ref: Rc<RefCell<FormulaValue>> = self.evalRefCall(n, sheet_idx);
         if !by_ref.borrow().isBlank() {
             return by_ref;
