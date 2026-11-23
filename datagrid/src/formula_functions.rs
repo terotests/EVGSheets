@@ -799,7 +799,10 @@ impl FormulaFunctions {
     /// AND/OR/XOR's inputs: logicals and numbers in ranges (text and blanks
     /// there are skipped), direct arguments read by logicalOf. None when a
     /// direct argument is text, or when there is nothing logical at all.
-    pub fn logicalArgs(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Option<Vec<bool>> {
+    /// Both cases come back as an empty Vec (both are #VALUE!): an
+    /// Option<Vec<_>> return does not survive Ranger's Rust writer (MFilesAPI
+    /// PR #560), which the mfiles:xlsx module build goes through.
+    pub fn logicalArgs(args: &Vec<Rc<RefCell<FormulaValue>>>) -> Vec<bool> {
         let mut out: Vec<bool> = Vec::new();
         for a in args.iter() {
             if a.borrow().isArray() {
@@ -819,14 +822,11 @@ impl FormulaFunctions {
                 }
                 match FormulaFunctions::logicalOf(a) {
                     Some(b) => out.push(b),
-                    None => return None,
+                    None => return Vec::new(),
                 }
             }
         }
-        if out.is_empty() {
-            return None;
-        }
-        Some(out)
+        out
     }
     pub fn needArity(args: &Vec<Rc<RefCell<FormulaValue>>>, min_n: i64) -> Rc<RefCell<FormulaValue>> {
         if (args.len() as i64) < min_n {
@@ -1307,10 +1307,10 @@ impl FormulaFunctions {
         if ee {
             return err;
         }
-        let vals: Vec<bool> = match FormulaFunctions::logicalArgs(args) {
-            Some(v) => v,
-            None => return FormulaValue::fromError("#VALUE!".to_string()),
-        };
+        let vals: Vec<bool> = FormulaFunctions::logicalArgs(args);
+        if vals.is_empty() {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
         let mut i: usize = 0;
         while i < vals.len() {
             if vals[i] == false {
@@ -1326,10 +1326,10 @@ impl FormulaFunctions {
         if ee {
             return err;
         }
-        let vals: Vec<bool> = match FormulaFunctions::logicalArgs(args) {
-            Some(v) => v,
-            None => return FormulaValue::fromError("#VALUE!".to_string()),
-        };
+        let vals: Vec<bool> = FormulaFunctions::logicalArgs(args);
+        if vals.is_empty() {
+            return FormulaValue::fromError("#VALUE!".to_string());
+        }
         let mut i: usize = 0;
         while i < vals.len() {
             if vals[i] == true {

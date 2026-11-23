@@ -2480,7 +2480,9 @@ impl FormulaEngine {
         if FormulaEngine::isVolatile(expr) {
             self.volatileKeys.insert(key.clone(), true);
         } else {
-            self.volatileKeys.remove(&key);
+            // false rather than remove(): Ranger's Rust map has no remove
+            // (the mfiles:xlsx module build); markEdited skips false keys
+            self.volatileKeys.insert(key.clone(), false);
         }
     }
     pub fn isVolatile(expr: &str) -> bool {
@@ -2662,7 +2664,7 @@ impl FormulaEngine {
         let mut visited: HashMap<String,bool> = HashMap::new();
         let vkeys: Vec<String> = self.volatileKeys.keys().cloned().collect();
         for vk in vkeys.iter() {
-            if *vk != key {
+            if *vk != key && self.volatileKeys.get(vk).cloned().unwrap_or(false) {
                 self.markDirty(vk, &mut visited);
             }
         }
