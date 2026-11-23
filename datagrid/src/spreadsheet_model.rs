@@ -1822,7 +1822,7 @@ impl SpreadsheetModel {
     /// FortuneSheet-style display value: raw cell + number format engine.
     pub fn getDisplay(&self, row: i64, col: i64) -> String {
         let raw: String = self.getCell(row, col);
-        if DgNative::char_at(&raw, 0) == 39 && self.getFormula(row, col).is_empty() {
+        if !raw.is_empty() && DgNative::char_at(&raw, 0) == 39 && self.getFormula(row, col).is_empty() {
             // the apostrophe only says "text"; it is not shown
             return DgNative::substr(&raw, 1, DgNative::str_len(&raw));
         }
