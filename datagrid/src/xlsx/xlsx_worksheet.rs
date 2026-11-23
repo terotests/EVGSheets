@@ -1225,6 +1225,19 @@ impl XlsxWorksheet {
         }
         FormulaParser::translateFormula(&master, dx, dy)
     }
+    pub fn markArrayBlock(&mut self, model: &Rc<RefCell<SpreadsheetModel>>, row: i64, col: i64, array_ref: &str) {
+        let colon: i64 = DgNative::index_of(array_ref, ":");
+        if colon < 0 {
+            return;
+        }
+        let tail: String = DgNative::substr(array_ref, colon + 1, DgNative::str_len(array_ref));
+        self.parseCellRefFast(&tail);
+        let rows: i64 = self.refRow - row + 1;
+        let cols: i64 = self.refCol - col + 1;
+        if rows >= 1 && cols >= 1 && rows * cols > 1 {
+            model.borrow_mut().setSpill(row, col, rows, cols);
+        }
+    }
     pub fn parseCell(&mut self, p: &Rc<RefCell<XmlLite>>, open: &Rc<RefCell<XmlTag>>, model: &Rc<RefCell<SpreadsheetModel>>, sst: &Rc<RefCell<XlsxSharedStrings>>, fall_back_row: i64) {
         let r#ref: String = open.borrow().attr("r");
         let mut row: i64 = fall_back_row;
@@ -1237,6 +1250,8 @@ impl XlsxWorksheet {
         let cell_type: String = open.borrow().attr("t");
         let style_attr: String = open.borrow().attr("s");
         let mut formula: String = String::new();
+        let mut formula_kind: String = String::new();
+        let mut array_ref: String = String::new();
         let mut value: String = String::new();
         let mut inline: String = String::new();
         let mut inline_rich: Option<Rc<RefCell<RichText>>> = None;
@@ -1269,6 +1284,10 @@ impl XlsxWorksheet {
                 if t.borrow().name == "f" && !t.borrow().isEnd {
                     let fkind: String = t.borrow().attr("t");
                     let si: String = t.borrow().attr("si");
+                    formula_kind = fkind.clone();
+                    if fkind == "array" {
+                        array_ref = t.borrow().attr("ref");
+                    }
                     let mut body: String = String::new();
                     if !t.borrow().selfClose {
                         body = p.borrow_mut().readTextUntilEnd("f");
@@ -1355,6 +1374,14 @@ impl XlsxWorksheet {
         model.borrow_mut().setCellRaw(row, col, &display);
         if !formula.is_empty() {
             model.borrow_mut().setFormula(row, col, &FormulaParser::stripFilePrefixes(&formula));
+            if formula_kind == "array" {
+                // An array formula (a dynamic one, or one entered with
+                // Ctrl+Shift+Enter) owns the block its ref names: the cached
+                // values there are its spill, not cells of their own.
+                self.markArrayBlock(model, row, col, &array_ref);
+            } else {
+                model.borrow_mut().markLegacyFormula(row, col);
+            }
         }
         if !style_attr.is_empty() {
             model.borrow_mut().setCellStyleId(row, col, XlsxWorksheet::parseInt0(&style_attr));

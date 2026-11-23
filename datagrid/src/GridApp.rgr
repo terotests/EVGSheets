@@ -3989,6 +3989,52 @@ class GridApp {
         }
     }
 
+    ; The same after a cut on another sheet: references into the block now
+    ; name this sheet (or no sheet, for formulas here).
+    fn moveRefsAcrossSheets:void (startR:int startC:int) {
+        def r0:int clipR0
+        def c0:int clipC0
+        def r1:int ((clipR0 + clipRows) - 1)
+        def c1:int ((clipC0 + clipCols) - 1)
+        def dy:int (startR - clipR0)
+        def dx:int (startC - clipC0)
+        def src:string clipSheetName
+        def dest:string model.name
+        def si:int 0
+        def sn:int (book.sheetCount())
+        while (si < sn) {
+            def sheet:SpreadsheetModel (book.sheetAt(si))
+            def here:boolean (si == book.activeIndex)
+            def onSrc:boolean (sheet.name == src)
+            def prefix:string dest
+            if here {
+                prefix = ""
+            }
+            def keys:[string] (sheet.formulaSnapshotKeys())
+            def texts:[string] (sheet.formulaSnapshotTexts())
+            def fi:int 0
+            while (fi < (array_length keys)) {
+                def key:string (itemAt keys fi)
+                def expr:string (itemAt texts fi)
+                def rewritten:string (FormulaParser.moveAcross(expr src onSrc r0 c0 r1 c1 dy dx prefix))
+                if (((strlen rewritten) > 0) && (rewritten != expr)) {
+                    if here {
+                        def parts:[string] (strsplit key ",")
+                        def rr:int (SpreadsheetModel.parseInt0((itemAt parts 0)))
+                        def cc:int (SpreadsheetModel.parseInt0((itemAt parts 1)))
+                        model.applyEditStyled(rr cc "" rewritten (model.getCellStyle(rr cc)))
+                        engine.syncCell(book.activeIndex rr cc)
+                    } {
+                        set sheet.formulas key rewritten
+                    }
+                }
+                fi = (fi + 1)
+            }
+            si = (si + 1)
+        }
+        engine.recalcAll()
+    }
+
     fn applyFilter:void (col:int values:[string]) {
         model.setFilter(col true values)
         ; SUBTOTAL leaves out filtered rows, so it has to see the new filter.
@@ -13660,6 +13706,8 @@ class GridApp {
                 model.setRowHidden(rr hide)
                 rr = (rr + 1)
             }
+            ; SUBTOTAL 101-111 and AGGREGATE leave hidden rows out.
+            engine.recalcAll()
             this.refreshAll()
             return true
         }
@@ -17763,7 +17811,12 @@ class GridApp {
                     def srcStyle:CellStyle (itemAt clipStyles idx)
                     def newValue:string (itemAt clipValues idx)
                     def newFormula:string ""
-                    if ((strlen f) > 0) {
+                    def acrossCut:boolean (clipCut && (clipSheetName != model.name))
+                    if (((strlen f) > 0) && acrossCut) {
+                        newFormula = (FormulaParser.cutPaste(f clipSheetName clipR0 clipC0 ((clipR0 + clipRows) - 1) ((clipC0 + clipCols) - 1) (startR - clipR0) (startC - clipC0)))
+                        newValue = ""
+                    }
+                    if (((strlen f) > 0) && (acrossCut == false)) {
                         def translated:string (FormulaParser.translateFormula(f dx dy))
                         if ((strlen translated) > 0) {
                             newFormula = translated
@@ -17803,6 +17856,9 @@ class GridApp {
         }
         if (clipCut && (clipSheetName == model.name)) {
             this.moveRefsAfterCut(startR startC)
+        }
+        if (clipCut && (clipSheetName != model.name)) {
+            this.moveRefsAcrossSheets(startR startC)
         }
         model.endTx()
         engine.recalcDirty()
