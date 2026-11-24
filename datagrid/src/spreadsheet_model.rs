@@ -925,7 +925,8 @@ impl SpreadsheetModel {
             .cloned()
             .collect::<Vec<String>>();
         for k5 in lk.iter() {
-            c.borrow_mut().legacyFormulas.insert(k5.clone(), true);
+            let on: bool = self.legacyFormulas.get(k5).cloned().unwrap_or(false);
+            c.borrow_mut().legacyFormulas.insert(k5.clone(), on);
         }
         let ok: Vec<String> = self.spillOwner.keys()
             .cloned()
@@ -1102,12 +1103,11 @@ impl SpreadsheetModel {
         if self.formulas.contains_key(&src) {
             self.formulas.insert(src.clone(), String::new());
         }
-        let was_legacy: bool = self.legacyFormulas.contains_key(&src);
-        self.legacyFormulas.remove(&src);
-        self.legacyFormulas.remove(&dst);
-        if was_legacy {
-            self.legacyFormulas.insert(dst.clone(), true);
-        }
+        // false rather than remove(): Ranger's Rust map has no remove (the
+        // mfiles:xlsx module build); a key is legacy only while it is true
+        let was_legacy: bool = self.legacyFormulas.get(&src).cloned().unwrap_or(false);
+        self.legacyFormulas.insert(src.clone(), false);
+        self.legacyFormulas.insert(dst.clone(), was_legacy);
         let mut sid: i64 = -1;
         if self.cellStyleIds.contains_key(&src) {
             sid = self.cellStyleIds.get(&src).cloned().unwrap();
@@ -1121,7 +1121,7 @@ impl SpreadsheetModel {
         if self.formulas.contains_key(&k) {
             self.formulas.insert(k.clone(), String::new());
         }
-        self.legacyFormulas.remove(&k);
+        self.legacyFormulas.insert(k.clone(), false);
         self.cellStyleIds.insert(k.clone(), -1);
     }
     /// The cells that hold a formula, in the order they were written, as
@@ -2438,7 +2438,9 @@ impl SpreadsheetModel {
     }
     pub fn setFormula(&mut self, row: i64, col: i64, formula: &str) {
         let k: String = self.cellKey(row, col);
-        self.legacyFormulas.remove(&k);
+        if self.legacyFormulas.contains_key(&k) {
+            self.legacyFormulas.insert(k.clone(), false);
+        }
         if self.formulas.contains_key(&k) {
         } else {
             self.formulaKeys.push(k.clone());
@@ -2470,7 +2472,7 @@ impl SpreadsheetModel {
     }
     pub fn isLegacyFormula(&self, row: i64, col: i64) -> bool {
         let k: String = self.cellKey(row, col);
-        self.legacyFormulas.contains_key(&k)
+        self.legacyFormulas.get(&k).cloned().unwrap_or(false)
     }
     pub fn hasFormula(&self, row: i64, col: i64) -> bool {
         let k: String = self.cellKey(row, col);
