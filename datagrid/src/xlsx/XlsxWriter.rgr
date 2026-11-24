@@ -838,7 +838,22 @@ class XlsxWriter {
                                 }
                             }
                         }
-                        str_append tag ("><f>" + (XlsxWriter.esc((FormulaParser.addFilePrefixes(formula)))) + "</f>")
+                        ; A formula that spills goes out as a dynamic array
+                        ; formula (cm points at the XLDAPR cell metadata), so
+                        ; a reader lays its block out again instead of taking
+                        ; it for a plain formula with implicit intersection.
+                        def fopen:string "<f>"
+                        if (m.isDynamicAt(r cc)) {
+                            def sr:int (m.spillExtent(r cc 0))
+                            def sc:int (m.spillExtent(r cc 1))
+                            def aref:string ref
+                            if ((sr * sc) > 1) {
+                                aref = (ref + ":" + (XlsxWriter.cellRef(((r + sr) - 1) ((cc + sc) - 1))))
+                            }
+                            str_append tag " cm=\"1\""
+                            fopen = ("<f t=\"array\" ref=\"" + aref + "\">")
+                        }
+                        str_append tag (">" + fopen + (XlsxWriter.esc((FormulaParser.addFilePrefixes(formula)))) + "</f>")
                         if ((strlen raw) > 0) {
                             str_append tag ("<v>" + cached + "</v>")
                         }
@@ -1126,6 +1141,33 @@ class XlsxWriter {
     }
 
     ; --- package --------------------------------------------------------------
+    ; --- dynamic array metadata ------------------------------------------------
+    sfn bookHasDynamic:boolean (book:WorkbookModel) {
+        def i:int 0
+        while (i < (book.sheetCount())) {
+            def sh:SpreadsheetModel (book.sheetAt(i))
+            if (sh.hasDynamicFormula()) {
+                return true
+            }
+            i = (i + 1)
+        }
+        return false
+    }
+    sfn metadataXml:string () {
+        def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        str_append out "<metadata xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:xda=\"http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray\">"
+        str_append out "<metadataTypes count=\"1\"><metadataType name=\"XLDAPR\" minSupportedVersion=\"120000\" copy=\"1\" pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" clearComments=\"1\" assign=\"1\" coerce=\"1\" cellMeta=\"1\"/></metadataTypes>"
+        str_append out "<futureMetadata name=\"XLDAPR\" count=\"1\"><bk><extLst><ext uri=\"{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}\"><xda:dynamicArrayProperties fDynamic=\"1\" fCollapsed=\"0\"/></ext></extLst></bk></futureMetadata>"
+        str_append out "<cellMetadata count=\"1\"><bk><rc t=\"1\" v=\"0\"/></bk></cellMetadata></metadata>"
+        return out
+    }
+    sfn metadataOverride:string () {
+        return "<Override PartName=\"/xl/metadata.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml\"/>"
+    }
+    sfn metadataRel:string (id:int) {
+        return ("<Relationship Id=\"rId" + (to_string id) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata\" Target=\"metadata.xml\"/>")
+    }
+
     fn contentTypesXml:string (book:WorkbookModel) {
         def out:string "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
         str_append out "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
@@ -1139,6 +1181,9 @@ class XlsxWriter {
             i = (i + 1)
         }
         str_append out "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>"
+        if (XlsxWriter.bookHasDynamic(book)) {
+            str_append out (XlsxWriter.metadataOverride())
+        }
         ; A table part needs its own override — the `xml` default above names
         ; it plain XML, and a reader that believes that finds no table.
         def tn:int 0
@@ -1323,6 +1368,9 @@ class XlsxWriter {
         }
         def styleId:int ((book.sheetCount()) + 1)
         str_append out ("<Relationship Id=\"rId" + (to_string styleId) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>")
+        if (XlsxWriter.bookHasDynamic(book)) {
+            str_append out (XlsxWriter.metadataRel((styleId + 1)))
+        }
         str_append out "</Relationships>"
         return out
     }
@@ -1359,6 +1407,11 @@ class XlsxWriter {
         def first:SpreadsheetModel (book.sheetAt(0))
         this.addOver(z "xl/workbook.xml" (this.workbookXml(book)))
         this.addOver(z "xl/styles.xml" (this.stylesXml(first.styles)))
+        ; A source that already has sheet metadata keeps its own (copied
+        ; through below); one without gets the dynamic array entry.
+        if ((XlsxWriter.bookHasDynamic(book)) && ((pkg.hasPart("xl/metadata.xml")) == false)) {
+            this.addOver(z "xl/metadata.xml" (XlsxWriter.metadataXml()))
+        }
         def i:int 0
         def tableSeen:int 0
         while (i < (book.sheetCount())) {
@@ -1602,6 +1655,10 @@ class XlsxWriter {
         def styleId:int ((book.sheetCount()) + 1)
         str_append out ("<Relationship Id=\"rId" + (to_string styleId) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>")
         def next:int (styleId + 1)
+        if ((XlsxWriter.bookHasDynamic(book)) && ((pkg.hasPart("xl/metadata.xml")) == false)) {
+            str_append out (XlsxWriter.metadataRel(next))
+            next = (next + 1)
+        }
         def rels:[OpcRelationship] (OpcPackage.parseRelationships((pkg.readXml("xl/_rels/workbook.xml.rels"))))
         def r:int 0
         while (r < (array_length rels)) {
@@ -1696,6 +1753,9 @@ class XlsxWriter {
             }
             t = (t + 1)
         }
+        if ((XlsxWriter.bookHasDynamic(book)) && ((XlsxWriter.declaresPart(src "/xl/metadata.xml")) == false)) {
+            str_append add (XlsxWriter.metadataOverride())
+        }
         ; A script part's extension, same rule as the clean writer: declared
         ; only when a script is actually there.
         def si:int 0
@@ -1765,6 +1825,9 @@ class XlsxWriter {
         ; loader builds them: one styles.xml for the package.
         def first:SpreadsheetModel (book.sheetAt(0))
         XlsxWriter.addPart(z "xl/styles.xml" (this.stylesXml(first.styles)))
+        if (XlsxWriter.bookHasDynamic(book)) {
+            XlsxWriter.addPart(z "xl/metadata.xml" (XlsxWriter.metadataXml()))
+        }
         def i:int 0
         def tableSeen:int 0
         while (i < (book.sheetCount())) {

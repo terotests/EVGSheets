@@ -13,6 +13,17 @@
 ; operators, nor for reading a file.
 
 class DgNative {
+    ; the target's own math library, exact to the last bit where the
+    ; series helpers in the .rs modules lose an ulp or two
+    sfn sin:double (x:double) {
+        return (sin x)
+    }
+    sfn cos:double (x:double) {
+        return (cos x)
+    }
+    sfn atan2:double (y:double x:double) {
+        return (atan2 y x)
+    }
     sfn str_len:int (s:string) {
         return (strlen s)
     }

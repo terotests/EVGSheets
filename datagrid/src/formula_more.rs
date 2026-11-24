@@ -8,6 +8,10 @@ use crate::rgr::DgNative;
 use crate::date_serial::DateSerial;
 use crate::formula_value::FormulaValue;
 use crate::formula_functions::FormulaFunctions;
+use crate::formula_stats::FormulaStats;
+use crate::formula_eng::FormulaEng;
+use crate::formula_regex::FormulaRegex;
+use crate::formula_ets::FormulaEts;
 
 /// FormulaMore - the second half of the pure function library: math and
 /// trigonometry, statistics, dates and times, text, information, lookup over
@@ -30,12 +34,12 @@ impl FormulaMore {
     /// Every name answered here, space-separated, with a space at each end so
     /// a lookup is one search for " NAME ".
     pub fn names() -> String {
-        " LOG SQRTPI EVEN ODD ISEVEN ISODD FACT FACTDOUBLE COMBIN COMBINA PERMUT GCD LCM QUOTIENT MROUND CEILING.MATH FLOOR.MATH CEILING.PRECISE FLOOR.PRECISE ISO.CEILING SUMSQ SUMX2MY2 SUMX2PY2 SUMXMY2 RADIANS DEGREES SIN COS TAN ASIN ACOS ATAN ATAN2 SINH COSH TANH COT CSC SEC BASE DECIMAL DEC2BIN BIN2DEC DEC2HEX HEX2DEC DEC2OCT OCT2DEC ROMAN ARABIC MULTINOMIAL MAXIFS MINIFS RANK RANK.EQ RANK.AVG MODE MODE.SNGL PERCENTILE PERCENTILE.INC PERCENTILE.EXC QUARTILE QUARTILE.INC QUARTILE.EXC PERCENTRANK PERCENTRANK.INC GEOMEAN HARMEAN AVEDEV DEVSQ AVERAGEA MAXA MINA CORREL PEARSON COVAR COVARIANCE.P COVARIANCE.S SLOPE INTERCEPT RSQ FORECAST FORECAST.LINEAR STEYX STANDARDIZE TRIMMEAN COUNTUNIQUE TIME HOUR MINUTE SECOND TIMEVALUE WEEKNUM ISOWEEKNUM NETWORKDAYS WORKDAY NETWORKDAYS.INTL WORKDAY.INTL DATEDIF DAYS360 YEARFRAC TEXTBEFORE TEXTAFTER TEXTSPLIT VALUETOTEXT NUMBERVALUE FIXED DOLLAR CLEAN UNICHAR UNICODE ISLOGICAL ISNONTEXT ISNA TYPE ERROR.TYPE XMATCH CHOOSECOLS CHOOSEROWS TAKE DROP VSTACK HSTACK SEQUENCE SORTBY TOCOL TOROW WRAPROWS WRAPCOLS EXPAND ADDRESS HYPERLINK IPMT PPMT CUMIPMT CUMPRINC RATE IRR XNPV XIRR MIRR DB DDB SYD EFFECT NOMINAL PDURATION RRI ROW COLUMN ROWS COLUMNS OFFSET INDIRECT ISREF ISFORMULA FORMULATEXT RAND RANDBETWEEN MMULT AGGREGATE MDETERM MINVERSE MUNIT AREAS LET LAMBDA REDUCE MAP SCAN BYROW BYCOL MAKEARRAY ".to_string()
+        " LOG SQRTPI EVEN ODD ISEVEN ISODD FACT FACTDOUBLE COMBIN COMBINA PERMUT GCD LCM QUOTIENT MROUND CEILING.MATH FLOOR.MATH CEILING.PRECISE FLOOR.PRECISE ISO.CEILING SUMSQ SUMX2MY2 SUMX2PY2 SUMXMY2 RADIANS DEGREES SIN COS TAN ASIN ACOS ATAN ATAN2 SINH COSH TANH COT CSC SEC BASE DECIMAL DEC2BIN BIN2DEC DEC2HEX HEX2DEC DEC2OCT OCT2DEC ROMAN ARABIC MULTINOMIAL MAXIFS MINIFS RANK RANK.EQ RANK.AVG MODE MODE.SNGL PERCENTILE PERCENTILE.INC PERCENTILE.EXC QUARTILE QUARTILE.INC QUARTILE.EXC PERCENTRANK PERCENTRANK.INC GEOMEAN HARMEAN AVEDEV DEVSQ AVERAGEA MAXA MINA CORREL PEARSON COVAR COVARIANCE.P COVARIANCE.S SLOPE INTERCEPT RSQ FORECAST FORECAST.LINEAR STEYX STANDARDIZE TRIMMEAN COUNTUNIQUE TIME HOUR MINUTE SECOND TIMEVALUE WEEKNUM ISOWEEKNUM NETWORKDAYS WORKDAY NETWORKDAYS.INTL WORKDAY.INTL DATEDIF DAYS360 YEARFRAC TEXTBEFORE TEXTAFTER TEXTSPLIT VALUETOTEXT NUMBERVALUE FIXED DOLLAR CLEAN UNICHAR UNICODE ISLOGICAL ISNONTEXT ISNA TYPE ERROR.TYPE XMATCH CHOOSECOLS CHOOSEROWS TAKE DROP VSTACK HSTACK SEQUENCE SORTBY TOCOL TOROW WRAPROWS WRAPCOLS EXPAND ADDRESS HYPERLINK IPMT PPMT CUMIPMT CUMPRINC RATE IRR XNPV XIRR MIRR DB DDB SYD EFFECT NOMINAL PDURATION RRI ROW COLUMN ROWS COLUMNS OFFSET INDIRECT ISREF ISFORMULA FORMULATEXT RAND RANDBETWEEN RANDARRAY GROUPBY PIVOTBY MMULT AGGREGATE MDETERM MINVERSE MUNIT AREAS LET LAMBDA REDUCE MAP SCAN BYROW BYCOL MAKEARRAY ".to_string()
     }
     pub fn isKnown(n: &str) -> bool {
         let all: String = FormulaMore::names();
         let key: String = format!(" {} ", n);
-        DgNative::index_of(&all, &key) >= 0
+        DgNative::index_of(&all, &key) >= 0 || FormulaStats::isKnown(n) || FormulaEng::isKnown(n) || FormulaRegex::isKnown(n) || FormulaEts::isKnown(n)
     }
 
     // --- small helpers ---------------------------------------------------------
@@ -268,6 +272,22 @@ impl FormulaMore {
         if !r5.borrow().isBlank() {
             return r5;
         }
+        let r7: Rc<RefCell<FormulaValue>> = FormulaStats::invoke(&nm, args);
+        if !r7.borrow().isBlank() {
+            return r7;
+        }
+        let r8: Rc<RefCell<FormulaValue>> = FormulaEng::invoke(&nm, args);
+        if !r8.borrow().isBlank() {
+            return r8;
+        }
+        let r9: Rc<RefCell<FormulaValue>> = FormulaRegex::invoke(&nm, args);
+        if !r9.borrow().isBlank() {
+            return r9;
+        }
+        let r10: Rc<RefCell<FormulaValue>> = FormulaEts::invoke(&nm, args);
+        if !r10.borrow().isBlank() {
+            return r10;
+        }
         let r6: Rc<RefCell<FormulaValue>> = FormulaMore::financeFn(&nm, args);
         r6
     }
@@ -450,7 +470,8 @@ impl FormulaMore {
         }
         if n == "AGGREGATE" {
             // AGGREGATE(function, options, ref1, [k]): options 2, 3, 6 and 7
-            // leave out error values; hidden rows are not known here.
+            // leave out error values. Hidden rows (1, 3, 5, 7) are left out of
+            // the ranges by the engine before they get here.
             if (args.len() as i64) < 3 {
                 return FormulaMore::err("#VALUE!");
             }

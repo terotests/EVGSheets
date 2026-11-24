@@ -21,7 +21,7 @@ spawnSync("python3", [path.join(HERE, "make_book.py"), BOOK], { stdio: "ignore" 
 
 const cases = fs.readFileSync(path.join(HERE, "formulas.tsv"), "utf8").split("\n")
   .filter((l) => l && !l.startsWith("#"))
-  .map((l) => { const [f, exp = ""] = l.split("\t"); return { f, exp }; });
+  .map((l) => { const [f, exp = "", fileExp = ""] = l.split("\t"); return { f, exp, fileExp }; });
 
 // One CSV parser for gridcraft and LibreOffice output.
 function csv(text) {
@@ -102,10 +102,13 @@ const rows = cases.map((c, i) => {
   const known = c.exp !== "";
   const v = { evg: norm(evg[i]), typed: norm(typed[i]), gc: gc ? norm(gc[i]) : null, lo: lo ? norm(lo[i]) : null };
   const ref = known ? e : v.gc ?? v.lo ?? null;
-  return { formula: c.f, expected: known ? e : null, ...v, evgOk: same(v.evg, ref), typedOk: same(v.typed, ref), gcOk: known ? same(v.gc, e) : null, loOk: known ? same(v.lo, e) : null };
+  // A third column is what the OPENED file shows where that differs: the book
+  // holds plain formulas, which Excel evaluates with implicit intersection.
+  const fileRef = c.fileExp ? norm(c.fileExp) : ref;
+  return { formula: c.f, expected: known ? e : null, fileExpected: c.fileExp || null, ...v, evgOk: same(v.evg, fileRef), typedOk: same(v.typed, ref), gcOk: known ? same(v.gc, c.fileExp ? norm(c.fileExp) : e) : null, loOk: known ? same(v.lo, c.fileExp ? norm(c.fileExp) : e) : null };
 });
 const bad = rows.filter((r) => r.evgOk === false || r.typedOk === false);
-for (const r of bad) console.log(`${r.formula}\n     file ${JSON.stringify(r.evg)}  typed ${JSON.stringify(r.typed)}  want ${JSON.stringify(r.expected ?? r.gc)}  gridcraft ${JSON.stringify(r.gc)}  lo ${JSON.stringify(r.lo)}`);
+for (const r of bad) console.log(`${r.formula}\n     file ${JSON.stringify(r.evg)}  typed ${JSON.stringify(r.typed)}  want ${JSON.stringify(r.expected ?? r.gc)}${r.fileExpected ? " (file " + r.fileExpected + ")" : ""}  gridcraft ${JSON.stringify(r.gc)}  lo ${JSON.stringify(r.lo)}`);
 const count = (k) => rows.filter((r) => r[k] === true).length + "/" + rows.filter((r) => r[k] !== null).length;
 console.log(`\nformulas ${rows.length}: EVGSheets opened ${count("evgOk")}, typed ${count("typedOk")}, GridCraft ${count("gcOk")}, LibreOffice ${count("loOk")}`);
 const gcBad = rows.filter((r) => r.gcOk === false);
