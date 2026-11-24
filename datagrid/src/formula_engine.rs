@@ -4580,10 +4580,14 @@ impl FormulaEngine {
                 }
                 c += 1;
             }
-            for _sl in slots.iter() {
+            // a counted loop, not `for _sl in slots.iter()`: Ranger's Go writer
+            // declares an index for the unused element, which Go refuses
+            let mut si: usize = 0;
+            while si < slots.len() {
                 for h in value_hdr.iter() {
                     out.push(h.clone());
                 }
+                si += 1;
             }
             out_rows += 1;
         }
