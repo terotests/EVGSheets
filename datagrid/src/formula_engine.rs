@@ -2647,7 +2647,9 @@ impl FormulaEngine {
         if FormulaEngine::isVolatile(expr) {
             self.volatileKeys.insert(key.clone(), true);
         } else {
-            self.volatileKeys.remove(&key);
+            // false rather than remove(): Ranger's Rust map has no remove
+            // (the mfiles:xlsx module build); markEdited skips false keys
+            self.volatileKeys.insert(key.clone(), false);
         }
     }
     pub fn isVolatile(expr: &str) -> bool {
@@ -2829,7 +2831,7 @@ impl FormulaEngine {
         let mut visited: HashMap<String,bool> = HashMap::new();
         let vkeys: Vec<String> = self.volatileKeys.keys().cloned().collect();
         for vk in vkeys.iter() {
-            if *vk != key {
+            if *vk != key && self.volatileKeys.get(vk).cloned().unwrap_or(false) {
                 self.markDirty(vk, &mut visited);
             }
         }
@@ -4578,10 +4580,14 @@ impl FormulaEngine {
                 }
                 c += 1;
             }
-            for _sl in slots.iter() {
+            // a counted loop, not `for _sl in slots.iter()`: Ranger's Go writer
+            // declares an index for the unused element, which Go refuses
+            let mut si: usize = 0;
+            while si < slots.len() {
                 for h in value_hdr.iter() {
                     out.push(h.clone());
                 }
+                si += 1;
             }
             out_rows += 1;
         }

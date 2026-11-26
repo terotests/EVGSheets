@@ -543,7 +543,11 @@ impl FormulaValue {
         }
         if FormulaValue::parseTime(&s).is_some() {
             let up: String = s.to_uppercase();
-            let secs: bool = s.split(":").count() > 2;
+            // a Vec and its len, not split(..).count(): Ranger's Go writer
+            // turns count() into a loop with an index it never uses, which Go
+            // refuses to compile (MFilesAPI's desktop/web build)
+            let colons: Vec<String> = s.split(":").map(|p| p.to_string()).collect::<Vec<String>>();
+            let secs: bool = colons.len() > 2;
             if up.ends_with("M") || up.ends_with(" A") || up.ends_with(" P") {
                 return if secs { "h:mm:ss AM/PM".to_string() } else { "h:mm AM/PM".to_string() };
             }

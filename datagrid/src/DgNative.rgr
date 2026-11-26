@@ -27,7 +27,13 @@ class DgNative {
     sfn str_len:int (s:string) {
         return (strlen s)
     }
+    ; 0 past either end: Go and C++ index the bytes directly, so charAt on
+    ; "" panicked there (SpreadsheetModel.getDisplay on an empty cell took
+    ; MFilesAPI's window server down), where JavaScript only gave NaN
     sfn char_at:int (s:string i:int) {
+        if ((i < 0) || (i >= (strlen s))) {
+            return 0
+        }
         return (charAt s i)
     }
     sfn substr:string (s:string a:int b:int) {
